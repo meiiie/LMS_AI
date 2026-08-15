@@ -35,6 +35,7 @@ import {
   describeArtifactFile,
   resolveArtifactFileUrl,
 } from "@/lib/artifact-file";
+import { WorkspacePaneControls } from "./WorkspacePaneControls";
 
 type ArtifactTabId = "code" | "preview" | "output";
 
@@ -156,6 +157,7 @@ function ArtifactPanelContent({
             Tải file
           </a>
         )}
+        <WorkspacePaneControls />
         <button
           onClick={closeArtifact}
           className="p-1.5 rounded-md hover:bg-surface-tertiary text-text-tertiary hover:text-text transition-colors"

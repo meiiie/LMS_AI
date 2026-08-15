@@ -232,7 +232,7 @@ export function SettingsView() {
             await clearOllamaApiKey();
           } catch { /* ignore */ }
           setDraft({
-            server_url: "http://localhost:8080",
+            server_url: "http://localhost:8000",
             // Phase 31 fix: same as SettingsPage. The "local-dev-key"
             // placeholder never matched the backend's .env API_KEY, so
             // legacy fallback would always 401. Empty string forces the

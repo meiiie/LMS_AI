@@ -39,6 +39,14 @@ export type TurnStopReason =
   | "cancelled"
   | "error";
 
+export type DriverFileOperation = "read" | "create" | "update" | "delete" | "move";
+
+export interface DriverFileLocation {
+  /** Absolute path reported by the provider. Native file commands revalidate it. */
+  path: string;
+  line?: number;
+}
+
 /** One tool/command/plan row in the transcript, upserted by id. */
 export interface DriverActivity {
   /** Backend-scoped id (ACP toolCallId); unique within a turn. */
@@ -50,6 +58,12 @@ export interface DriverActivity {
   status: "pending" | "in_progress" | "completed" | "cancelled" | "failed";
   /** Optional display detail (tool output snippet, plan entries). */
   detail?: string;
+  /** Structured tool identity and file facts; never infer these from the title. */
+  toolName?: string;
+  operation?: DriverFileOperation;
+  locations?: DriverFileLocation[];
+  rawInput?: unknown;
+  rawOutput?: unknown;
 }
 
 /** An option offered by the agent on a permission request. */
@@ -110,6 +124,8 @@ export type DriverEvent =
       sessionId: string;
       title?: string | null;
       updatedAt?: string | null;
+      continuityLevel?: "durable" | "recovered";
+      revision?: number;
     }
   | { type: "turn-started"; sessionId: string }
   | { type: "reasoning-delta"; sessionId: string; text: string }
@@ -140,6 +156,8 @@ export interface Driver {
   readonly kind: DriverKind;
   readonly sessionId: string;
   readonly runtime: DriverRuntimeDescriptor;
+  /** Durable provider-owned session id, when the backend advertises resume. */
+  readonly backendSessionId?: string | null;
   start(): Promise<void>;
   /** Send one user prompt; events stream via the subscribed handler. */
   prompt(text: string): Promise<void>;

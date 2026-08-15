@@ -27,6 +27,7 @@ import {
   type PreviewSourceReference,
 } from "@/lib/source-references";
 import type { PreviewItemData } from "@/api/types";
+import { WorkspacePaneControls } from "./WorkspacePaneControls";
 
 const HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE =
   "LMS đang giữ quyền áp dụng trong hộp thoại preview. Hãy xác nhận trực tiếp trong LMS để Wiii không tự thay đổi dữ liệu.";
@@ -54,13 +55,16 @@ function PreviewPanelContent({
             ({previews.length})
           </span>
         </div>
-        <button
-          onClick={closePreview}
-          className="p-1.5 rounded-md hover:bg-surface-tertiary text-text-secondary transition-colors"
-          aria-label="Đóng panel xem trước"
-        >
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          <WorkspacePaneControls />
+          <button
+            onClick={closePreview}
+            className="p-1.5 rounded-md hover:bg-surface-tertiary text-text-secondary transition-colors"
+            aria-label="Đóng panel xem trước"
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Selected preview detail */}
@@ -99,19 +103,23 @@ export function PreviewPanel({ inline }: { inline?: boolean }) {
   const { previewPanelOpen, selectedPreviewId, closePreview } = useUIStore();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Get all previews from the last assistant message
+  // Keep the full conversation registry so opening an older preview never
+  // resolves against an unrelated last message.
   const previews = useChatStore((s) => {
     const conv = s.activeConversation();
     if (!conv) return [];
-    for (let i = conv.messages.length - 1; i >= 0; i--) {
-      const msg = conv.messages[i];
-      if (msg.role === "assistant" && msg.previews && msg.previews.length > 0) {
-        return msg.previews;
+    const registry = new Map<string, PreviewItemData>();
+    for (const message of conv.messages) {
+      if (message.role === "assistant") {
+        for (const preview of message.previews ?? []) {
+          registry.set(preview.preview_id, preview);
+        }
       }
     }
-    // Also check streaming previews
-    if (s.streamingPreviews.length > 0) return s.streamingPreviews;
-    return [];
+    for (const preview of s.streamingPreviews) {
+      registry.set(preview.preview_id, preview);
+    }
+    return [...registry.values()];
   });
 
   // Close on Escape

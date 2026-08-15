@@ -23,6 +23,7 @@ import type {
 } from "../drivers/types";
 import type { AgentLaunchProfile, DetectedAgent } from "./neko-agent-store";
 import { useNekoAgentStore } from "./neko-agent-store";
+import { useNekoWorkspaceStore } from "./neko-workspace-store";
 import { isAbsoluteWorkspacePath, workspaceFromPath, type WorkspaceRef } from "../workspace";
 import {
   deletePersistedSession,
@@ -62,6 +63,8 @@ export interface NekoSession {
   workspace: WorkspaceRef | null;
   /** Neko's config-first launch choice; null for other agents/default launch. */
   launchProfile: AgentLaunchProfile | null;
+  /** Provider-owned durable ACP id; independent from Wiii's local session id. */
+  backendSessionId: string | null;
   /** Last complete capability snapshot reported by the live driver. */
   controls: DriverConfigOption[];
   commands: DriverCommand[];
@@ -125,7 +128,7 @@ async function waitForHolds(registry: Map<string, Set<Promise<void>>>, sessionId
 type DriverFactory = (
   agent: DetectedAgent,
   sessionId: string,
-  launch: { workspace: WorkspaceRef; profileId?: string },
+  launch: { workspace: WorkspaceRef; profileId?: string; backendSessionId?: string | null },
   onEvent: (event: DriverEvent) => void,
   ownDriver: (driver: Driver) => void,
 ) => Promise<Driver>;
@@ -133,7 +136,7 @@ type DriverFactory = (
 async function defaultDriverFactory(
   agent: DetectedAgent,
   sessionId: string,
-  launch: { workspace: WorkspaceRef; profileId?: string },
+  launch: { workspace: WorkspaceRef; profileId?: string; backendSessionId?: string | null },
   onEvent: (event: DriverEvent) => void,
   ownDriver: (driver: Driver) => void,
 ): Promise<Driver> {
@@ -392,6 +395,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             updatedAt: entry.updatedAt,
             workspace,
             launchProfile,
+            backendSessionId: entry.backendSessionId ?? null,
             controls: projectControls(entry.controls ?? [], events),
             commands: entry.commands ?? [],
             pendingControlId: null,
@@ -483,6 +487,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           updatedAt: now,
           workspace,
           launchProfile,
+          backendSessionId: null,
           controls: [],
           commands: [],
           pendingControlId: null,
@@ -516,6 +521,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             {
               workspace,
               ...(launchProfile?.id ? { profileId: launchProfile.id } : {}),
+              backendSessionId: null,
             },
             (event) => {
               if (runtimes.isCurrent(sessionId, instanceId)) get().handleEvent(event);
@@ -529,6 +535,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const session = state.sessions[sessionId];
           if (!session) return;
           session.runtime = replacement.current;
+          session.backendSessionId = replacement.current.backendSessionId;
           appendOwnedSessionEvent(session, "runtime", {
             type: "runtime-attached",
             provider: replacement.current,
@@ -584,6 +591,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const session = state.sessions[sessionId];
           if (!session || session.workspace) return;
           session.workspace = workspace;
+          session.backendSessionId = null;
           session.runtime = null;
           if (provider) {
             appendOwnedSessionEvent(session, "runtime", {
@@ -698,6 +706,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 {
                   workspace: session.workspace!,
                   ...(session.launchProfile?.id ? { profileId: session.launchProfile.id } : {}),
+                  backendSessionId: session.backendSessionId,
                 },
                 (event) => {
                   if (runtimes.isCurrent(sessionId, instanceId)) get().handleEvent(event);
@@ -712,6 +721,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               const s = state.sessions[sessionId];
               if (s) {
                 s.runtime = replacement.current;
+                s.backendSessionId = replacement.current.backendSessionId;
                 appendOwnedSessionEvent(s, "runtime", {
                   type: "runtime-attached",
                   provider: replacement.current,
@@ -1431,6 +1441,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           state.activeSessionId = null;
         }
       });
+      useNekoWorkspaceStore.getState().clearSession(sessionId);
     },
 
     setActiveSession: (sessionId) => {
@@ -1471,6 +1482,10 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 session.updatedAt = Math.max(session.updatedAt, parsed);
                 session.lastActivityAt = Math.max(session.lastActivityAt, parsed);
               }
+            }
+            if (event.continuityLevel === "recovered") {
+              session.statusDetail =
+                "Neko Core đã phục hồi checkpoint sau lần dừng bất thường; các mutation chưa có kết quả được giữ ở trạng thái chưa xác định và sẽ không tự chạy lại.";
             }
             return;
           }
@@ -1528,6 +1543,18 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               existing.status = next.status;
             } else {
               message.blocks!.push(next);
+            }
+            if (event.activity.locations?.length) {
+              appendOwnedSessionEvent(session, "runtime", {
+                type: "workspace-activity",
+                activityId: event.activity.id,
+                title: event.activity.title,
+                status: event.activity.status,
+                operation: event.activity.operation ?? null,
+                locations: event.activity.locations.map((location) => ({ ...location })),
+                ...(event.activity.toolName ? { toolName: event.activity.toolName } : {}),
+                ...(event.activity.detail ? { detail: event.activity.detail } : {}),
+              });
             }
             return;
           }
@@ -1590,6 +1617,11 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       // its detach record immediate so a crash cannot restore a phantom runtime.
       const session = get().sessions[event.sessionId];
       if (session) {
+        if (event.type === "activity" && session.workspace) {
+          useNekoWorkspaceStore
+            .getState()
+            .observeActivity(event.sessionId, session.workspace, event.activity);
+        }
         if (event.type === "process-exited") {
           void persistSessionNowOrReport(event.sessionId, "trạng thái provider đã thoát", {
             strict: true,

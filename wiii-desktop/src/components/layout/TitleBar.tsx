@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
 import { APP_NAME } from "@/lib/constants";
+import { WiiiMark } from "@/components/common/WiiiMark";
 
 /** Custom desktop chrome is omitted from browser and embed builds. */
 function isTauri(): boolean {
@@ -144,7 +145,8 @@ export function TitleBar({
                 {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
               </button>
             ) : null}
-            <span className="px-1 text-[13px] font-semibold text-text-secondary">
+            <WiiiMark className="ml-0.5 shrink-0" size={19} />
+            <span className="px-0.5 text-[13px] font-semibold text-text-secondary">
               {APP_NAME}
             </span>
           </>

@@ -41,6 +41,8 @@ export interface SessionIndexEntry {
   updatedAt: number;
   workspace?: WorkspaceRef | null;
   launchProfile?: AgentLaunchProfile | null;
+  /** Provider-owned durable ACP id used to resume across process restarts. */
+  backendSessionId?: string | null;
   controls?: DriverConfigOption[];
   commands?: DriverCommand[];
 }
@@ -148,6 +150,9 @@ function isSessionIndexEntry(value: unknown, expectedId?: string): value is Sess
     (entry.launchProfile === undefined ||
       entry.launchProfile === null ||
       isLaunchProfile(entry.launchProfile)) &&
+    (entry.backendSessionId === undefined ||
+      entry.backendSessionId === null ||
+      typeof entry.backendSessionId === "string") &&
     (entry.controls === undefined || (
       Array.isArray(entry.controls) && entry.controls.every(isDriverConfigOption)
     )) &&
@@ -271,6 +276,7 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     updatedAt: session.updatedAt,
     workspace: session.workspace,
     launchProfile: session.launchProfile,
+    backendSessionId: session.backendSessionId,
     controls: session.controls,
     commands: session.commands,
   };

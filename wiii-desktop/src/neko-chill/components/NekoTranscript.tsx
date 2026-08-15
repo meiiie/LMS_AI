@@ -1,14 +1,21 @@
 /**
  * Neko Chill transcript — workspace-shell styling (#904): 780px
  * centered column, quiet thinking rail, dot-status tool rows, shared
- * MarkdownRenderer for answers. Virtualization: follow-up #891.
+ * MarkdownRenderer for answers, with measured row virtualization for long sessions.
  */
-import { useEffect, useRef } from "react";
-import { Command, FolderGit2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { ArrowDown, Command, FolderGit2 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import type { ContentBlock } from "@/api/types";
 import type { NekoSession } from "../stores/neko-session-store";
 import { PermissionCard } from "./PermissionCard";
+
+export const NEKO_TRANSCRIPT_VIRTUALIZATION_THRESHOLD = 50;
+
+export function shouldVirtualizeTranscript(messageCount: number): boolean {
+  return messageCount > NEKO_TRANSCRIPT_VIRTUALIZATION_THRESHOLD;
+}
 
 /** Remove one matching outer emphasis pair without interpreting reasoning as HTML. */
 export function formatReasoningLabel(content: string): string {
@@ -57,6 +64,22 @@ function Block({ block }: { block: ContentBlock }) {
   }
 }
 
+function MessageRow({ message }: { message: NekoSession["messages"][number] }) {
+  return message.role === "user" ? (
+    <div className="my-3 flex justify-end">
+      <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl bg-[var(--nk-raised)] px-3.5 py-2 text-[13.5px] leading-[20px] text-[var(--nk-text)]">
+        {message.text}
+      </div>
+    </div>
+  ) : (
+    <div className="my-3">
+      {(message.blocks ?? []).map((block) => (
+        <Block key={block.id} block={block} />
+      ))}
+    </div>
+  );
+}
+
 interface NekoTranscriptProps {
   session: NekoSession;
   onResolvePermission: (optionId: string | null) => void;
@@ -79,19 +102,65 @@ export function NekoTranscript({
   onResolvePermission,
   onInsertPrompt,
 }: NekoTranscriptProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [followingTail, setFollowingTail] = useState(true);
   const messageCount = session.messages.length;
   const lastMessage = session.messages[messageCount - 1];
   const lastBlockCount = lastMessage?.blocks?.length ?? 0;
+  const useVirtual = shouldVirtualizeTranscript(messageCount);
+  const virtualizer = useVirtualizer({
+    count: messageCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: useCallback(
+      (index: number) => (session.messages[index]?.role === "user" ? 64 : 180),
+      [session.messages],
+    ),
+    overscan: 6,
+    gap: 4,
+    enabled: useVirtual,
+  });
+
+  const scrollToLatest = useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      if (useVirtual && messageCount > 0) {
+        virtualizer.scrollToIndex(messageCount - 1, { align: "end", behavior });
+      } else if (typeof bottomRef.current?.scrollIntoView === "function") {
+        bottomRef.current.scrollIntoView({ block: "end", behavior });
+      }
+    },
+    [messageCount, useVirtual, virtualizer],
+  );
 
   useEffect(() => {
-    if (typeof bottomRef.current?.scrollIntoView === "function") {
-      bottomRef.current.scrollIntoView({ block: "end" });
-    }
-  }, [messageCount, lastBlockCount, session.pendingPermission]);
+    setFollowingTail(true);
+  }, [session.id]);
+
+  useEffect(() => {
+    if (lastMessage?.role === "user") setFollowingTail(true);
+  }, [lastMessage?.id, lastMessage?.role]);
+
+  useEffect(() => {
+    if (!followingTail) return;
+    requestAnimationFrame(() => scrollToLatest());
+  }, [followingTail, lastBlockCount, messageCount, scrollToLatest, session.pendingPermission]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto" data-testid="neko-transcript">
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={scrollRef}
+        className="h-full overflow-y-auto"
+        data-testid="neko-transcript"
+        role="log"
+        aria-label="Lịch sử phiên Neko Chill"
+        aria-live={session.status === "streaming" ? "off" : "polite"}
+        onScroll={(event) => {
+          const viewport = event.currentTarget;
+          const distanceFromTail =
+            viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+          setFollowingTail(distanceFromTail < 96);
+        }}
+      >
       <div className="mx-auto w-full max-w-[780px] px-6 py-4">
         {session.messages.length === 0 && session.status === "idle" ? (
           <section className="mx-auto flex max-w-[560px] flex-col items-center px-4 py-[10vh] text-center" aria-label="Bắt đầu phiên">
@@ -124,20 +193,25 @@ export function NekoTranscript({
             </p>
           </section>
         ) : null}
-        {session.messages.map((message) =>
-          message.role === "user" ? (
-            <div key={message.id} className="my-3 flex justify-end">
-              <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl bg-[var(--nk-raised)] px-3.5 py-2 text-[13.5px] leading-[20px] text-[var(--nk-text)]">
-                {message.text}
-              </div>
-            </div>
-          ) : (
-            <div key={message.id} className="my-3">
-              {(message.blocks ?? []).map((block) => (
-                <Block key={block.id} block={block} />
-              ))}
-            </div>
-          ),
+        {useVirtual ? (
+          <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+            {virtualizer.getVirtualItems().map((row) => {
+              const message = session.messages[row.index];
+              return (
+                <div
+                  key={message.id}
+                  ref={virtualizer.measureElement}
+                  data-index={row.index}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${row.start}px)` }}
+                >
+                  <MessageRow message={message} />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          session.messages.map((message) => <MessageRow key={message.id} message={message} />)
         )}
         {session.pendingPermission ? (
           <PermissionCard
@@ -164,6 +238,21 @@ export function NekoTranscript({
         ) : null}
         <div ref={bottomRef} />
       </div>
+      </div>
+      {!followingTail ? (
+        <button
+          type="button"
+          className="absolute bottom-3 left-1/2 z-10 flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--nk-border-strong)] bg-[var(--nk-composer)] px-3 text-[11px] font-medium text-[var(--nk-text-2)] shadow-sm transition-colors hover:bg-[var(--nk-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--nk-focus-soft)]"
+          onClick={() => {
+            setFollowingTail(true);
+            scrollToLatest("smooth");
+          }}
+          aria-label="Đi tới tin nhắn mới nhất"
+        >
+          <ArrowDown aria-hidden="true" className="h-3.5 w-3.5" />
+          Mới nhất
+        </button>
+      ) : null}
     </div>
   );
 }

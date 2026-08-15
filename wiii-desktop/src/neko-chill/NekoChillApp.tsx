@@ -1,5 +1,6 @@
 /** Neko Chill desktop-agent shell: projects -> sessions -> active runtime. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   AlertTriangle,
   Check,
@@ -7,12 +8,14 @@ import {
   LoaderCircle,
   PanelLeft,
   PanelLeftClose,
-  PanelRight,
+  Files,
+  Info,
   Power,
   RefreshCw,
   Search,
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
+import { WiiiMark } from "@/components/common/WiiiMark";
 import { useModeStore } from "./stores/mode-store";
 import { useNekoAgentStore } from "./stores/neko-agent-store";
 import {
@@ -28,6 +31,8 @@ import { NewSessionView } from "./components/NewSessionView";
 import { SessionInspector } from "./components/SessionInspector";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { NekoCommandCenter } from "./components/NekoCommandCenter";
+import { NekoWorkspacePane } from "./components/NekoWorkspacePane";
+import { useNekoWorkspaceStore } from "./stores/neko-workspace-store";
 import {
   type ClientCommandName,
   type WorkbenchActionName,
@@ -35,6 +40,19 @@ import {
 import type { ComposerInsertRequest } from "./components/NekoComposer";
 import { chooseWorkspaceFolder } from "./workspace";
 import "./theme.css";
+
+function useCompactWorkspace(breakpoint = 1040) {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, [breakpoint]);
+  return compact;
+}
 
 function ModeSwitcher() {
   const { setMode } = useModeStore();
@@ -68,7 +86,8 @@ function ModeSwitcher() {
         className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-semibold text-[var(--nk-text)] transition-colors hover:bg-[var(--nk-overlay)]"
         onClick={() => setOpen((value) => !value)}
       >
-        Neko Chill
+        <WiiiMark className="shrink-0" size={17} />
+        <span>Neko Chill</span>
         <ChevronDown aria-hidden="true" className="h-3 w-3 text-[var(--nk-text-3)]" />
       </button>
       {open ? (
@@ -85,7 +104,7 @@ function ModeSwitcher() {
             className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--nk-overlay)]"
             onClick={() => void setMode("wiii")}
           >
-            <span className="block text-[13px] font-medium text-[var(--nk-text)]">Wiii</span>
+            <span className="block text-[13px] font-medium text-[var(--nk-text)]">Wiii Cloud</span>
             <span className="block text-[11.5px] text-[var(--nk-text-3)]">
               Trợ lý học tập và nghiên cứu · tài khoản cloud
             </span>
@@ -205,6 +224,17 @@ export default function NekoChillApp() {
   const [commandCenterOpen, setCommandCenterOpen] = useState(false);
   const [insertRequest, setInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const desktopChrome = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  const compactWorkspace = useCompactWorkspace();
+  const workspacePane = useNekoWorkspaceStore((state) =>
+    activeSessionId ? state.sessions[activeSessionId] : undefined,
+  );
+  const {
+    ensureSession: ensureWorkspaceSession,
+    refresh: refreshWorkspace,
+    restoreActivities,
+    toggle: toggleWorkspace,
+    close: closeWorkspace,
+  } = useNekoWorkspaceStore();
 
   useEffect(() => {
     void detect();
@@ -221,6 +251,36 @@ export default function NekoChillApp() {
   }, [activeSessionId]);
 
   useEffect(() => {
+    if (!session?.workspace) return;
+    ensureWorkspaceSession(session.id);
+    restoreActivities(
+      session.id,
+      session.workspace,
+      session.events.flatMap((event) =>
+        event.data.type === "workspace-activity"
+          ? [{
+              id: event.data.activityId,
+              title: event.data.title,
+              kind: "file" as const,
+              status: event.data.status,
+              operation: event.data.operation ?? undefined,
+              locations: event.data.locations,
+              toolName: event.data.toolName,
+              detail: event.data.detail,
+            }]
+          : [],
+      ),
+    );
+    void refreshWorkspace(session.id, session.workspace);
+  }, [
+    ensureWorkspaceSession,
+    refreshWorkspace,
+    restoreActivities,
+    session?.id,
+    session?.workspace?.path,
+  ]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -234,7 +294,11 @@ export default function NekoChillApp() {
   const handleProjectCommand = async () => {
     if (!session) return;
     if (session.workspace) {
-      setInspectorOpen(true);
+      if (!useNekoWorkspaceStore.getState().sessions[session.id]?.open) {
+        if (compactWorkspace) setSidebarOpen(false);
+        toggleWorkspace(session.id);
+      }
+      void refreshWorkspace(session.id, session.workspace);
       return;
     }
     const workspace = await chooseWorkspaceFolder();
@@ -316,7 +380,17 @@ export default function NekoChillApp() {
             {sidebarOpen ? <SessionSidebar /> : null}
             {session ? (
           <div className="relative flex min-w-0 flex-1">
-            <div className="flex min-w-0 flex-1 flex-col">
+            <Group
+              orientation="horizontal"
+              id={`neko-workspace-layout-${session.id}`}
+              className="min-w-0 flex-1"
+            >
+              <Panel
+                id="neko-chat"
+                defaultSize={workspacePane?.open && !compactWorkspace ? 48 : 100}
+                minSize={28}
+              >
+            <div className="flex h-full min-w-0 flex-1 flex-col">
               <header className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--nk-border)] px-4">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusColor(session.status)}`} />
@@ -332,12 +406,33 @@ export default function NekoChillApp() {
                 <div className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    className={`rounded-md p-1.5 text-[var(--nk-text-3)] hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] ${inspectorOpen ? "bg-[var(--nk-overlay)]" : ""}`}
+                    className={`relative rounded-md p-1.5 text-[var(--nk-text-3)] hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] ${workspacePane?.open ? "bg-[var(--nk-overlay)] text-[var(--nk-text)]" : ""}`}
+                    aria-label={workspacePane?.open ? "Ẩn workspace" : "Mở workspace"}
+                    aria-pressed={Boolean(workspacePane?.open)}
+                    title="Files và Changes"
+                    onClick={() => {
+                      setInspectorOpen(false);
+                      if (!workspacePane?.open && compactWorkspace) setSidebarOpen(false);
+                      toggleWorkspace(session.id);
+                    }}
+                  >
+                    <Files aria-hidden="true" className="h-3.5 w-3.5" />
+                    {workspacePane?.unseenChanges ? (
+                      <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--nk-accent)]" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-md p-1.5 text-[var(--nk-text-3)] hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] ${inspectorOpen ? "bg-[var(--nk-overlay)] text-[var(--nk-text)]" : ""}`}
                     aria-label={inspectorOpen ? "Ẩn thông tin phiên" : "Mở thông tin phiên"}
                     aria-pressed={inspectorOpen}
-                    onClick={() => setInspectorOpen((value) => !value)}
+                    title="Thông tin phiên"
+                    onClick={() => {
+                      if (!inspectorOpen) closeWorkspace(session.id);
+                      setInspectorOpen((value) => !value);
+                    }}
                   >
-                    <PanelRight aria-hidden="true" className="h-3.5 w-3.5" />
+                    <Info aria-hidden="true" className="h-3.5 w-3.5" />
                   </button>
                   {session.status !== "exited" &&
                   session.status !== "stopping" &&
@@ -369,6 +464,21 @@ export default function NekoChillApp() {
                 insertRequest={insertRequest}
               />
             </div>
+              </Panel>
+              {workspacePane?.open && !compactWorkspace ? (
+                <>
+                  <Separator className="wiii-resize-handle" />
+                  <Panel id="neko-workspace" defaultSize={52} minSize={36}>
+                    <NekoWorkspacePane session={session} />
+                  </Panel>
+                </>
+              ) : null}
+            </Group>
+            {workspacePane?.open && compactWorkspace ? (
+              <div className="absolute inset-0 z-30 bg-[var(--nk-composer)]">
+                <NekoWorkspacePane session={session} />
+              </div>
+            ) : null}
             {inspectorOpen ? (
               <>
                 <button

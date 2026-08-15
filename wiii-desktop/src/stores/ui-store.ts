@@ -15,6 +15,13 @@ export type ActiveView =
   | "soul-bridge"
   | "wiii-connect";
 
+/** The one content surface allowed to occupy the secondary workspace pane. */
+export type RightPaneSurface =
+  | { kind: "closed" }
+  | { kind: "preview"; id: string }
+  | { kind: "artifact"; id: string }
+  | { kind: "code-studio" };
+
 interface UIState {
   /** Sprint 192: Which view is displayed in the main content area */
   activeView: ActiveView;
@@ -36,6 +43,12 @@ interface UIState {
   orgManagerTargetOrgId: string | null;
   /** Code Studio panel */
   codeStudioPanelOpen: boolean;
+  /** Authoritative right-pane state. Legacy booleans below mirror this value. */
+  rightPane: RightPaneSurface;
+  /** Agent events may reveal their current resource while this is enabled. */
+  workspaceFollowAgent: boolean;
+  /** A pinned surface is never replaced by an agent-originated reveal. */
+  workspacePinned: boolean;
 
   /** Whether any right-side split panel is open (artifact, code studio, or preview) */
   hasRightPanel: () => boolean;
@@ -54,10 +67,12 @@ interface UIState {
   toggleCharacterPanel: () => void;
   /** Sprint 166: Preview panel actions */
   openPreview: (id: string) => void;
+  revealPreview: (id: string) => void;
   closePreview: () => void;
   togglePreviewPanel: () => void;
   /** Sprint 167: Artifact panel actions */
   openArtifact: (id: string, artifact?: ArtifactData) => void;
+  revealArtifact: (id: string, artifact?: ArtifactData) => void;
   closeArtifact: () => void;
   setArtifactTab: (tab: "code" | "preview" | "output") => void;
   /** Sprint 179: Admin panel */
@@ -74,10 +89,34 @@ interface UIState {
   closeWiiiConnect: () => void;
   /** Code Studio panel actions */
   openCodeStudio: () => void;
+  revealCodeStudio: () => void;
   closeCodeStudio: () => void;
+  setWorkspaceFollowAgent: (follow: boolean) => void;
+  setWorkspacePinned: (pinned: boolean) => void;
+  closeWorkspacePane: () => void;
   /** Sprint 192: Navigate back to chat from any view */
   navigateToChat: () => void;
   closeAll: () => void;
+}
+
+function rightPanePatch(
+  rightPane: RightPaneSurface,
+  artifact?: ArtifactData | null,
+) {
+  return {
+    rightPane,
+    previewPanelOpen: rightPane.kind === "preview",
+    selectedPreviewId: rightPane.kind === "preview" ? rightPane.id : null,
+    artifactPanelOpen: rightPane.kind === "artifact",
+    selectedArtifactId: rightPane.kind === "artifact" ? rightPane.id : null,
+    codeStudioPanelOpen: rightPane.kind === "code-studio",
+    _ephemeralArtifact:
+      rightPane.kind === "artifact" ? artifact ?? null : null,
+  };
+}
+
+function canFollowWorkspace(state: Pick<UIState, "workspaceFollowAgent" | "workspacePinned">) {
+  return state.workspaceFollowAgent && !state.workspacePinned;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -96,10 +135,13 @@ export const useUIStore = create<UIState>((set, get) => ({
   _ephemeralArtifact: null,
   orgManagerTargetOrgId: null,
   codeStudioPanelOpen: false,
+  rightPane: { kind: "closed" },
+  workspaceFollowAgent: true,
+  workspacePinned: false,
 
   hasRightPanel: () => {
     const s = get();
-    return s.artifactPanelOpen || s.codeStudioPanelOpen || s.previewPanelOpen;
+    return s.rightPane.kind !== "closed" || s.artifactPanelOpen || s.codeStudioPanelOpen || s.previewPanelOpen;
   },
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -120,27 +162,67 @@ export const useUIStore = create<UIState>((set, get) => ({
       sourcesPanelOpen: s.characterPanelOpen ? s.sourcesPanelOpen : false,
     })),
   // Sprint 166: Preview panel — mutual exclusion with sources panel
-  openPreview: (id) => set({ previewPanelOpen: true, selectedPreviewId: id, sourcesPanelOpen: false, artifactPanelOpen: false }),
-  closePreview: () => set({ previewPanelOpen: false, selectedPreviewId: null }),
+  openPreview: (id) => set({ ...rightPanePatch({ kind: "preview", id }), sourcesPanelOpen: false }),
+  revealPreview: (id) =>
+    set((state) =>
+      canFollowWorkspace(state)
+        ? { ...rightPanePatch({ kind: "preview", id }), sourcesPanelOpen: false }
+        : state,
+    ),
+  closePreview: () =>
+    set((state) =>
+      state.rightPane.kind === "preview"
+        ? rightPanePatch({ kind: "closed" })
+        : { previewPanelOpen: false, selectedPreviewId: null },
+    ),
   togglePreviewPanel: () =>
-    set((s) => ({ previewPanelOpen: !s.previewPanelOpen, sourcesPanelOpen: s.previewPanelOpen ? s.sourcesPanelOpen : false })),
+    set((state) =>
+      state.rightPane.kind === "preview" || state.previewPanelOpen
+        ? rightPanePatch({ kind: "closed" })
+        : { ...rightPanePatch({ kind: "preview", id: state.selectedPreviewId ?? "" }), sourcesPanelOpen: false },
+    ),
   // Sprint 167: Artifact panel — mutual exclusion with preview + sources
   // Sprint 168: Optional artifact param for ad-hoc artifacts from CodeBlock
-  openArtifact: (id, artifact) => set({ artifactPanelOpen: true, selectedArtifactId: id, artifactActiveTab: "code" as const, previewPanelOpen: false, sourcesPanelOpen: false, _ephemeralArtifact: artifact || null }),
-  closeArtifact: () => set({ artifactPanelOpen: false, selectedArtifactId: null, _ephemeralArtifact: null }),
+  openArtifact: (id, artifact) => set({ ...rightPanePatch({ kind: "artifact", id }, artifact), artifactActiveTab: "code" as const, sourcesPanelOpen: false }),
+  revealArtifact: (id, artifact) =>
+    set((state) =>
+      canFollowWorkspace(state)
+        ? { ...rightPanePatch({ kind: "artifact", id }, artifact), sourcesPanelOpen: false }
+        : state,
+    ),
+  closeArtifact: () =>
+    set((state) =>
+      state.rightPane.kind === "artifact"
+        ? rightPanePatch({ kind: "closed" })
+        : { artifactPanelOpen: false, selectedArtifactId: null, _ephemeralArtifact: null },
+    ),
   setArtifactTab: (tab) => set({ artifactActiveTab: tab }),
   openAdminPanel: () => set({ activeView: "system-admin" as ActiveView, commandPaletteOpen: false }),
   closeAdminPanel: () => set({ activeView: "chat" as ActiveView }),
   openOrgManagerPanel: (orgId) => set({ activeView: "org-admin" as ActiveView, orgManagerTargetOrgId: orgId, commandPaletteOpen: false }),
   closeOrgManagerPanel: () => set({ activeView: "chat" as ActiveView, orgManagerTargetOrgId: null }),
   // Code Studio panel — mutual exclusion with artifact + preview + sources
-  openCodeStudio: () => set({ codeStudioPanelOpen: true, artifactPanelOpen: false, previewPanelOpen: false, sourcesPanelOpen: false }),
-  closeCodeStudio: () => set({ codeStudioPanelOpen: false }),
+  openCodeStudio: () => set({ ...rightPanePatch({ kind: "code-studio" }), sourcesPanelOpen: false }),
+  revealCodeStudio: () =>
+    set((state) =>
+      canFollowWorkspace(state)
+        ? { ...rightPanePatch({ kind: "code-studio" }), sourcesPanelOpen: false }
+        : state,
+    ),
+  closeCodeStudio: () =>
+    set((state) =>
+      state.rightPane.kind === "code-studio"
+        ? rightPanePatch({ kind: "closed" })
+        : { codeStudioPanelOpen: false },
+    ),
+  setWorkspaceFollowAgent: (workspaceFollowAgent) => set({ workspaceFollowAgent }),
+  setWorkspacePinned: (workspacePinned) => set({ workspacePinned }),
+  closeWorkspacePane: () => set({ ...rightPanePatch({ kind: "closed" }), workspacePinned: false }),
   openSoulBridge: () => set({ activeView: "soul-bridge" as ActiveView, commandPaletteOpen: false }),
   closeSoulBridge: () => set({ activeView: "chat" as ActiveView }),
   openWiiiConnect: () => set({ activeView: "wiii-connect" as ActiveView, commandPaletteOpen: false }),
   closeWiiiConnect: () => set({ activeView: "chat" as ActiveView, commandPaletteOpen: false }),
   navigateToChat: () => set({ activeView: "chat" as ActiveView, orgManagerTargetOrgId: null }),
   closeAll: () =>
-    set({ activeView: "chat" as ActiveView, commandPaletteOpen: false, sourcesPanelOpen: false, characterPanelOpen: false, previewPanelOpen: false, selectedPreviewId: null, artifactPanelOpen: false, selectedArtifactId: null, _ephemeralArtifact: null, orgManagerTargetOrgId: null, codeStudioPanelOpen: false }),
+    set({ activeView: "chat" as ActiveView, commandPaletteOpen: false, sourcesPanelOpen: false, characterPanelOpen: false, ...rightPanePatch({ kind: "closed" }), workspacePinned: false, orgManagerTargetOrgId: null }),
 }));

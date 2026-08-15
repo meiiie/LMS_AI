@@ -395,7 +395,7 @@ export function SettingsPage() {
               /* ignore */
             }
             setDraft({
-              server_url: "http://localhost:8080",
+              server_url: "http://localhost:8000",
               // Phase 31 fix: don't seed a placeholder api_key. The
               // hardcoded "local-dev-key" never matched the backend's
               // .env API_KEY (≥16 chars required), so legacy fallback
@@ -455,7 +455,7 @@ export function ConnectionTab({
           type="url"
           value={draft.server_url}
           onChange={(e) => setDraft({ ...draft, server_url: e.target.value })}
-          placeholder="http://localhost:8080"
+          placeholder="http://localhost:8000"
           className="w-full px-3 py-2 rounded-lg border border-border bg-surface-secondary text-text text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
         />
       </FieldGroup>

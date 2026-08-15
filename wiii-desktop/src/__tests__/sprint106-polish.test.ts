@@ -43,6 +43,7 @@ beforeEach(() => {
   });
   useConnectionStore.setState({
     status: "disconnected",
+    isChecking: false,
     serverVersion: null,
     lastCheckedAt: null,
     errorMessage: null,
@@ -217,5 +218,46 @@ describe("ConnectionBadge — Reconnect logic", () => {
     await useConnectionStore.getState().checkHealth();
 
     expect(useConnectionStore.getState().status).toBe("degraded");
+  });
+
+  it("deduplicates overlapping automatic and manual health checks", async () => {
+    let resolveHealth!: (value: { status: string; version: string; environment: string }) => void;
+    vi.mocked(healthApi.checkHealth).mockImplementation(
+      () => new Promise((resolve) => {
+        resolveHealth = resolve;
+      }) as ReturnType<typeof healthApi.checkHealth>,
+    );
+
+    const first = useConnectionStore.getState().checkHealth();
+    const second = useConnectionStore.getState().checkHealth();
+
+    expect(healthApi.checkHealth).toHaveBeenCalledTimes(1);
+    expect(useConnectionStore.getState().status).toBe("disconnected");
+    expect(useConnectionStore.getState().isChecking).toBe(true);
+
+    resolveHealth({ status: "ok", version: "1.0.0", environment: "test" });
+    await Promise.all([first, second]);
+    expect(useConnectionStore.getState().isChecking).toBe(false);
+    expect(useConnectionStore.getState().status).toBe("connected");
+  });
+
+  it("ignores a stale health response after the endpoint lifecycle changes", async () => {
+    const resolvers: Array<(value: { status: string; version: string; environment: string }) => void> = [];
+    vi.mocked(healthApi.checkHealth).mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)) as ReturnType<typeof healthApi.checkHealth>,
+    );
+
+    const stale = useConnectionStore.getState().checkHealth();
+    useConnectionStore.getState().stopPolling();
+    const current = useConnectionStore.getState().checkHealth();
+    expect(healthApi.checkHealth).toHaveBeenCalledTimes(2);
+
+    resolvers[1]({ status: "ok", version: "new", environment: "test" });
+    await current;
+    resolvers[0]({ status: "degraded", version: "old", environment: "test" });
+    await stale;
+
+    expect(useConnectionStore.getState().status).toBe("connected");
+    expect(useConnectionStore.getState().serverVersion).toBe("new");
   });
 });

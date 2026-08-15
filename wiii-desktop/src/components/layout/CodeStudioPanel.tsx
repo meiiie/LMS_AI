@@ -12,6 +12,7 @@ import { useUIStore } from "@/stores/ui-store";
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 import type { CodeStudioSession } from "@/stores/code-studio-store";
 import { InlineVisualFrame } from "@/components/common/InlineVisualFrame";
+import { WorkspacePaneControls } from "./WorkspacePaneControls";
 
 type StudioTab = "code" | "preview";
 
@@ -151,6 +152,7 @@ const CodeStudioContent = memo(function CodeStudioContent({
             )}
           </div>
         </div>
+        <WorkspacePaneControls />
         <button
           onClick={onClose}
           className="p-1.5 rounded-md hover:bg-surface-tertiary text-text-tertiary hover:text-text transition-colors"
