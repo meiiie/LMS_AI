@@ -138,7 +138,6 @@ class ThinkingAdapter:
             )
             
             # Use LIGHT tier for speed (~2-3s) with adaptive budget
-            # Note: LangChain LLMs handle max_tokens via generation_config
             response = await ainvoke_agentic_rag_llm(
                 llm=self._llm,
                 messages=prompt,

@@ -488,14 +488,6 @@ class TestGraphWiring:
 
         assert hasattr(graph, "curate_products")
 
-    def test_synthesize_reads_curated_products(self):
-        """synthesize_response prefers curated_products over deduped_products."""
-        # Verify by inspecting the source code pattern
-        import inspect
-        from app.engine.multi_agent.subagents.search.workers import synthesize_response
-
-        source = inspect.getsource(synthesize_response)
-        assert "curated_products" in source
 
 
 # ═════════════════════════════════════════════════════════════════

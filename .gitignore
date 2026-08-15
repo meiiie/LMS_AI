@@ -74,13 +74,12 @@ _find_untested.py
 docx_output.txt
 test_*.txt
 /tools/*
+!/tools/release/
+!/tools/release/**
+tools/release/__pycache__/
 !/tools/wiii_self_harness/
 !/tools/wiii_self_harness/**
 tools/wiii_self_harness/__pycache__/
-!/tools/wiii_understand_harness/
-!/tools/wiii_understand_harness/**
-tools/wiii_understand_harness/__pycache__/
-
 # === pip install artifacts ===
 maritime-ai-service/=*
 
@@ -94,6 +93,8 @@ Documents/
 maritime-ai-service/.tmp-workspace/
 maritime-ai-service/.env.soul-agi
 maritime-ai-service/.env.production.bak-*
+maritime-ai-service/docker-compose.override.yml
+maritime-ai-service/start-wiii-backend.ps1
 wiii-desktop/playwright/*.png
 wiii-desktop/public/labs/
 wiii-desktop/scripts/screenshots/

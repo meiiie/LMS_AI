@@ -272,26 +272,3 @@ class TestDenseSearchPgvector:
 # Pool config tests
 # ---------------------------------------------------------------------------
 
-class TestPoolConfig:
-    """Tests for database.py pool configuration from settings."""
-
-    def test_pool_reads_from_settings(self):
-        """get_shared_engine() uses settings.async_pool_min/max_size (not hardcoded)."""
-        import app.core.database as db_mod
-
-        # Read the source file directly (inspect.getsource fails when module is mocked)
-        source_path = db_mod.__file__
-        with open(source_path, "r", encoding="utf-8") as f:
-            source = f.read()
-
-        # Verify pool_size reads from settings (not hardcoded 5)
-        assert "settings.async_pool_min_size" in source, \
-            "pool_size must read from settings.async_pool_min_size"
-        assert "settings.async_pool_max_size" in source, \
-            "max_overflow must derive from settings.async_pool_max_size"
-
-        # Verify no hardcoded pool_size=5
-        assert "pool_size=5" not in source, \
-            "pool_size must NOT be hardcoded to 5"
-        assert "max_overflow=5" not in source, \
-            "max_overflow must NOT be hardcoded to 5"

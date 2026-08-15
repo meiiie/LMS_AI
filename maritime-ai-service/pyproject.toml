@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wiii-service"
-version = "0.1.0"
-description = "Wiii - Multi-Domain Agentic RAG Platform with Long-term Memory by The Wiii Lab"
+version = "1.2.0"
+description = "Wiii Core — durable AI workbench runtime by The Wiii Lab"
 readme = "README.md"
 license = {text = "AGPL-3.0-only"}
 requires-python = ">=3.11"

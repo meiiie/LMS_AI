@@ -15,7 +15,6 @@ def create_llm_with_model_for_provider_impl(
     thinking_tier_cls,
     normalize_provider,
     ensure_provider,
-    attach_tracking_callback,
     tag_runtime_metadata,
     logger_obj,
 ):
@@ -88,7 +87,6 @@ def create_llm_with_model_for_provider_impl(
             temperature=0.5,
             model_name=selected_model_name,
         )
-        attach_tracking_callback(llm, cache_key)
         llm = tag_custom_runtime(llm, selected_model_name)
         pool[cache_key] = llm
         logger_obj.info(

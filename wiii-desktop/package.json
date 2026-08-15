@@ -1,9 +1,16 @@
 {
   "name": "wiii-desktop",
   "private": true,
-  "version": "1.0.0",
-  "license": "AGPL-3.0-only",
+  "version": "1.2.0",
+  "description": "Wiii — an open-source durable AI workbench by The Wiii Lab",
   "author": "Meiiie (The Wiii Lab)",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://wiii.holilihu.online",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/meiiie/wiii.git",
+    "directory": "wiii-desktop"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -33,7 +40,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@rive-app/react-webgl2": "^4.28.2",
     "@tanstack/react-virtual": "^3.13.24",
-    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-http": "^2.5.8",
     "@tauri-apps/plugin-notification": "^2.0.0",

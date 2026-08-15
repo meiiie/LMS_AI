@@ -1,6 +1,5 @@
 """
-Wiii - Multi-Domain Agentic RAG Platform by The Wiii Lab
-Architecture: Clean Architecture + Agentic RAG + Long-term Memory + Domain Plugins
+Wiii Core — durable AI workbench runtime by The Wiii Lab.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.2.0"

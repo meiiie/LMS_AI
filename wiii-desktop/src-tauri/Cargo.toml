@@ -1,10 +1,12 @@
 [package]
 name = "wiii-desktop"
-version = "1.0.0"
-description = "Wiii — AI Assistant by The Wiii Lab"
+version = "1.2.0"
+description = "Wiii — durable AI workbench by The Wiii Lab"
 authors = ["Meiiie (The Wiii Lab)"]
 edition = "2021"
 license = "AGPL-3.0-only"
+homepage = "https://wiii.holilihu.online"
+repository = "https://github.com/meiiie/wiii"
 
 [lib]
 name = "wiii_desktop_lib"
@@ -22,4 +24,5 @@ tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 tokio = { version = "1", features = ["net"] }

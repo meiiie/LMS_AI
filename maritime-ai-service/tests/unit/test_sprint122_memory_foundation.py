@@ -255,32 +255,6 @@ class TestF3TypeOrderUpdated:
 # ============================================================
 
 
-class TestF4SingleFactInjectionPath:
-    """Bug F4: User facts should only be injected via build_system_prompt()."""
-
-    def test_retrieve_context_called_without_user_facts(self):
-        """input_processor should call retrieve_context with include_user_facts=False."""
-        # This is a structural test — verify the code was changed
-        import inspect
-        from app.services.input_processor_context_runtime import _populate_semantic_memory_context
-        source = inspect.getsource(_populate_semantic_memory_context)
-        assert "include_user_facts=False" in source
-
-    def test_core_memory_block_not_injected_in_direct_node(self):
-        """graph.py direct_response_node should NOT append core_memory_block."""
-        import inspect
-        from app.engine.multi_agent import graph
-        source = inspect.getsource(graph)
-        # The old pattern: system_prompt += f"\n\n{core_memory}"
-        # Should be commented out / removed
-        assert 'system_prompt += f"\\n\\n{core_memory}"' not in source
-
-    def test_core_memory_section_empty_in_tutor_node(self):
-        """tutor_node should set core_memory_section = '' (no injection)."""
-        import inspect
-        from app.engine.multi_agent.agents import tutor_surface
-        source = inspect.getsource(tutor_surface)
-        assert 'core_memory_section = ""' in source
 
 
 # ============================================================

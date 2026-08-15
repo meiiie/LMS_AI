@@ -135,11 +135,15 @@ def base_app():
     from app.api.v1.admin_audit import router as audit_router
     from app.api.v1.admin_gdpr import router as gdpr_router
 
-    existing_paths = {r.path for r in _app.routes}
+    # Issue #210 / PR #896 pattern: newer FastAPI represents include_router
+    # entries as opaque _IncludedRouter objects (no .path); the OpenAPI
+    # schema is the drift-proof way to enumerate materialized paths.
+    existing_paths = set(_app.openapi().get("paths", {}).keys())
     if "/api/v1/admin/audit-logs" not in existing_paths:
         _app.include_router(audit_router, prefix="/api/v1")
     if "/api/v1/admin/users/{user_id}/export" not in existing_paths:
         _app.include_router(gdpr_router, prefix="/api/v1")
+    _app.openapi_schema = None  # drop the cached schema after mutation
     _keep_root_mount_last(_app)
 
     return _app

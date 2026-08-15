@@ -1,138 +1,130 @@
 # Contributing to Wiii
 
-Thank you for your interest in contributing to Wiii! This guide will help you get started.
+Wiii is an open AI workbench spanning a FastAPI runtime, a React/Tauri desktop
+application, local ACP agents, memory, tools, artifacts, and governed external
+adapters. Contributions should preserve those boundaries and keep failures
+inspectable.
 
 Wiii uses a dual-licensing model. Before a contribution to the core can be
 merged, its licensing authority must satisfy
 [CONTRIBUTOR-LICENSE-POLICY.md](CONTRIBUTOR-LICENSE-POLICY.md). Apache SDK
 contributions are accepted only inside the explicit `sdk/` boundary.
 
-## Development Setup
+## Before coding
 
-### Prerequisites
+1. Read [AGENTS.md](AGENTS.md), the
+   [project mental model](docs/WIII_PROJECT_MENTAL_MODEL.md), and the relevant
+   subsystem guide.
+2. Search open and closed issues.
+3. Open or claim a focused issue for non-trivial work. Record scope,
+   acceptance, risk, verification, and rollback.
+4. Create a branch from current `main`:
+   - people: `<kind>/<issue>-<slug>`;
+   - coding agents: `codex/<issue>-<kind>-<slug>`.
+
+Typical kinds are `feat`, `fix`, `docs`, `refactor`, `test`, `ci`, and `chore`.
+Do not mix unrelated cleanup into a product change.
+
+## Development setup
+
+Prerequisites:
 
 - Python 3.11+
-- Node.js 20+ (for desktop app)
-- Docker & Docker Compose (for databases)
-- Rust toolchain (for Tauri desktop builds)
+- Node.js 22
+- Rust stable and the Tauri v2 platform prerequisites
+- Docker with Compose for local services
 
-### Backend Setup
+Backend:
 
-```bash
+```powershell
 cd maritime-ai-service
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env               # Configure your API keys
-
-# Start database services
-docker compose up -d postgres neo4j minio
-
-# Run the server
+Copy-Item .env.example .env
+docker compose up -d postgres neo4j minio valkey
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-### Desktop Setup
+Desktop:
 
-```bash
+```powershell
 cd wiii-desktop
-npm install
-npm run dev          # Vite dev server
-npx tauri dev        # Full Tauri app
+npm ci
+npm run tauri -- dev
 ```
 
-## Branch Naming
+Use the equivalent activation/copy commands on macOS or Linux. Configure only
+your own credentials and never commit `.env`, certificates, tokens, session
+stores, or local database files.
 
-| Prefix | Use |
-|--------|-----|
-| `feature/` | New features (`feature/add-voice-input`) |
-| `fix/` | Bug fixes (`fix/streaming-disconnect`) |
-| `docs/` | Documentation (`docs/api-guide`) |
-| `refactor/` | Code refactoring (`refactor/memory-store`) |
-| `test/` | Test additions (`test/grader-edge-cases`) |
+## Engineering rules
 
-## Commit Messages
+- Put authorization, ownership, approval, and tenant enforcement on the server;
+  UI gating is not a security boundary.
+- Record a mutation before execution. An interrupted unconfirmed mutation is
+  `unknown_outcome` and must not be replayed automatically.
+- Keep provider secrets and backend-owned selectors out of model-facing tool
+  schemas, logs, and evidence.
+- Preserve ordered event/session semantics across desktop, HTTP, SSE, ACP, and
+  provider boundaries.
+- Treat LMS and other external systems as Wiii Connect adapters, not special
+  global architecture.
+- Add migrations for persisted schema changes and document rollout/rollback.
+- Prefer focused changes and existing abstractions over speculative layers.
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
+## Verification
 
+Run the smallest focused tests while iterating, then the owning surface's full
+gate before requesting review.
+
+```powershell
+# Repository contracts and versions
+python tools/wiii_self_harness/run_wiii_self_harness.py --profile pr
+python tools/release/wiii_release.py check
+
+# Backend
+cd maritime-ai-service
+pytest tests/unit/ -p no:capture --tb=short -q
+ruff check app/ --select=E9,F63,F7
+
+# Desktop
+cd ../wiii-desktop
+npm test -- --run
+npx tsc --noEmit
+npm run build:embed
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
-<type>(<scope>): <description>
 
-[optional body]
+Add focused security/adversarial tests for auth, tenancy, memory, external
+actions, migrations, and filesystem behavior. UI changes require a screenshot
+or recording. Live external claims require a guarded runtime evidence artifact;
+a mock proves a contract, not provider availability.
+
+## Commits and pull requests
+
+Use a concise Conventional Commit title, for example:
+
+```text
+feat(neko): add durable workspace file replay
+fix(connect): block reuse of consumed approval
+docs(release): define signed stable channel
 ```
 
-**Types**: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `ci`
+The pull request must link its issue, declare scope/non-scope, list exact
+verification results, identify risks and rollback, and remain within the
+[reviewability gate](docs/operations/WIII_GITHUB_GOVERNANCE.md). Keep generated
+build output out of Git.
 
-**Examples**:
-```
-feat(memory): add importance-aware eviction
-fix(streaming): prevent duplicate answer events
-docs(api): update authentication guide
-test(rag): add corrective RAG edge cases
-```
+Changes to `VERSION`, release workflow, signing, package/bundle identifiers, or
+public artifacts must follow the
+[Wiii Release Standard](docs/releases/WIII_RELEASE_STANDARD.md).
 
-## Pull Request Process
+## Review and merge
 
-1. **Fork** the repository and create your branch from `main`
-2. **Write tests** for any new functionality
-3. **Run the test suite** and ensure all tests pass:
-   ```bash
-   # Backend (must pass 10059+ tests)
-   cd maritime-ai-service
-   pytest tests/unit/ -v -p no:capture --tb=short
+Resolve required checks and review findings. Do not self-approve protected work
+or bypass branch protection merely to finish faster. Squash merge is preferred
+when it preserves a clear issue-linked history.
 
-   # Desktop (must pass 1860+ tests)
-   cd wiii-desktop
-   npx vitest run
-   ```
-4. **Lint your code**:
-   ```bash
-   ruff check app/ --select=F401,F841
-   ```
-5. **Open a PR** with a clear description of the changes
-6. **Respond to review feedback** promptly
-
-## Code Style
-
-### Python (Backend)
-
-- **Formatter/Linter**: ruff (configured in `pyproject.toml`)
-- **Type hints**: Use throughout, especially for function signatures
-- **Async**: Use `async/await` for all I/O operations
-- **Imports**: Group as stdlib → third-party → local, sorted alphabetically
-- **Docstrings**: For public APIs; skip for obvious internal functions
-
-### TypeScript (Desktop)
-
-- **Framework**: React 18 with functional components and hooks
-- **State**: Zustand stores (no Redux, no Context API for global state)
-- **Styling**: Tailwind CSS utility classes
-- **Testing**: Vitest + jsdom
-
-### General
-
-- **Language**: Vietnamese-first for all user-facing text (UI, prompts, error messages)
-- **Config**: Use Pydantic Settings + `.env` — never hardcode secrets
-- **Feature flags**: Gate new features behind settings flags in `app/core/config.py`
-- **Lazy imports**: Use inside function bodies for optional dependencies
-
-## Testing Requirements
-
-- All PRs must include tests for new functionality
-- Backend test count must not decrease (currently 10059+)
-- Desktop test count must not decrease (currently 1860+)
-- Windows compatibility: use `-p no:capture` and `PYTHONIOENCODING=utf-8`
-
-## Architecture Guidelines
-
-- **Domain plugins**: New domains go in `app/domains/` with a `domain.yaml`
-- **LLM calls**: Use `get_llm_deep/moderate/light()` from `app.engine.llm_pool`
-- **Database access**: Via repository pattern in `app/repositories/`
-- **Error handling**: Use typed exceptions from `app/core/exceptions.py`
-- **Security**: Never expose `str(e)` in HTTP responses; use `hmac.compare_digest` for secrets
-
-## Getting Help
-
-- Open an [issue](https://github.com/meiiie/wiii/issues) for bugs or feature requests
-- Check existing issues before creating new ones
-- Use issue templates for consistent reporting
+For help choosing an issue type or support channel, see [SUPPORT.md](SUPPORT.md).

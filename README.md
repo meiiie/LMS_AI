@@ -1,142 +1,167 @@
 # Wiii
 
-![Wiii AI platform banner showing document citations, LMS preview, voice, and simulation workflows](docs/assets/brand/wiii-readme-banner-2026-05-19.png)
+<p align="center">
+  <img src="docs/assets/brand/neko-family-v1/social/wiii-readme-banner.png" alt="Wiii — a durable AI workbench for people and agents" width="100%" />
+</p>
 
-Wiii is a monorepo for an AI platform that combines a FastAPI backend, a Tauri desktop client, iframe/embed delivery, multi-agent orchestration, retrieval and memory pipelines, LMS integrations, and multi-tenant organization support.
+<p align="center">
+  <a href="https://github.com/meiiie/wiii/actions/workflows/test-backend.yml"><img src="https://github.com/meiiie/wiii/actions/workflows/test-backend.yml/badge.svg" alt="Backend tests" /></a>
+  <a href="https://github.com/meiiie/wiii/actions/workflows/test-desktop.yml"><img src="https://github.com/meiiie/wiii/actions/workflows/test-desktop.yml/badge.svg" alt="Desktop tests" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/meiiie/wiii" alt="MIT license" /></a>
+</p>
 
-This repository is optimized for ongoing product engineering, not as a minimal sample. Start here for the repository shape, the current deployment model, the main architecture documents, and the fastest local entry points.
+Wiii is an open-source AI workbench for durable conversations, local and cloud
+agents, project files, tools, memory, artifacts, and permission-aware
+integrations. It is built by **The Wiii Lab** and designed to stay useful across
+different models, runtimes, knowledge domains, and host applications.
 
-## Monorepo Layout
+Vietnamese is the primary product language today. The architecture itself is
+provider- and domain-extensible.
 
-- `maritime-ai-service/`: FastAPI backend, orchestration, integrations, data access, deployment assets, tests
-- `wiii-desktop/`: Tauri desktop app, React frontend, embed app, frontend scripts, desktop-local docs
-- `docs/`: repository-level documentation, plans, diagrams, screenshots, and doc indexes
-- `Documents/`: supporting reference material and vendor research
-- `tools/`: utilities, fixtures, and one-off helpers
+## What Wiii brings together
 
-Agent instructions now start from `AGENTS.md`, `.agents/skills/`, GitHub issues/PRs, and `docs/operations/`. Legacy local scratch folders such as `.claude/` and `.Codex/` are intentionally ignored and should not be committed.
+- **Durable work** — conversations, provider sessions, files, artifacts, and
+  recovery state survive process replacement and app restarts.
+- **Local + cloud agents** — use Wiii Cloud or run ACP-compatible local agents
+  through the no-account **Neko Chill** workspace.
+- **Files + live artifacts** — inspect project files, follow edits, and open
+  code, Markdown, HTML previews, diagrams, and generated visual work beside the
+  conversation.
+- **Permission-aware tools** — tool calls and host mutations remain visible,
+  reviewable, and gated before side effects.
+- **Connected context** — RAG, semantic memory, MCP, embeds, documents, browser
+  surfaces, and external applications meet behind explicit contracts.
+- **Organization controls** — authentication, tenant context, feature policy,
+  audit paths, and deployment controls support managed environments.
 
-## Architecture At A Glance
+LMS support remains an important Wiii Connect adapter. It is one integration,
+not the product boundary.
 
-Primary runtime flow:
+## Product map
 
-1. Client request enters the backend through REST, SSE, WebSocket, or LMS/embed integration.
-2. Middleware applies request correlation, organization context, auth, and rate limiting.
-3. `ChatOrchestrator` resolves session state, domain context, and request normalization.
-4. The WiiiRunner multi-agent pipeline routes work to RAG, tutor, memory, direct-response, Code Studio, product search, or other feature-gated tool paths.
-5. Retrieval, tools, LMS data, semantic memory, and optional browser or MCP integrations contribute context.
-6. The response is synthesized back to JSON or SSE V3 events for the desktop app and embed clients.
+| Layer | Responsibility |
+| --- | --- |
+| **Wiii Core** | API, orchestration, streaming, providers, tools, and retrieval |
+| **Wiii Living** | continuity, memory, identity, goals, and long-running agent state |
+| **Wiii Host** | desktop, embed, browser, LMS, and future host applications |
+| **Wiii Connect** | ACP, MCP, documents, OAuth apps, and capability contracts |
+| **Wiii Org** | identity, tenancy, policy, admin, and audit controls |
+| **Wiii Data** | PostgreSQL/pgvector, optional graph context, caches, and object storage |
 
-Core subsystems:
+The repository contains two primary runtime surfaces:
 
-- FastAPI API layer with organization-aware middleware and auth
-- WiiiRunner multi-agent orchestration with RAG, tutor, memory, direct-response, and feature-gated tool paths
-- Retrieval stack built on PostgreSQL, pgvector, sparse search, and optional Neo4j graph context
-- LMS bridge with HMAC token exchange, webhook ingestion, and dashboard/data pull tools
-- Tauri desktop client with Zustand state, SSE V3 streaming, full-page admin surfaces, and embed mode
-- Production delivery via immutable app and nginx images published to GHCR
+- [`maritime-ai-service/`](maritime-ai-service/) — FastAPI backend,
+  orchestration, RAG, memory, integrations, deployment assets, and tests.
+- [`wiii-desktop/`](wiii-desktop/) — Tauri v2 desktop workbench, React client,
+  Neko Chill, artifact workspace, and embed surfaces.
 
-## Quick Start
+Shared architecture, governance, research, and brand sources live in
+[`docs/`](docs/).
+
+## Quick start
+
+### Install a desktop release
+
+Governed desktop packages are published on the
+[Wiii Releases page](https://github.com/meiiie/wiii/releases):
+
+| Platform | Package |
+| --- | --- |
+| Windows x64 | NSIS setup `.exe` |
+| Debian/Ubuntu x64 | `.deb` |
+| Other supported Linux x64 | portable `.AppImage` |
+| macOS Apple Silicon | ARM64 `.dmg` |
+| macOS Intel | x64 `.dmg` |
+
+Verify the adjacent `.sha256` file before installation. Windows stable builds
+must be Authenticode-signed. macOS packages are currently ad-hoc signed but not
+Apple-notarized, so their filenames explicitly include `unnotarized`; see the
+[release standard](docs/releases/WIII_RELEASE_STANDARD.md) for Gatekeeper and
+trust guidance.
+
+### Desktop workbench
+
+Prerequisites: Node.js 18+, Rust, and the
+[Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/).
+
+```bash
+cd wiii-desktop
+npm install
+npm run tauri -- dev
+```
+
+For frontend-only iteration:
+
+```bash
+cd wiii-desktop
+npm run dev
+```
 
 ### Backend
 
 ```bash
 cd maritime-ai-service
 python -m venv .venv
-.venv\Scripts\activate
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env
+cp .env.example .env
 docker compose up -d postgres neo4j minio valkey
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-### Desktop
+Use `copy .env.example .env` instead of `cp` in Command Prompt. Configure only
+your own development secrets; never commit `.env` files.
+
+## Build and verify
 
 ```bash
-cd wiii-desktop
-npm install
-npm run dev
-```
-
-### Full Desktop App
-
-```bash
-cd wiii-desktop
-npx tauri dev
-```
-
-### Embed Bundle For Local Verification
-
-```bash
-cd wiii-desktop
-npm run build:embed
-```
-
-`wiii-desktop/dist-embed/` is now generated, gitignored output. It remains useful for local verification, but it is no longer part of the production deployment contract.
-
-## Build And Test
-
-### Backend
-
-```bash
-cd maritime-ai-service
-set PYTHONIOENCODING=utf-8 && pytest tests/unit/ -p no:capture --tb=short -q
-```
-
-### Desktop
-
-```bash
+# Desktop
 cd wiii-desktop
 npx vitest run
 npx tsc --noEmit
+npm run build:embed
+# Package for the host operating system:
+npm run tauri -- build --bundles nsis
+# Linux: npm run tauri -- build --bundles deb,appimage
+# macOS: npm run tauri -- build --bundles dmg
+
+# Backend
+cd ../maritime-ai-service
+pytest tests/unit/ -p no:capture --tb=short -q
+ruff check app/ --select=E9,F63,F7
 ```
 
-## Deployment Model
+Tauri packages are generated under
+`wiii-desktop/src-tauri/target/<target?>/release/bundle/`. Generated `dist*`,
+target, coverage, and local screenshot output must stay out of source control.
 
-Production now uses CI-built immutable images for both the backend app and nginx layer.
+## Documentation
 
-Current deployment flow:
+- [Project mental model](docs/WIII_PROJECT_MENTAL_MODEL.md)
+- [Codebase map](docs/architecture/WIII_CODEBASE_MAP.md)
+- [Workbench identity and durable ACP boundary](docs/architecture/WIII_WORKBENCH_IDENTITY_AND_ACP.md)
+- [Wiii Connect architecture](docs/architecture/wiii-connect/README.md)
+- [Desktop engineering guide](wiii-desktop/README.md)
+- [Backend engineering guide](maritime-ai-service/README.md)
+- [Release standard](docs/releases/WIII_RELEASE_STANDARD.md)
+- [Neko brand system](docs/assets/brand/neko-family-v1/README.md)
 
-1. Push to `main` triggers `.github/workflows/build-production-images.yml`.
-2. CI builds `wiii-desktop/dist-embed/` and `wiii-desktop/dist-pointy/` as build artifacts.
-3. CI builds and publishes:
-   - `ghcr.io/meiiie/wiii-app:*` (legacy `ghcr.io/meiiie/lms-ai-app:*` is still pushed for one release window)
-   - `ghcr.io/meiiie/wiii-nginx:*` (legacy `ghcr.io/meiiie/lms-ai-nginx:*` is still pushed for one release window)
-4. The app image serves embed assets from `/app-embed`.
-5. The nginx image serves embed assets from `/usr/share/nginx/embed` and the Pointy host bridge from `/usr/share/nginx/pointy`.
-6. Production deploy pulls tagged images instead of rebuilding frontend assets on the host.
+Wiii is active product and research engineering. Contracts that affect
+persistence, permissions, integrations, or user data should be treated as
+versioned interfaces, not informal implementation details.
 
-Operational consequence:
+## Contributing and security
 
-- production no longer depends on `wiii-desktop/dist-embed/` being committed or present in the server checkout
-- rollback is image-tag based rather than “rebuild on host” based
-- `/embed/` and `/pointy/wiii-pointy.umd.js` verification belongs in post-deploy smoke testing
-- Pointy Voice uses the backend ElevenLabs proxy at `/api/v1/voice/*`; raw ElevenLabs keys stay in production secrets or encrypted runtime settings, never in frontend storage
+Read [`AGENTS.md`](AGENTS.md), the issue templates, and
+[`docs/operations/WIII_GITHUB_GOVERNANCE.md`](docs/operations/WIII_GITHUB_GOVERNANCE.md)
+before broad changes. Open a focused issue, document risk and rollback for
+high-impact paths, and include visual evidence for user-facing work.
 
-Current release controls:
-
-- `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md`
-
-## Documentation Map
-
-Repository-level entry points:
-
-- `docs/README.md`: documentation layout and top-level doc map
-- `maritime-ai-service/docs/architecture/SYSTEM_ARCHITECTURE.md`: authoritative architecture overview and component deep dive
-- `maritime-ai-service/docs/architecture/SYSTEM_FLOW.md`: detailed technical request and streaming flow
-- `maritime-ai-service/docs/integration/WIII_LMS_INTEGRATION.md`: LMS contract and integration architecture
-- `maritime-ai-service/scripts/deploy/README.md`: production deployment runbook
-- `maritime-ai-service/README.md`: backend technical entry point
-- `wiii-desktop/README.md`: desktop technical entry point
-
-## Repository Conventions
-
-- Keep durable, shared documentation in `docs/`, not at the repository root.
-- Keep screenshots and documentation assets under `docs/assets/`.
-- Keep desktop-only docs under `wiii-desktop/docs/`.
-- Keep generated build outputs out of git unless they are intentional release artifacts.
-- Do not hand-edit hashed files inside build output directories.
+Please report security-sensitive issues privately to the maintainers rather
+than publishing credentials, private data, or exploit details in a public
+issue.
 
 ## License
 

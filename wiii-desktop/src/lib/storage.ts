@@ -83,6 +83,15 @@ function persistMemoryStore(name: string) {
   }
 }
 
+function persistMemoryStoreStrict(name: string) {
+  const map = getMemoryStore(name);
+  const obj: Record<string, unknown> = {};
+  for (const [k, v] of map.entries()) {
+    obj[k] = v;
+  }
+  localStorage.setItem(`wiii:${name}`, JSON.stringify(obj));
+}
+
 export async function loadStore<T>(
   storeName: string,
   key: string,
@@ -105,6 +114,32 @@ export async function loadStore<T>(
   // Fallback: memory + localStorage
   const map = getMemoryStore(effectiveName);
   return (map.get(key) as T) ?? defaultValue;
+}
+
+/** Read authoritative state without converting I/O or parse failures to absence. */
+export async function loadStoreStrict<T>(
+  storeName: string,
+  key: string,
+  defaultValue: T,
+): Promise<T> {
+  const effectiveName = namespacedStoreName(storeName);
+  const StoreClass = await getStoreClass();
+
+  if (StoreClass) {
+    const store = await StoreClass.load(effectiveName);
+    const value = (await store.get(key)) as T | undefined;
+    return value === undefined ? defaultValue : value;
+  }
+
+  // localStorage is the durable browser authority. Refresh the memory mirror
+  // only after a successful read/parse so transient failures cannot look like
+  // a missing key and later overwrite existing data.
+  const raw = localStorage.getItem(`wiii:${effectiveName}`);
+  const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+  const map = new Map<string, unknown>(Object.entries(parsed));
+  memoryStore.set(effectiveName, map);
+  const value = map.get(key) as T | undefined;
+  return value === undefined ? defaultValue : value;
 }
 
 export async function saveStore<T>(
@@ -132,6 +167,63 @@ export async function saveStore<T>(
   persistMemoryStore(effectiveName);
 }
 
+/**
+ * Persist without a best-effort fallback. Use this as a durability barrier
+ * before an external runtime may observe state. A Tauri store failure is not
+ * equivalent to a successful in-memory write, so it is deliberately exposed
+ * to the caller.
+ */
+export async function saveStoreStrict<T>(
+  storeName: string,
+  key: string,
+  value: T
+): Promise<void> {
+  const effectiveName = namespacedStoreName(storeName);
+  const StoreClass = await getStoreClass();
+
+  if (StoreClass) {
+    const store = await StoreClass.load(effectiveName);
+    const previous = await store.get(key);
+    const hadPrevious = previous !== undefined;
+    await store.set(key, value);
+    try {
+      await store.save();
+    } catch (error) {
+      // plugin-store keeps staged values in memory. Restore that staging area
+      // so a later successful save cannot accidentally persist a fact whose
+      // durability barrier already failed.
+      let compensationError: unknown;
+      try {
+        if (hadPrevious) await store.set(key, previous);
+        else await store.delete(key);
+        await store.save();
+      } catch (rollbackError) {
+        compensationError = rollbackError;
+      }
+      if (compensationError) {
+        throw new AggregateError(
+          [error, compensationError],
+          `Không thể lưu hoặc hoàn tác ${effectiveName}/${key}.`,
+        );
+      }
+      throw error;
+    }
+    return;
+  }
+
+  const map = getMemoryStore(effectiveName);
+  const hadPrevious = map.has(key);
+  const previous = map.get(key);
+  map.set(key, value);
+  try {
+    persistMemoryStoreStrict(effectiveName);
+  } catch (error) {
+    if (hadPrevious) map.set(key, previous);
+    else map.delete(key);
+    throw error;
+  }
+}
+
 export async function deleteStore(
   storeName: string,
   key: string
@@ -153,6 +245,53 @@ export async function deleteStore(
   const map = getMemoryStore(effectiveName);
   map.delete(key);
   persistMemoryStore(effectiveName);
+}
+
+/** Delete a durable key or reject while restoring any staged prior value. */
+export async function deleteStoreStrict(
+  storeName: string,
+  key: string,
+): Promise<void> {
+  const effectiveName = namespacedStoreName(storeName);
+  const StoreClass = await getStoreClass();
+
+  if (StoreClass) {
+    const store = await StoreClass.load(effectiveName);
+    const previous = await store.get(key);
+    const hadPrevious = previous !== undefined;
+    await store.delete(key);
+    try {
+      await store.save();
+    } catch (error) {
+      if (!hadPrevious) throw error;
+      let compensationError: unknown;
+      try {
+        await store.set(key, previous);
+        await store.save();
+      } catch (rollbackError) {
+        compensationError = rollbackError;
+      }
+      if (compensationError) {
+        throw new AggregateError(
+          [error, compensationError],
+          `Không thể xóa hoặc hoàn tác ${effectiveName}/${key}.`,
+        );
+      }
+      throw error;
+    }
+    return;
+  }
+
+  const map = getMemoryStore(effectiveName);
+  const hadPrevious = map.has(key);
+  const previous = map.get(key);
+  map.delete(key);
+  try {
+    persistMemoryStoreStrict(effectiveName);
+  } catch (error) {
+    if (hadPrevious) map.set(key, previous);
+    throw error;
+  }
 }
 
 export async function clearStore(storeName: string): Promise<void> {

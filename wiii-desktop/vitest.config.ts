@@ -12,10 +12,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    // Windows + Vite dynamic imports occasionally approach the 5s Vitest
-    // default under full-suite load. Keep this finite, but high enough to
-    // avoid false negatives while still catching real hangs.
-    testTimeout: 15_000,
+    // The 2.7k-test single-fork suite can spend ~30s transforming Plotly and
+    // Recharts modules on Windows even though focused runs finish in seconds.
+    // Keep the guard finite while avoiding load-dependent false failures.
+    testTimeout: 45_000,
     setupFiles: ["src/__tests__/setup.ts"],
     // Keep vitest's default excludes and add the Playwright spec folder —
     // playwright/*.spec.ts uses @playwright/test's test.describe(), which

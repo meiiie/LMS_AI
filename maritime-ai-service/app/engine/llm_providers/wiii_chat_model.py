@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Iterable, Optional
 
@@ -50,6 +51,7 @@ class StreamChunk:
     content: str = ""
     tool_call_chunks: list[dict] = field(default_factory=list)
     finish_reason: Optional[str] = None
+    reasoning: str = ""
 
     @property
     def message(self) -> "StreamChunk":
@@ -96,6 +98,7 @@ class StreamChunk:
             content=merged_content,
             tool_call_chunks=list(merged_chunks.values()),
             finish_reason=other.finish_reason or self.finish_reason,
+            reasoning=(self.reasoning or "") + (other.reasoning or ""),
         )
 
     def __radd__(self, other: Optional["StreamChunk"]) -> "StreamChunk":
@@ -340,6 +343,16 @@ def _openai_chunk_to_stream_chunk(chunk: Any) -> Optional[StreamChunk]:
         return None
 
     content = getattr(delta, "content", None) or ""
+    # Reasoning deltas (GLM/DeepSeek-style ``reasoning_content``, some
+    # OpenAI-compat endpoints use ``reasoning``). Surfacing them here lets
+    # consumers drop their own bypass clients (epic #207 single-path).
+    reasoning = (
+        getattr(delta, "reasoning_content", None)
+        or getattr(delta, "reasoning", None)
+        or ""
+    )
+    if not isinstance(reasoning, str):
+        reasoning = ""
     tool_call_chunks: list[dict] = []
     raw_tool_calls = getattr(delta, "tool_calls", None)
     if raw_tool_calls:
@@ -359,6 +372,7 @@ def _openai_chunk_to_stream_chunk(chunk: Any) -> Optional[StreamChunk]:
         content=content,
         tool_call_chunks=tool_call_chunks,
         finish_reason=getattr(choice, "finish_reason", None),
+        reasoning=reasoning,
     )
 
 
@@ -461,6 +475,44 @@ class WiiiChatModel(BaseModel):
 
         return _strip_unsupported_params(api_kwargs, self.base_url)
 
+    def _record_native_usage(
+        self,
+        usage: Any,
+        duration_ms: float,
+        component: str,
+    ) -> None:
+        """Feed the per-request TokenTracker from a native SDK response (issue #882).
+
+        The LangChain callback path (``TokenTrackingCallback.on_llm_end``) died
+        with ``BaseChatModel`` — nothing fired it, so ``llm_usage_log`` went
+        silent. This is the direct replacement: no tracker on the context →
+        no-op. Accounting is strictly best-effort and must never break a call.
+        """
+        if usage is None:
+            return
+        try:
+            from app.core.token_tracker import record_llm_call
+
+            if isinstance(usage, dict):
+                input_tokens = int(usage.get("prompt_tokens") or 0)
+                output_tokens = int(usage.get("completion_tokens") or 0)
+            else:
+                input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+                output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            if input_tokens <= 0 and output_tokens <= 0:
+                return
+            record_llm_call(
+                model=self.model,
+                tier=str(getattr(self, "_wiii_tier_key", "") or ""),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                provider=str(getattr(self, "_wiii_provider_name", "") or ""),
+                duration_ms=duration_ms,
+                component=component,
+            )
+        except Exception:  # noqa: BLE001 — accounting is strictly best-effort
+            logger.debug("Native usage recording failed", exc_info=True)
+
     async def ainvoke(self, messages: Iterable[Any] | str, **kwargs: Any) -> Message:
         """Async invoke. Returns a native ``Message`` with ``.content`` + ``.tool_calls``."""
         client = self._get_client()
@@ -477,7 +529,13 @@ class WiiiChatModel(BaseModel):
         except Exception:  # noqa: BLE001
             pass  # rate limiter is best-effort; never block the call
 
+        started = time.time()
         response = await client.chat.completions.create(**api_kwargs)
+        self._record_native_usage(
+            getattr(response, "usage", None),
+            (time.time() - started) * 1000.0,
+            "WiiiChatModel.ainvoke",
+        )
 
         if not getattr(response, "choices", None):
             return Message(role="assistant", content="")
@@ -517,8 +575,17 @@ class WiiiChatModel(BaseModel):
             else None
         )
 
+        started = time.time()
         stream = await client.chat.completions.create(**api_kwargs)
+        # Providers that put usage on the final stream chunk (Gemini-compat,
+        # Zhipu, DeepSeek) get accounted here; OpenAI-strict endpoints only
+        # send stream usage when stream_options is requested — follow-up in
+        # issue #882. Non-stream calls are always accounted via ainvoke.
+        stream_usage: Any = None
         async for raw_chunk in stream:
+            chunk_usage = getattr(raw_chunk, "usage", None)
+            if chunk_usage is not None:
+                stream_usage = chunk_usage
             sc = _openai_chunk_to_stream_chunk(raw_chunk)
             if sc is None:
                 continue
@@ -527,8 +594,15 @@ class WiiiChatModel(BaseModel):
                     content=injector.process(sc.content),
                     tool_call_chunks=sc.tool_call_chunks,
                     finish_reason=sc.finish_reason,
+                    reasoning=sc.reasoning,
                 )
             yield sc
+
+        self._record_native_usage(
+            stream_usage,
+            (time.time() - started) * 1000.0,
+            "WiiiChatModel.astream",
+        )
 
     # ------------------------------------------------------------------ #
     # bind_tools / with_structured_output

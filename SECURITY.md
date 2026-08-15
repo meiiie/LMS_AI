@@ -1,60 +1,68 @@
-# Security Policy
+# Wiii security policy
 
-## Supported Versions
+## Reporting a vulnerability
 
-| Version | Supported |
-|---------|-----------|
-| main branch | Yes |
-| Older commits | No |
+Do not open a public issue, discussion, or pull request for a suspected
+vulnerability or exposed secret.
 
-## Reporting a Vulnerability
+Use a [private GitHub security advisory](https://github.com/meiiie/wiii/security/advisories/new).
+If that channel is unavailable, contact the maintainer at
+`meokhp888@gmail.com` with the subject `Wiii security report`.
 
-If you discover a security vulnerability in Wiii, please report it responsibly.
+Include, when safe:
 
-**Do NOT open a public GitHub issue for security vulnerabilities.**
+- affected commit/version and surface;
+- reproduction steps or a minimal proof of concept;
+- expected impact and required privileges;
+- whether credentials, personal data, tenant data, or external side effects may
+  be involved;
+- a suggested mitigation, if known.
 
-### How to Report
+Do not include live secrets or unrelated private data. Revoke an exposed
+credential first, then report only a redacted identifier.
 
-1. Email: **security@wiii.lab** (or open a private security advisory on GitHub)
-2. Include:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if any)
+## Supported versions
 
-### What to Expect
+| Line | Security support |
+| --- | --- |
+| Latest stable GitHub Release | Supported |
+| `main` | Development branch; fixes land here before release |
+| Older releases | Not supported unless a release notice says otherwise |
 
-- **Acknowledgment**: Within 48 hours of your report
-- **Assessment**: We will evaluate the severity and impact within 7 days
-- **Fix**: Critical vulnerabilities will be patched as quickly as possible
-- **Disclosure**: We will coordinate with you on public disclosure timing
+## Response process
 
-## Security Measures
+The Wiii Lab will acknowledge a complete report as capacity allows, validate
+impact, coordinate a fix and release, and agree on disclosure timing with the
+reporter. Critical credential exposure or active exploitation is handled ahead
+of normal issue work.
 
-Wiii implements the following security practices:
+## Security boundaries
 
-- **Authentication**: Dual auth (API Key + JWT) with timing-safe comparison (`hmac.compare_digest`)
-- **Authorization**: Role-based access control (student, teacher, admin) with ownership checks
-- **Input validation**: Pydantic models with field constraints (e.g., message max 10,000 chars)
-- **Rate limiting**: Per-role rate limits via slowapi (Valkey-backed in production)
-- **Sandboxing**: Filesystem and code execution tools run in restricted sandboxes
-- **Error handling**: Generic error messages in HTTP responses; details logged server-side only
-- **Secrets management**: Environment variables via `.env` — never committed to version control
-- **Request tracing**: Auto-generated `X-Request-ID` for log correlation
+High-risk areas include:
 
-## Scope
+- JWT/API-key/OAuth/Magic Link and adapter token exchange;
+- organization, ownership, and cross-user data isolation;
+- semantic memory and model-visible context provenance;
+- ACP/MCP/tools, host actions, filesystem access, and code execution;
+- Wiii Connect vaults, provider scopes, previews, approvals, and mutations;
+- webhook signature and replay protection;
+- desktop session persistence and unknown mutation outcomes;
+- migrations, release signing, update trust, CI credentials, and artifacts.
 
-The following are **in scope** for security reports:
+Expected controls include timing-safe secret comparison, server-side
+authorization, least privilege, bounded input and rate limits, sanitized
+errors/logs, preview-before-apply where applicable, no automatic replay of
+unknown mutations, and verifiable release artifacts.
 
-- Authentication/authorization bypasses
-- SQL injection, XSS, SSRF, or other injection attacks
-- Sensitive data exposure
-- Sandbox escapes (filesystem tools, code execution)
-- Privilege escalation
+## Out of scope
 
-The following are **out of scope**:
+- Vulnerabilities that require an unsupported modified build and do not affect
+  upstream Wiii.
+- Reports consisting only of automated scanner output without a reproducible
+  security impact.
+- Social engineering, physical access, or third-party service issues that do
+  not arise from Wiii's integration.
+- Denial-of-service claims that only demonstrate expected rate limiting.
 
-- Denial of service via rate limiting (by design)
-- Issues in third-party dependencies (report to their maintainers)
-- Social engineering attacks
-- Issues requiring physical access to the server
+Third-party dependency vulnerabilities that affect a shipped Wiii version are
+in scope even when the root defect belongs upstream.

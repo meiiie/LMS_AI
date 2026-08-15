@@ -4,12 +4,25 @@
  * Container with 4 sub-tabs: 2D Scatter | 3D Scatter | Đồ thị | RAG Flow.
  * Renders below the document list in OrgManagerKnowledge.
  */
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { ScatterChart, Network, GitBranch, Search, Eye } from "lucide-react";
-import { KnowledgeScatter2D } from "./KnowledgeScatter2D";
-import { KnowledgeScatter3D } from "./KnowledgeScatter3D";
-import { KnowledgeGraph } from "./KnowledgeGraph";
-import { RagFlowVisualizer } from "./RagFlowVisualizer";
+
+const KnowledgeScatter2D = lazy(async () => {
+  const mod = await import("./KnowledgeScatter2D");
+  return { default: mod.KnowledgeScatter2D };
+});
+const KnowledgeScatter3D = lazy(async () => {
+  const mod = await import("./KnowledgeScatter3D");
+  return { default: mod.KnowledgeScatter3D };
+});
+const KnowledgeGraph = lazy(async () => {
+  const mod = await import("./KnowledgeGraph");
+  return { default: mod.KnowledgeGraph };
+});
+const RagFlowVisualizer = lazy(async () => {
+  const mod = await import("./RagFlowVisualizer");
+  return { default: mod.RagFlowVisualizer };
+});
 
 type VizTab = "scatter2d" | "scatter3d" | "graph" | "ragflow";
 
@@ -90,10 +103,18 @@ export function KnowledgeVisualizer({
 
       {/* Tab content */}
       <div className="min-h-[300px]">
-        {activeTab === "scatter2d" && <KnowledgeScatter2D orgId={orgId} />}
-        {activeTab === "scatter3d" && <KnowledgeScatter3D orgId={orgId} />}
-        {activeTab === "graph" && <KnowledgeGraph orgId={orgId} />}
-        {activeTab === "ragflow" && <RagFlowVisualizer orgId={orgId} />}
+        <Suspense
+          fallback={
+            <div className="grid min-h-[300px] place-items-center text-xs text-text-tertiary" role="status">
+              Wiii đang mở công cụ trực quan hóa…
+            </div>
+          }
+        >
+          {activeTab === "scatter2d" && <KnowledgeScatter2D orgId={orgId} />}
+          {activeTab === "scatter3d" && <KnowledgeScatter3D orgId={orgId} />}
+          {activeTab === "graph" && <KnowledgeGraph orgId={orgId} />}
+          {activeTab === "ragflow" && <RagFlowVisualizer orgId={orgId} />}
+        </Suspense>
       </div>
     </div>
   );

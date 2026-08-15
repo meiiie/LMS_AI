@@ -226,17 +226,28 @@ class TestSSEMetadataMood:
 # =============================================================================
 
 class TestRouterRegistration:
-    """Tests that new routers are registered."""
+    """Tests that new routers are registered.
+
+    Issue #210: newer FastAPI represents ``include_router`` entries as opaque
+    ``_IncludedRouter`` objects (no ``.path``, no ``.routes``) that only
+    materialize when the app builds its schema. Registration is therefore
+    asserted through the OpenAPI paths — the drift-proof public surface.
+    """
+
+    @staticmethod
+    def _v1_openapi_paths() -> list[str]:
+        from fastapi import FastAPI
+        from app.api.v1 import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return list(app.openapi().get("paths", {}).keys())
 
     def test_character_router_registered(self):
         """Character router is in v1 routes."""
-        from app.api.v1 import router
-        paths = [r.path for r in router.routes]
-        assert any("/character" in p for p in paths)
+        assert any("/character" in p for p in self._v1_openapi_paths())
 
     def test_mood_router_registered(self):
         """Mood router is in v1 routes."""
-        from app.api.v1 import router
-        paths = [r.path for r in router.routes]
-        assert any("/mood" in p for p in paths)
+        assert any("/mood" in p for p in self._v1_openapi_paths())
 

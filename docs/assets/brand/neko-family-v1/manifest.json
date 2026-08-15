@@ -1,0 +1,233 @@
+{
+  "schema_version": "wiii.neko.brand.v1",
+  "status": "approved_visual_direction",
+  "primary_mark": "Neko Peek",
+  "supporting_poses": [
+    "Neko Mochi",
+    "Neko Nap",
+    "Neko Tilt"
+  ],
+  "generated_with": "OpenAI built-in imagegen plus deterministic Pillow export",
+  "assets": [
+    {
+      "path": "BRAND_SYSTEM.md",
+      "bytes": 5773,
+      "sha256": "e566bffede6aea7aa30991623b8a7eb2a1cfead62cb882be3f0f17d6924aaba0"
+    },
+    {
+      "path": "concepts/neko-mochi-concept.png",
+      "bytes": 383798,
+      "sha256": "7982522e8d43c515eab78ece0cd9ed7999db5e1192c3a20504eafefce6341842"
+    },
+    {
+      "path": "concepts/neko-nap-concept.png",
+      "bytes": 378255,
+      "sha256": "ab8b188fdd34c77f33a6496c1c91e0730208ef42a43276d5493f4fa1202108f7"
+    },
+    {
+      "path": "concepts/neko-peek-concept.png",
+      "bytes": 385404,
+      "sha256": "ee4de6f0c39383b5f5b4c547918185bc7f04faca7d3ec9806d951f6bf8b02449"
+    },
+    {
+      "path": "concepts/neko-tilt-concept.png",
+      "bytes": 378200,
+      "sha256": "34a94fad8e66279fa4c43f87efcd68b07e77db7b2198f09f9ec7bc2917044ed3"
+    },
+    {
+      "path": "logo/neko-peek-mark-mono.svg",
+      "bytes": 632,
+      "sha256": "0a4d133cf2b28f59e740e003e41a3659d034d95f96bab052604e7f5c4286fc9a"
+    },
+    {
+      "path": "logo/neko-peek-mark-on-dark.svg",
+      "bytes": 807,
+      "sha256": "e989a28870b7326b76e22c3cdc0e6eff51b5f135249519ee573732d0e3c85231"
+    },
+    {
+      "path": "logo/neko-peek-mark.svg",
+      "bytes": 776,
+      "sha256": "d53531fb66335ef86f03951d79caf19bdc30baf51ab93936e486276cbafc4e82"
+    },
+    {
+      "path": "logo/neko-peek-wordmark.svg",
+      "bytes": 1012,
+      "sha256": "22ab93dfd1c76dc41f2ac58a81f0f5068923738434b0b2ac726a373351b0865e"
+    },
+    {
+      "path": "logo/neko-peek.ico",
+      "bytes": 101625,
+      "sha256": "fb9fac3fbeced5828228f9c9625f3bbd5048e0231aa7dae767d3b2bf645d24f9"
+    },
+    {
+      "path": "logo/png/neko-peek-app-icon-master.png",
+      "bytes": 782265,
+      "sha256": "05cda3b54fc238c2474c8cdaaafce2bb64fda3baca1d475d17aa7e31886327fa"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-1024.png",
+      "bytes": 782265,
+      "sha256": "05cda3b54fc238c2474c8cdaaafce2bb64fda3baca1d475d17aa7e31886327fa"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-128.png",
+      "bytes": 20387,
+      "sha256": "7c6caa681a9a617734cf387570952b30605368da8cd1ba35680bc8f778d557d1"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-16.png",
+      "bytes": 883,
+      "sha256": "78b644203a26036f3458931cafa091c5539f5efbf661492d6729c0a965c20686"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-180.png",
+      "bytes": 34446,
+      "sha256": "aea9553bd0921c0ff38cc90bf354cc0964a3f591692cf199270ca7b0befcfddc"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-192.png",
+      "bytes": 39085,
+      "sha256": "ca003f61fd0f4c509fa13c7bd6558e916c0fd72c449376254149877119573347"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-20.png",
+      "bytes": 1242,
+      "sha256": "f4b83c9078a3e9180f3512ca2ead6f9121df7b7e418294235ca7db698665d23e"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-24.png",
+      "bytes": 1643,
+      "sha256": "ecf0fe022dbd2d93ea6de161aff4f9ab9c82014841ae79cab52e0191c6f785cb"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-256.png",
+      "bytes": 61945,
+      "sha256": "c0a8e64be7164c8c0cac514f66ad959aeeabfb77d2141bdfdbe4864629d8ed00"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-32.png",
+      "bytes": 2486,
+      "sha256": "6e7a1d23797cb0539fba07c51b13bd441de47d93507608028385b6634d81bf41"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-48.png",
+      "bytes": 4551,
+      "sha256": "c0e4cfda87edeb1bc1ce0045614c679cc2f0fa5a1f7a7f8805245b1fbc63019c"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-512.png",
+      "bytes": 226098,
+      "sha256": "c535abf36321c14d70d7fe3daf5aa8fc4ee9863e6834bb03e7ac94f33265634e"
+    },
+    {
+      "path": "logo/png/neko-peek-icon-64.png",
+      "bytes": 7232,
+      "sha256": "492246aeb71185c2f4c7174466f1cf0ce3bd3dfda8ad0e95f7ae79728807146e"
+    },
+    {
+      "path": "mascot/neko-peek-master.png",
+      "bytes": 842468,
+      "sha256": "0224e75562c155e8c93c260631b3e2fb9fc6415d228449189214873d346482be"
+    },
+    {
+      "path": "previews/neko-family-overview.png",
+      "bytes": 609318,
+      "sha256": "f2d29edd03856471d0a64298a82d90bfdde499f088fd7884989a71e5a7e73ff8"
+    },
+    {
+      "path": "previews/neko-peek-on-dark.png",
+      "bytes": 529657,
+      "sha256": "48b18614125b34c1470af5b48fde1b2c270f6b8b37e2f7b5f6839fc77b17edab"
+    },
+    {
+      "path": "previews/neko-peek-on-light.png",
+      "bytes": 560010,
+      "sha256": "691107b8b67bc5d2e7b8d3d5fece144343b657efcab960abe805f38691c68f7c"
+    },
+    {
+      "path": "previews/neko-peek-small-size-strip.png",
+      "bytes": 51985,
+      "sha256": "daaf72ac6fc8540a956d9d1c21c1429b4dc98111400837ba9137a47eb927eb7b"
+    },
+    {
+      "path": "previews/neko-peek-vector-mark-on-dark.png",
+      "bytes": 21294,
+      "sha256": "3b0520c58475ef0edf87fd7b5ed98293436c08ff78d83028b619aac44dd27bc6"
+    },
+    {
+      "path": "previews/neko-peek-vector-mark.png",
+      "bytes": 20231,
+      "sha256": "ca0fc36f550a4beb4f9547e5c21c5062dff0be2a7ac87ca3ed25861bf2742a60"
+    },
+    {
+      "path": "previews/neko-peek-vector-wordmark.png",
+      "bytes": 23794,
+      "sha256": "ad69b286f02310b0434ee87e1a70ac18482ec1269a888376658ee3d6a128116c"
+    },
+    {
+      "path": "PROMPTS.md",
+      "bytes": 3110,
+      "sha256": "3101251f2b165fd9aa55383d1504f37598d2d17fea787f356d1334f49ed8a9b8"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2974,
+      "sha256": "857d5637d6c034f756d634c5a9080cc13ce508d4322a3a2e1822ec16aa5cb03e"
+    },
+    {
+      "path": "scripts/export_neko_family.py",
+      "bytes": 11166,
+      "sha256": "6cf50abeccf300738f42f3d3517723fed72853fc95cee6591c85be0a7b027dc1"
+    },
+    {
+      "path": "scripts/render_social_surfaces.mjs",
+      "bytes": 2218,
+      "sha256": "1d674003373f1d027f31ed9fc0019be19b548121048fec77281ffb3122093d1d"
+    },
+    {
+      "path": "scripts/render_svg_previews.mjs",
+      "bytes": 2357,
+      "sha256": "416c2108d5c1128c91849ad65a5280d95a98b5b129dd5ec9bf7558fc74a6bd65"
+    },
+    {
+      "path": "scripts/sync_wiii_desktop_brand.py",
+      "bytes": 2404,
+      "sha256": "5e27724e02130abddc64aa4f0a7a9e2af41f9c2cc1657d8305bc649fa86eab19"
+    },
+    {
+      "path": "scripts/verify_neko_family.py",
+      "bytes": 4168,
+      "sha256": "7950fc495fba774697b222d7be2f7d0e8251fc66052c23bf7003e994632d8cb6"
+    },
+    {
+      "path": "social/wiii-readme-banner.png",
+      "bytes": 439757,
+      "sha256": "3a96b9bc85bf1c9056beb21e49c4a80cac192a76c6dad526e62cf01efbe08d8f"
+    },
+    {
+      "path": "social/wiii-readme-banner.svg",
+      "bytes": 5043,
+      "sha256": "ae78cdf25e112840d12315ae1625e4291cd61c4d6efd53e63dca30e81168f1d3"
+    },
+    {
+      "path": "social/wiii-social-card.png",
+      "bytes": 353436,
+      "sha256": "f110b045c1fdf55a32dd04d97b451bf21fdc0e02ccf5235bba46ad9be50e2d6d"
+    },
+    {
+      "path": "social/wiii-social-card.svg",
+      "bytes": 3123,
+      "sha256": "99af0307438138895ce2326874e5af237598405216b7b168470866c1508674d9"
+    },
+    {
+      "path": "source/neko-family-approved-board-v5.png",
+      "bytes": 1631815,
+      "sha256": "306f84ab8638dec6ad87dd318b4c3087d5d3a6dd99d0fe79c64aa46837534d10"
+    },
+    {
+      "path": "source/neko-peek-chroma-source.png",
+      "bytes": 1386727,
+      "sha256": "09ab93379348b785f186be266d288910c6f7df163631b370e0471aad5502e88f"
+    }
+  ]
+}

@@ -10,13 +10,13 @@
 
 ## Product Release Lane
 
-For product launches and release-candidate deploys, use the repository-level runbook:
+For product launches and release-candidate deploys, use the repository-level standard:
 
 ```text
-docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md
+docs/releases/WIII_RELEASE_STANDARD.md
 ```
 
-That runbook is the canonical checklist for pinned-SHA deploys, GHCR image verification, smoke tests, rollback, and parallel-team safety. The short version is: deploy from a clean `main` checkout, use matching `sha-...` tags for app and nginx, and probe the app through local nginx (`http://localhost:8080`) because the app container is not exposed on the host.
+That standard governs version, reviewed release commits, immutable artifacts, checksums, provenance, and rollback. This deployment guide owns the backend-specific pinned-SHA/GHCR rollout and smoke sequence. Deploy from a clean `main` checkout, use matching `sha-...` tags for app and nginx, and probe through local nginx (`http://localhost:8080`) because the app container is not exposed on the host.
 
 Current GCP rebuild helper:
 
@@ -26,8 +26,7 @@ ZONE=asia-southeast1-c \
   bash maritime-ai-service/scripts/deploy/provision-gcp-vm.sh
 ```
 
-This creates a separate `wiii-production` VM. Do not deploy Wiii containers onto the existing `lms-production` VM.
-Canonical target details live in `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md#current-gcp-rebuild-target`.
+This creates a separate `wiii-production` VM. Do not deploy Wiii containers onto an unrelated host application VM.
 
 ---
 
@@ -248,7 +247,7 @@ Validation completed so far:
 
 Current release controls:
 
-- `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md`
+- `docs/releases/WIII_RELEASE_STANDARD.md`
 
 Local `npm run build:embed` remains useful for developer verification, but it is no longer part of the production deployment contract.
 

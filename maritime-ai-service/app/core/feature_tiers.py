@@ -204,7 +204,6 @@ FEATURE_TIER_GROUPS: Final[dict[FeatureTier, frozenset[str]]] = {
             "enable_cross_soul_query",
             "enable_messenger_webhook",
             "enable_neo4j",
-            "enable_oauth_token_store",
             "enable_subagent_architecture",
             "enable_telegram",
             "enable_zalo",

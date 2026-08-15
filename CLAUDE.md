@@ -10,5 +10,9 @@ Claude Code agents working in Wiii must use the same canonical instructions as e
 2. Follow `docs/operations/WIII_GITHUB_GOVERNANCE.md` for issue, branch, PR, review, and merge workflow.
 3. Use `.agents/skills/` plus the relevant `docs/` area for project-specific skills and source-of-truth context.
 4. Treat local `.claude/` and `.Codex/` folders as ignored scratch space only. Do not commit them or use them as governance, runtime, memory, or architecture truth.
+5. For Neko identity or motion work, read the `## Wiii + Neko Brand Memory`
+   section in `AGENTS.md`, then the canonical brand and motion-lab documents it
+   links. The approved Neko family must not be redesigned without explicit
+   project-owner approval.
 
 The old tracked `.claude/` coordination tree was removed from `main` on 2026-05-10 as part of issue #279 so Wiii keeps one clean project control plane.

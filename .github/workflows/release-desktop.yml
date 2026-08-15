@@ -1,0 +1,410 @@
+name: Desktop Release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-desktop.yml'
+      - 'tools/release/**'
+      - 'docs/releases/**'
+      - 'wiii-desktop/src-tauri/tauri.conf.json'
+      - 'VERSION'
+      - 'CHANGELOG.md'
+  workflow_dispatch:
+    inputs:
+      release_scope:
+        description: Release matrix to build (emergency scope requires a stable tag and protected approval)
+        required: true
+        default: complete
+        type: choice
+        options:
+          - complete
+          - windows-only-emergency
+      emergency_reason:
+        description: Public incident or runner-outage reason (required for emergency scope)
+        required: false
+        type: string
+  push:
+    tags:
+      - 'wiii-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release commit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.release-plan.outputs.matrix }}
+      release_scope: ${{ steps.release-plan.outputs.release_scope }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Plan governed release matrix
+        id: release-plan
+        env:
+          EMERGENCY_REASON_INPUT: ${{ inputs.emergency_reason }}
+          EVENT_NAME_VALUE: ${{ github.event_name }}
+          REF_TYPE_VALUE: ${{ github.ref_type }}
+          RELEASE_SCOPE_INPUT: ${{ inputs.release_scope }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_scope="${RELEASE_SCOPE_INPUT:-complete}"
+          if [[ "$release_scope" == 'windows-only-emergency' ]]; then
+            if [[ "$EVENT_NAME_VALUE" != 'workflow_dispatch' || "$REF_TYPE_VALUE" != 'tag' ]]; then
+              echo 'Windows-only emergency publication requires workflow_dispatch on an existing stable tag.' >&2
+              exit 1
+            fi
+            reason="${EMERGENCY_REASON_INPUT//[[:space:]]/}"
+            if [[ ${#reason} -lt 20 ]]; then
+              echo 'Emergency publication requires a meaningful public reason of at least 20 non-space characters.' >&2
+              exit 1
+            fi
+            matrix='{"include":[{"release_target":"windows-x64","runner":"windows-latest","rust_target":""}]}'
+          else
+            release_scope='complete'
+            matrix='{"include":[{"release_target":"windows-x64","runner":"windows-latest","rust_target":""},{"release_target":"linux-x64","runner":"ubuntu-22.04","rust_target":""},{"release_target":"macos-arm64","runner":"macos-latest","rust_target":"aarch64-apple-darwin"},{"release_target":"macos-x64","runner":"macos-latest","rust_target":"x86_64-apple-darwin"}]}'
+          fi
+          echo "release_scope=$release_scope" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release metadata
+        env:
+          REF_NAME_VALUE: ${{ github.ref_name }}
+          REF_TYPE_VALUE: ${{ github.ref_type }}
+        shell: bash
+        run: |
+          arguments=(tools/release/wiii_release.py check --out artifacts/release-check.json)
+          if [[ "$REF_TYPE_VALUE" == 'tag' ]]; then
+            arguments+=(--tag "$REF_NAME_VALUE")
+          fi
+          python "${arguments[@]}"
+
+      - name: Run release tool tests
+        run: python -m unittest discover -s tools/release -p 'test_*.py' -v
+
+      - name: Install desktop dependencies
+        working-directory: wiii-desktop
+        run: npm ci
+
+      - name: Test desktop
+        working-directory: wiii-desktop
+        run: npm test -- --run
+
+      - name: Build web surfaces
+        working-directory: wiii-desktop
+        run: |
+          npm run build
+          npm run build:embed
+
+  build-desktop:
+    name: Build ${{ matrix.release_target }}
+    needs: validate
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.validate.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    environment: ${{ startsWith(github.ref, 'refs/tags/') && 'release' || 'candidate' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Select stable Rust
+        run: rustup default stable
+
+      - name: Add macOS Rust target
+        if: startsWith(matrix.release_target, 'macos-')
+        env:
+          RUST_TARGET_VALUE: ${{ matrix.rust_target }}
+        run: rustup target add "$RUST_TARGET_VALUE"
+
+      - name: Install Linux system dependencies
+        if: matrix.release_target == 'linux-x64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils
+
+      - name: Install desktop dependencies
+        working-directory: wiii-desktop
+        run: npm ci
+
+      - name: Import stable Windows code-signing certificate
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        id: windows-signing
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WIII_WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WIII_WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw 'Stable releases require the protected Wiii Windows signing secrets.'
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'wiii-release-certificate.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $certificate.Thumbprint) { throw 'The Wiii signing certificate could not be imported.' }
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+          Remove-Item -LiteralPath $certificatePath -Force
+
+      - name: Create stable Windows signing configuration
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        working-directory: wiii-desktop
+        env:
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ steps.windows-signing.outputs.thumbprint }}
+        shell: pwsh
+        run: |
+          $configuration = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT
+                digestAlgorithm = 'sha256'
+                timestampUrl = 'http://timestamp.digicert.com'
+              }
+            }
+          }
+          $configuration | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 release-signing.json
+
+      - name: Build Windows candidate installer
+        if: matrix.release_target == 'windows-x64' && !startsWith(github.ref, 'refs/tags/')
+        working-directory: wiii-desktop
+        run: npm run tauri -- build --bundles nsis
+
+      - name: Build signed Windows stable installer
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        working-directory: wiii-desktop
+        run: npm run tauri -- build --bundles nsis --config release-signing.json
+
+      - name: Build Linux packages
+        if: matrix.release_target == 'linux-x64'
+        working-directory: wiii-desktop
+        run: npm run tauri -- build --bundles deb,appimage
+
+      - name: Create unnotarized macOS configuration
+        if: startsWith(matrix.release_target, 'macos-')
+        working-directory: wiii-desktop
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          Path('release-macos-unnotarized.json').write_text(
+              json.dumps({'bundle': {'macOS': {'signingIdentity': '-'}}}),
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Build unnotarized macOS disk image
+        if: startsWith(matrix.release_target, 'macos-')
+        working-directory: wiii-desktop
+        env:
+          RUST_TARGET_VALUE: ${{ matrix.rust_target }}
+        run: npm run tauri -- build --target "$RUST_TARGET_VALUE" --bundles dmg --config release-macos-unnotarized.json
+
+      - name: Normalize release assets
+        env:
+          GIT_SHA_VALUE: ${{ github.sha }}
+          RELEASE_TARGET_VALUE: ${{ matrix.release_target }}
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          python tools/release/normalize_desktop_bundle.py \
+            --source-root wiii-desktop/src-tauri/target \
+            --output-dir artifacts/release \
+            --release-target "$RELEASE_TARGET_VALUE" \
+            --version "$version" \
+            --git-sha "$GIT_SHA_VALUE"
+          python tools/release/wiii_release.py notes "$version" --out artifacts/release/release-notes.md
+
+      - name: Verify stable Windows signature
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        env:
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ steps.windows-signing.outputs.thumbprint }}
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'artifacts/release' -Filter '*.exe'
+          if ($installer.Count -ne 1) { throw "Expected one normalized Windows installer, found $($installer.Count)." }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($signature.Status -ne 'Valid') { throw "Stable installer signature is $($signature.Status)." }
+          if (-not $signature.SignerCertificate -or
+              $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_CERTIFICATE_THUMBPRINT) {
+            throw 'Stable installer was signed by an unexpected certificate.'
+          }
+
+      - name: Upload candidate or stable bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: Wiii-Workbench-${{ github.sha }}-${{ matrix.release_target }}
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-stable:
+    name: Attest and publish stable release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [validate, build-desktop]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    # Write scopes are isolated to the post-build publication job. The protected
+    # `release` environment on build jobs remains the human approval boundary.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the tagged release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+
+      - name: Download verified platform bundles
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: Wiii-Workbench-${{ github.sha }}-*
+          path: artifacts/platforms
+          merge-multiple: false
+
+      - name: Verify release asset contracts
+        env:
+          GIT_SHA_VALUE: ${{ github.sha }}
+          RELEASE_SCOPE_VALUE: ${{ needs.validate.outputs.release_scope }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          python tools/release/verify_desktop_release.py \
+            --root artifacts/platforms \
+            --version "$version" \
+            --git-sha "$GIT_SHA_VALUE" \
+            --release-scope "$RELEASE_SCOPE_VALUE" \
+            --out artifacts/desktop-release-verification.json
+          find artifacts/platforms -type f -print | sort
+
+      - name: Collect attestation subjects
+        id: release-assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t subjects < <(
+            find artifacts/platforms -type f \
+              \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.sha256' -o -name '*_release-manifest.json' \) \
+              -print | sort
+          )
+          [[ ${#subjects[@]} -gt 0 ]] || { echo 'No attestation subjects found.' >&2; exit 1; }
+          {
+            echo 'subject_paths<<EOF'
+            printf '%s\n' "${subjects[@]}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Attest stable release provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: ${{ steps.release-assets.outputs.subject_paths }}
+
+      - name: Prepare public release notes
+        env:
+          EMERGENCY_REASON_INPUT: ${{ inputs.emergency_reason }}
+          RELEASE_SCOPE_VALUE: ${{ needs.validate.outputs.release_scope }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes_source="$(find artifacts/platforms -type f -name release-notes.md -print -quit)"
+          [[ -n "$notes_source" ]] || { echo 'Release notes are missing.' >&2; exit 1; }
+          cp "$notes_source" artifacts/publish-release-notes.md
+          if [[ "$RELEASE_SCOPE_VALUE" == 'windows-only-emergency' ]]; then
+            {
+              echo
+              echo '## Emergency platform availability notice'
+              echo
+              echo 'This protected break-glass publication contains only the signed Windows x64 package.'
+              echo 'Linux and macOS packages are temporarily omitted and will be backfilled by a complete, attested matrix run.'
+              echo
+              printf '**Reason:** %s\n' "$EMERGENCY_REASON_INPUT"
+            } >> artifacts/publish-release-notes.md
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SCOPE_VALUE: ${{ needs.validate.outputs.release_scope }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#wiii-v}"
+          mapfile -d '' assets < <(
+            find artifacts/platforms -type f \
+              \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.sha256' -o -name '*_release-manifest.json' \) \
+              -print0 | sort -z
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            if [[ "$RELEASE_SCOPE_VALUE" != 'complete' ]]; then
+              echo 'An existing release may only be updated by a complete matrix backfill.' >&2
+              exit 1
+            fi
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "Wiii $version" \
+              --notes-file artifacts/publish-release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --verify-tag \
+              --title "Wiii $version" \
+              --notes-file artifacts/publish-release-notes.md
+          fi

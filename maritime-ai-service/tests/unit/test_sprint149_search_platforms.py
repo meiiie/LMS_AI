@@ -763,66 +763,11 @@ class TestConfigAdditions:
         assert "enable_tiktok_native_api" in fields
         assert "tiktok_client_key" in fields
         assert "tiktok_client_secret" in fields
-        assert "enable_oauth_token_store" in fields
         assert "oauth_encryption_key" in fields
 
     def test_sprint149_config_defaults(self):
         from app.core.config import Settings
         assert Settings.model_fields["enable_tiktok_native_api"].default is False
-        assert Settings.model_fields["enable_oauth_token_store"].default is False
         assert "google_shopping" in Settings.model_fields["product_search_platforms"].default
 
 
-# =============================================================================
-# 12. OAuth Token Store (Skeleton)
-# =============================================================================
-
-
-class TestOAuthTokenStore:
-    @pytest.mark.asyncio
-    async def test_store_and_retrieve(self):
-        from app.engine.search_platforms.oauth.token_store import OAuthTokenStore, OAuthToken
-        store = OAuthTokenStore()
-        token = OAuthToken(user_id="u1", platform_id="shopee", access_token="abc123")
-        await store.store_token(token)
-        retrieved = await store.get_token("u1", "shopee")
-        assert retrieved is not None
-        assert retrieved.access_token == "abc123"
-
-    @pytest.mark.asyncio
-    async def test_delete_token(self):
-        from app.engine.search_platforms.oauth.token_store import OAuthTokenStore, OAuthToken
-        store = OAuthTokenStore()
-        token = OAuthToken(user_id="u1", platform_id="lazada", access_token="xyz")
-        await store.store_token(token)
-        deleted = await store.delete_token("u1", "lazada")
-        assert deleted is True
-        assert await store.get_token("u1", "lazada") is None
-
-    @pytest.mark.asyncio
-    async def test_has_valid_token(self):
-        import time
-        from app.engine.search_platforms.oauth.token_store import OAuthTokenStore, OAuthToken
-        store = OAuthTokenStore()
-
-        # Valid token
-        token = OAuthToken(
-            user_id="u1", platform_id="shopee",
-            access_token="abc", expires_at=time.time() + 3600,
-        )
-        await store.store_token(token)
-        assert await store.has_valid_token("u1", "shopee") is True
-
-        # Expired token
-        expired = OAuthToken(
-            user_id="u2", platform_id="shopee",
-            access_token="old", expires_at=time.time() - 1,
-        )
-        await store.store_token(expired)
-        assert await store.has_valid_token("u2", "shopee") is False
-
-    @pytest.mark.asyncio
-    async def test_nonexistent_token(self):
-        from app.engine.search_platforms.oauth.token_store import OAuthTokenStore
-        store = OAuthTokenStore()
-        assert await store.has_valid_token("nobody", "nothing") is False

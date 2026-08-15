@@ -69,7 +69,6 @@ from app.engine.llm_route_runtime import (
     resolve_runtime_route_impl,
 )
 from app.engine.llm_pool_legacy_runtime import (
-    attach_tracking_callback_impl,
     create_instance_legacy_impl,
 )
 from app.engine.llm_pool_custom_models import (
@@ -382,15 +381,6 @@ class LLMPool:
             settings_obj=settings,
             create_provider_fn=create_provider,
             logger_obj=logger,
-            attach_tracking_callback_fn=cls._attach_tracking_callback,
-        )
-
-    @classmethod
-    def _attach_tracking_callback(cls, llm: Any, tier_key: str) -> None:
-        attach_tracking_callback_impl(
-            llm=llm,
-            tier_key=tier_key,
-            logger_obj=logger,
         )
 
     @classmethod
@@ -625,7 +615,6 @@ class LLMPool:
             thinking_tier_cls=ThinkingTier,
             normalize_provider=cls._normalize_provider,
             ensure_provider=cls._ensure_provider,
-            attach_tracking_callback=cls._attach_tracking_callback,
             tag_runtime_metadata=cls._tag_runtime_metadata,
             logger_obj=logger,
         )

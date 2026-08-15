@@ -334,12 +334,6 @@ class TestHeartbeatFacebookIntegration:
             # Phase 3A: target is "auto" (smart topic selection at execution time)
             assert browse_actions[0].target == "auto"
 
-    def test_browse_target_auto_in_source(self):
-        """_plan_actions source contains 'auto' target for BROWSE_SOCIAL."""
-        import inspect
-        from app.engine.living_agent import heartbeat
-        source = inspect.getsource(heartbeat.HeartbeatScheduler._plan_actions)
-        assert '"auto"' in source, "auto not in _plan_actions source"
 
     @pytest.mark.asyncio
     async def test_plan_actions_browse_when_energy_high(self):

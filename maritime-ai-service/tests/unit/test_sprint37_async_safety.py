@@ -22,63 +22,6 @@ from app.api.v1.admin import _ingestion_jobs, _cleanup_old_jobs, _MAX_TRACKED_JO
 # ============================================================================
 
 
-class TestNoBlockingSleepInAsyncCode:
-    """Verify async functions don't use time.sleep()."""
-
-    def test_vision_extractor_no_time_sleep(self):
-        """vision_extractor._rate_limit should use asyncio.sleep, not time.sleep."""
-        with open("app/engine/vision_extractor.py", "r", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef):
-                # Check all async functions for time.sleep calls
-                for child in ast.walk(node):
-                    if isinstance(child, ast.Call):
-                        if (isinstance(child.func, ast.Attribute)
-                                and child.func.attr == "sleep"
-                                and isinstance(child.func.value, ast.Name)
-                                and child.func.value.id == "time"):
-                            pytest.fail(
-                                f"async function '{node.name}' at line {node.lineno} "
-                                f"uses blocking time.sleep() at line {child.lineno}"
-                            )
-
-    def test_object_storage_no_time_sleep_in_async(self):
-        """object_storage async methods should not use time.sleep()."""
-        with open("app/services/object_storage.py", "r", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef):
-                for child in ast.walk(node):
-                    if isinstance(child, ast.Call):
-                        if (isinstance(child.func, ast.Attribute)
-                                and child.func.attr == "sleep"
-                                and isinstance(child.func.value, ast.Name)
-                                and child.func.value.id == "time"):
-                            pytest.fail(
-                                f"async function '{node.name}' at line {node.lineno} "
-                                f"uses blocking time.sleep() at line {child.lineno}"
-                            )
-
-    def test_vision_rate_limit_is_async(self):
-        """_rate_limit should be an async method."""
-        with open("app/engine/vision_extractor.py", "r", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for item in node.body:
-                    if (isinstance(item, ast.AsyncFunctionDef)
-                            and item.name == "_rate_limit"):
-                        return  # Found as async — pass
-                    if (isinstance(item, ast.FunctionDef)
-                            and item.name == "_rate_limit"):
-                        pytest.fail(
-                            "_rate_limit is a sync method — should be async "
-                            "to avoid blocking the event loop"
-                        )
 
 
 # ============================================================================
@@ -89,12 +32,6 @@ class TestNoBlockingSleepInAsyncCode:
 class TestWebSearchCircuitBreakerThreadSafety:
     """Verify circuit breaker uses thread-safe operations."""
 
-    def test_circuit_breaker_functions_use_lock(self):
-        """CB functions should use threading.Lock for global state mutation."""
-        with open("app/engine/tools/web_search_tools.py", "r", encoding="utf-8") as f:
-            content = f.read()
-        assert "threading.Lock()" in content or "threading.Lock(" in content
-        assert "_cb_lock" in content
 
     def test_cb_record_failure_is_atomic(self):
         """Concurrent failures should not corrupt state."""

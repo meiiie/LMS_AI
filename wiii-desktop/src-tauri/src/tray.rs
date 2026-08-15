@@ -5,7 +5,7 @@ use tauri::{
 };
 
 pub fn create_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItemBuilder::with_id("show", "Mở Wiii").build(app)?;
+    let show = MenuItemBuilder::with_id("show", "Mở Wiii Workbench").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Thoát").build(app)?;
 
     let menu = MenuBuilder::new(app)
@@ -16,7 +16,7 @@ pub fn create_tray(app: &tauri::App) -> tauri::Result<()> {
 
     let _tray = TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("Wiii — AI Assistant")
+        .tooltip("Wiii Workbench")
         .on_menu_event(move |app, event| {
             match event.id().as_ref() {
                 "show" => {

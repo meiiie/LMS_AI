@@ -109,9 +109,17 @@ export default defineConfig({
       input: isEmbed
         ? { embed: path.resolve(__dirname, "embed.html") }
         : undefined,
-      output: {
-        manualChunks,
-      },
+      // Tauri (default target): ONE bundle. Rolldown's automatic splitting
+      // emitted circularly-initialized chunks (settings-store imported
+      // zustand's `create` from the index chunk before it initialized →
+      // "create is not a function" → white screen on every production
+      // window; first seen the first time a release was built after the
+      // Vite 8 bump). The desktop app loads from disk, so code splitting
+      // buys nothing there. Embed/Web stay split for network delivery.
+      output:
+        isEmbed || isWeb
+          ? { manualChunks }
+          : { inlineDynamicImports: true },
       // Tauri-only plugins resolved at runtime (dynamic import with try/catch fallback)
       // Web + Embed: bundle everything (Tauri APIs fail gracefully via try/catch)
       external: isEmbed || isWeb ? [] : ["@fabianlars/tauri-plugin-oauth"],

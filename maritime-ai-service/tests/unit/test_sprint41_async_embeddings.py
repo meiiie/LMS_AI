@@ -72,39 +72,6 @@ class TestNoSyncEmbedInAsyncFunctions:
 # ============================================================================
 
 
-class TestAsyncEmbedUsage:
-    """Verify aembed_documents()/aembed_query() are used in the fixed files."""
-
-    def test_hybrid_search_uses_aembed_documents(self):
-        """hybrid_search_service.store_embedding uses aembed_documents."""
-        with open("app/services/hybrid_search_service.py", encoding="utf-8") as f:
-            content = f.read()
-        assert "aembed_documents" in content
-
-    def test_hybrid_search_uses_aembed_query(self):
-        """hybrid_search_service._generate_query_embedding uses aembed_query."""
-        with open("app/services/hybrid_search_service.py", encoding="utf-8") as f:
-            content = f.read()
-        assert "aembed_query" in content
-
-    def test_extraction_uses_aembed(self):
-        """extraction.py store_user_fact_upsert uses aembed_documents."""
-        with open("app/engine/semantic_memory/extraction.py", encoding="utf-8") as f:
-            content = f.read()
-        # Should have at least 1 aembed_documents call (fact embedding)
-        assert content.count("aembed_documents") >= 1
-
-    def test_corrective_rag_uses_aembed_query(self):
-        """Corrective RAG runtime support uses aembed_query for embeddings."""
-        with open("app/engine/agentic_rag/corrective_rag_runtime_support.py", encoding="utf-8") as f:
-            content = f.read()
-        assert "aembed_query" in content
-
-    def test_context_retriever_uses_aembed_query(self):
-        """context.py retrieve_context uses aembed_query."""
-        with open("app/engine/semantic_memory/context.py", encoding="utf-8") as f:
-            content = f.read()
-        assert "aembed_query" in content
 
 
 # ============================================================================

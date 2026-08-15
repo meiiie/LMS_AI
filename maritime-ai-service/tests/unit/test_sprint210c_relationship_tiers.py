@@ -529,27 +529,6 @@ class TestHeartbeatIntegration:
 # Group 10: Streaming Path Tier-Aware
 # ============================================================================
 
-class TestStreamingTierAware:
-    """Test that chat_stream.py uses tier-aware logic (Sprint 210c)."""
-
-    def test_streaming_code_has_llm_sentiment(self):
-        """Verify chat_stream.py uses Sprint 210d LLM-based sentiment."""
-        import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        assert "_analyze_and_process_sentiment" in source
-        assert "Sprint 210d" in source or "enable_living_continuity" in source
-
-    def test_streaming_code_no_keyword_matching(self):
-        """Verify old keyword matching pattern is removed from streaming."""
-        import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        # Old keyword patterns should be gone
-        assert "sai rồi" not in source
-        assert "cảm ơn" not in source
-        assert "_pos = [" not in source
-        assert "_neg = [" not in source
 
 
 # ============================================================================

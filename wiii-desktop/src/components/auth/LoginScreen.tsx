@@ -11,12 +11,15 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useAuthStore } from "@/stores/auth-store";
 import type { AuthUser } from "@/stores/auth-store";
 import type { AppSettings } from "@/api/types";
-import { WiiiAvatar } from "@/components/common/WiiiAvatar";
+import { WiiiMascot } from "@/components/common/WiiiMascot";
+import { TitleBar } from "@/components/layout/TitleBar";
+import { useModeStore } from "@/neko-chill/stores/mode-store";
 import {
   buildAuthUserFromPayload,
   toCompatibilitySettingsRole,
 } from "@/lib/auth-user";
 import { DEFAULT_SERVER_URL } from "@/lib/constants";
+import { CheckCircle2, ChevronDown, LoaderCircle, Server } from "lucide-react";
 
 // Dynamic import that bypasses Vite static analysis (plugin may not be installed)
 const _oauthMod = "@fabianlars/tauri-plugin-oauth";
@@ -36,7 +39,7 @@ export function resolveDevModeSettingsPatch(
   const patch: Partial<AppSettings> = {};
 
   if (!settings.server_url && isLocalBrowser) {
-    patch.server_url = DEFAULT_SERVER_URL || "http://localhost:8080";
+    patch.server_url = DEFAULT_SERVER_URL || "http://localhost:8000";
   }
 
   if (
@@ -50,12 +53,27 @@ export function resolveDevModeSettingsPatch(
   return patch;
 }
 
+export function normalizeServerEndpoint(value: string): string {
+  const normalized = value.trim().replace(/\/+$/, "");
+  const parsed = new URL(normalized);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error("Server URL phải bắt đầu bằng http:// hoặc https://");
+  }
+  return normalized;
+}
+
 export function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDevMode, setShowDevMode] = useState(false);
   const { settings, updateSettings } = useSettingsStore();
   const { loginWithTokens, setLegacyMode } = useAuthStore();
+  const [showConnection, setShowConnection] = useState(!settings.server_url);
+  const [serverDraft, setServerDraft] = useState(settings.server_url);
+  const [connectionState, setConnectionState] = useState<
+    "idle" | "checking" | "connected" | "error"
+  >("idle");
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
 
   // Sprint 224: Magic link email login state
   const [emailValue, setEmailValue] = useState("");
@@ -65,6 +83,43 @@ export function LoginScreen() {
 
   // Sprint 193: Detect Tauri vs browser environment
   const isTauri = !!(window as any).__TAURI_INTERNALS__;
+
+  useEffect(() => {
+    setServerDraft(settings.server_url);
+    if (!settings.server_url) setShowConnection(true);
+  }, [settings.server_url]);
+
+  const handleSaveServer = async () => {
+    setConnectionMessage(null);
+    let endpoint: string;
+    try {
+      endpoint = normalizeServerEndpoint(serverDraft);
+    } catch (validationError) {
+      setConnectionState("error");
+      setConnectionMessage(
+        validationError instanceof Error ? validationError.message : String(validationError),
+      );
+      return;
+    }
+
+    setConnectionState("checking");
+    await updateSettings({ server_url: endpoint });
+    try {
+      const response = await fetch(`${endpoint}/health`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`Health check trả về ${response.status}`);
+      setConnectionState("connected");
+      setConnectionMessage("Đã kết nối tới Wiii server.");
+    } catch (connectionError) {
+      setConnectionState("error");
+      setConnectionMessage(
+        `Đã lưu endpoint nhưng chưa thể kết nối: ${
+          connectionError instanceof Error ? connectionError.message : String(connectionError)
+        }`,
+      );
+    }
+  };
 
   // Issue #88: One-click dev login on localhost. Probe the backend's
   // /auth/dev-login/status (public, unauthenticated) on mount and only show
@@ -421,17 +476,24 @@ export function LoginScreen() {
 
   return (
     <div
-      className="flex flex-col items-center h-screen pt-[10vh]"
+      className="flex flex-col h-screen"
       style={{
         background:
           "linear-gradient(180deg, var(--surface) 0%, var(--surface-secondary) 100%)",
       }}
       aria-busy={isLoading}
     >
+      {/* Frameless window: without this the login surface has no close/
+          minimize/drag at all (live smoke finding, 2026-08-13). */}
+      <TitleBar minimal />
+      <div className="flex-1 overflow-y-auto flex flex-col items-center pt-[10vh]">
       <div className="w-full max-w-[360px] mx-auto flex flex-col items-center px-6">
-        {/* Wiii avatar */}
-        <div className="mb-5">
-          <WiiiAvatar state="idle" size={64} />
+        {/* Full product mascot; animated conversation avatar remains inside chat. */}
+        <div className="mb-4" data-testid="wiii-mascot-lockup">
+          <WiiiMascot
+            size={108}
+            className="object-contain drop-shadow-[0_14px_24px_rgba(40,38,32,0.14)]"
+          />
         </div>
 
         {/* Title */}
@@ -439,11 +501,80 @@ export function LoginScreen() {
           className="text-[32px] font-normal text-text text-center leading-tight"
           style={{ fontFamily: "var(--font-serif)" }}
         >
-          Chào mừng đến Wiii
+          Chào mừng đến Wiii Workbench
         </h1>
         <p className="mt-2 mb-7 text-[15px] text-text-tertiary text-center">
           Trợ lý AI thông minh cho học tập và nghiên cứu
         </p>
+
+        <section className="mb-4 w-full rounded-xl border border-border bg-surface/80" aria-label="Kết nối Wiii server">
+          <button
+            type="button"
+            className="flex h-10 w-full items-center gap-2 px-3 text-left text-xs text-text-secondary transition-colors hover:text-text"
+            aria-expanded={showConnection}
+            onClick={() => setShowConnection((value) => !value)}
+          >
+            <Server aria-hidden="true" size={14} />
+            <span className="min-w-0 flex-1 truncate">
+              {settings.server_url || "Chưa cấu hình Wiii server"}
+            </span>
+            {connectionState === "connected" ? (
+              <CheckCircle2 aria-hidden="true" size={14} className="text-green-600" />
+            ) : null}
+            <ChevronDown
+              aria-hidden="true"
+              size={13}
+              className={`transition-transform ${showConnection ? "rotate-180" : ""}`}
+            />
+          </button>
+          {showConnection ? (
+            <div className="border-t border-border px-3 pb-3 pt-2">
+              <label htmlFor="wiii-server-endpoint" className="text-[11px] font-medium text-text-tertiary">
+                Server URL
+              </label>
+              <div className="mt-1.5 flex gap-2">
+                <input
+                  id="wiii-server-endpoint"
+                  type="url"
+                  value={serverDraft}
+                  onChange={(event) => {
+                    setServerDraft(event.target.value);
+                    setConnectionState("idle");
+                    setConnectionMessage(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void handleSaveServer();
+                  }}
+                  placeholder="https://api.example.com"
+                  className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 text-xs text-text outline-none placeholder:text-text-quaternary focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/15"
+                />
+                <button
+                  type="button"
+                  disabled={!serverDraft.trim() || connectionState === "checking"}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-text px-3 text-xs font-medium text-surface transition-opacity hover:opacity-85 disabled:opacity-40"
+                  onClick={() => void handleSaveServer()}
+                >
+                  {connectionState === "checking" ? (
+                    <LoaderCircle aria-hidden="true" size={13} className="animate-spin" />
+                  ) : null}
+                  Lưu và thử
+                </button>
+              </div>
+              {connectionMessage ? (
+                <p
+                  className={`mt-2 text-[10.5px] leading-4 ${connectionState === "error" ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}
+                  role={connectionState === "error" ? "alert" : "status"}
+                >
+                  {connectionMessage}
+                </p>
+              ) : (
+                <p className="mt-2 text-[10px] leading-4 text-text-quaternary">
+                  Bản desktop không dùng địa chỉ nội bộ của WebView làm API endpoint.
+                </p>
+              )}
+            </div>
+          ) : null}
+        </section>
 
         {/* Issue #88: One-click local dev login. Visible only when running
             on localhost AND the backend has enable_dev_login=true. Styled
@@ -587,6 +718,16 @@ export function LoginScreen() {
           </div>
         )}
 
+        {/* Desktop-first escape hatch (#893): the login wall must never be a
+            dead end — Neko Chill works without any account. */}
+        <button
+          onClick={() => void useModeStore.getState().setMode("neko-chill")}
+          className="mt-4 text-sm text-text-secondary hover:text-text-primary underline underline-offset-4 transition-colors"
+          data-testid="login-neko-chill-escape"
+        >
+          Dùng không cần tài khoản — mở Neko Chill
+        </button>
+
         {/* Developer mode toggle */}
         {!showDevMode ? (
           <button
@@ -642,6 +783,7 @@ export function LoginScreen() {
           </p>
           <p className="text-[10px] text-text-quaternary">by The Wiii Lab</p>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wiii</title>
+<title>Wiii Workbench</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
     font-family: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
-    background: #0d0d14;
+    background: #171816;
     color: #fff;
     overflow: hidden;
     user-select: none;
@@ -37,7 +37,7 @@
     position: absolute;
     width: 260px;
     height: 260px;
-    background: radial-gradient(circle, rgba(255,165,0,0.08) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(187,221,242,0.14) 0%, transparent 70%);
     border-radius: 50%;
     top: 50%;
     left: 50%;
@@ -57,26 +57,14 @@
     flex-direction: column;
     align-items: center;
     gap: 16px;
+    transform: translateY(-26px);
   }
 
   .logo-icon {
-    width: 72px;
-    height: 72px;
-    border-radius: 18px;
-    animation: fadeInScale 0.6s ease-out;
-  }
-
-  .logo-fallback {
-    width: 72px;
-    height: 72px;
-    border-radius: 18px;
-    background: linear-gradient(135deg, #ff8c00, #ff6600);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 36px;
-    font-weight: 700;
-    color: #fff;
+    width: 116px;
+    height: 116px;
+    object-fit: contain;
+    filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.25));
     animation: fadeInScale 0.6s ease-out;
   }
 
@@ -95,7 +83,7 @@
 
   .brand-sub {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.48);
     letter-spacing: 2px;
     text-transform: uppercase;
     animation: fadeIn 0.8s ease-out 0.4s both;
@@ -131,7 +119,7 @@
   .progress-bar {
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, #ff8c00, #ffa033);
+    background: linear-gradient(90deg, #bbddf2, #f5f0e6);
     border-radius: 2px;
     transition: width 0.4s ease;
   }
@@ -151,14 +139,24 @@
     color: rgba(255, 255, 255, 0.2);
     z-index: 1;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .splash::before,
+    .logo-icon,
+    .brand-name,
+    .brand-sub,
+    .progress-area {
+      animation: none;
+    }
+  }
 </style>
 </head>
 <body>
   <div class="splash">
     <div class="logo-container">
-      <div class="logo-fallback" id="logo-fallback">W</div>
-      <div class="brand-name">Wiii</div>
-      <div class="brand-sub">by The Wiii Lab</div>
+      <img class="logo-icon" src="/wiii-mascot-full.png" alt="Neko, bạn đồng hành của Wiii Workbench">
+      <div class="brand-name">Wiii Workbench</div>
+      <div class="brand-sub">The Wiii Lab</div>
     </div>
 
     <div class="progress-area">
@@ -168,7 +166,7 @@
       <div class="progress-text" id="progress-text">Khởi động...</div>
     </div>
 
-    <div class="version">v1.0.0</div>
+    <div class="version">v1.2.0</div>
   </div>
 
   <script>
@@ -176,7 +174,7 @@
     const text = document.getElementById('progress-text');
 
     const stages = [
-      { pct: 20, msg: 'Khởi động...', delay: 300 },
+      { pct: 20, msg: 'Đang mở Workbench...', delay: 300 },
       { pct: 50, msg: 'Kết nối server...', delay: 600 },
       { pct: 75, msg: 'Tải cấu hình...', delay: 500 },
       { pct: 90, msg: 'Chuẩn bị giao diện...', delay: 400 },

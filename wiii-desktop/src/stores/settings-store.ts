@@ -66,12 +66,14 @@ function migrateLocalPreviewServerUrl(
   hostname: string,
 ): string | undefined {
   if (!isLocalPreviewHost(hostname) || !serverUrl) return serverUrl;
-  const localPreviewDefault = DEFAULT_SERVER_URL || "http://localhost:8080";
+  const localPreviewDefault = DEFAULT_SERVER_URL || "http://localhost:8000";
   if (
     serverUrl === "http://localhost:8001" ||
     serverUrl === "http://127.0.0.1:8001" ||
     serverUrl === "http://localhost:8080" ||
-    serverUrl === "http://127.0.0.1:8080"
+    serverUrl === "http://127.0.0.1:8080" ||
+    serverUrl === "http://localhost:8000" ||
+    serverUrl === "http://127.0.0.1:8000"
   ) {
     return localPreviewDefault;
   }
@@ -92,7 +94,7 @@ export function normalizeLoadedSettingsForHost(
 
   // Preview builds running on localhost should still talk to the local backend.
   if (isLocalPreviewHost(hostname) && !merged.server_url) {
-    merged.server_url = DEFAULT_SERVER_URL || "http://localhost:8080";
+    merged.server_url = DEFAULT_SERVER_URL || "http://localhost:8000";
   }
 
   return merged;

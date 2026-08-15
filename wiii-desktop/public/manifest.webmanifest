@@ -1,13 +1,13 @@
 {
-  "name": "Wiii — Trợ lý AI thông minh",
+  "name": "Wiii Workbench — Không gian làm việc AI",
   "short_name": "Wiii",
-  "description": "Trợ lý AI đa lĩnh vực cho học tập và nghiên cứu. Hỏi đáp thông minh, trực quan hóa tương tác, trí nhớ dài hạn. By The Wiii Lab.",
+  "description": "Hội thoại, agent cục bộ, tệp dự án, công cụ và preview trong một workbench có phiên bền vững.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FAF5EE",
-  "theme_color": "#F97316",
+  "background_color": "#E7E3DE",
+  "theme_color": "#2A2928",
   "orientation": "portrait-primary",
-  "categories": ["education", "productivity"],
+  "categories": ["productivity", "utilities"],
   "lang": "vi",
   "icons": [
     {

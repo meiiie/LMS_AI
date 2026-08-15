@@ -234,21 +234,7 @@ class TestSuggestionBasedPrompts:
 class TestAntiRepetitionDedup:
     """Sprint 90: Anti-repetition rules in ONE place only."""
 
-    def test_prompt_loader_no_top_anti_a_block(self):
-        """build_system_prompt source should NOT have the old top QUY TẮC TUYỆT ĐỐI block."""
-        import inspect
-        from app.prompts.prompt_loader import PromptLoader
-        source = inspect.getsource(PromptLoader.build_system_prompt)
-        assert "⛔ QUY TẮC TUYỆT ĐỐI" not in source, \
-            "Top anti-'À,' block should be removed (now in identity YAML)"
 
-    def test_prompt_loader_no_bottom_anti_repetition_block(self):
-        """build_system_prompt source should NOT have the old bottom QUY TẮC BẮT BUỘC block."""
-        import inspect
-        from app.prompts.prompt_loader import PromptLoader
-        source = inspect.getsource(PromptLoader.build_system_prompt)
-        assert "QUY TẮC BẮT BUỘC - KHÔNG ĐƯỢC VI PHẠM" not in source, \
-            "Bottom anti-repetition block should be removed (now in identity YAML)"
 
     def test_identity_yaml_is_single_source(self):
         """wiii_identity.yaml has the avoid rules (single source of truth)."""

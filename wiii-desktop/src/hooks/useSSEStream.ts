@@ -1755,7 +1755,7 @@ export function useSSEStream() {
               if (previewItem) {
                 flushBothBuffers();
                 useChatStore.getState().addPreviewItem(previewItem, data.node || "host_action", toDisplayMeta(data));
-                useUIStore.getState().openPreview(previewItem.preview_id);
+                useUIStore.getState().revealPreview(previewItem.preview_id);
               } else if (action === "wiii_connect.facebook_post.direct_apply") {
                 const summary =
                   typeof result.data?.summary === "string" && result.data.summary.trim().length > 0
@@ -1819,7 +1819,7 @@ export function useSSEStream() {
             },
           );
           useCodeStudioStore.getState().setActiveSession(data.content.session_id);
-          useUIStore.getState().openCodeStudio();
+          useUIStore.getState().revealCodeStudio();
         },
       onCodeDelta: (data) => {
         traceEvent("code_delta", { session: data.content.session_id, idx: data.content.chunk_index });
@@ -1943,7 +1943,7 @@ export function useSSEStream() {
     const activeCodeStudioSessionId = useCodeStudioStore.getState().activeSessionId;
     if (requestedViewHint && activeCodeStudioSessionId) {
       useCodeStudioStore.getState().setRequestedView(activeCodeStudioSessionId, requestedViewHint);
-      useUIStore.getState().openCodeStudio();
+      useUIStore.getState().revealCodeStudio();
     }
 
     // Session-bound provider selection. Conversations own their model once set;

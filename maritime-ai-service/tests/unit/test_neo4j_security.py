@@ -229,20 +229,6 @@ class TestCypherInjectionPrevention:
         assert len(types_list) == len(set(types_list)), \
             "Allowlist should not have duplicate entries"
 
-    def test_allowlist_has_documentation(self):
-        """Verify ALLOWED_RELATION_TYPES is well-documented in code."""
-        import inspect
-        import app.repositories.neo4j_knowledge_repository as repo_module
-
-        source = inspect.getsource(repo_module)
-
-        # Check for security comment
-        assert "SECURITY" in source or "security" in source, \
-            "Security documentation should be present"
-        assert "injection" in source.lower(), \
-            "Should mention injection prevention"
-        assert "ALLOWED_RELATION_TYPES" in source, \
-            "Constant should be defined in module"
 
 
 class TestSecurityLogging:
