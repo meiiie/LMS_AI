@@ -12,6 +12,7 @@ Git history but are not product documentation.
 | [Project mental model](WIII_PROJECT_MENTAL_MODEL.md) | Product boundaries and shared vocabulary |
 | [Codebase map](architecture/WIII_CODEBASE_MAP.md) | Finding the owning package and tests |
 | [Workbench identity and ACP](architecture/WIII_WORKBENCH_IDENTITY_AND_ACP.md) | Product naming and durable local-agent sessions |
+| [Unified Workbench](architecture/WIII_UNIFIED_WORKBENCH.md) | Desktop/web host authority, runtime/account ownership, and optional knowledge composition |
 | [Wiii operating model](operations/WIII_SYSTEM_CONTROL_PLANE.md) | Runtime invariants and diagnosis |
 | [Release standard](releases/WIII_RELEASE_STANDARD.md) | Versioning, signing, provenance, and publication |
 

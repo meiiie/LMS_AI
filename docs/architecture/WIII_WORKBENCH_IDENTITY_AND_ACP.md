@@ -1,6 +1,6 @@
 # Wiii Workbench: product identity and durable ACP boundary
 
-Status: implemented in desktop `1.2.0` on 2026-08-15.
+Status: retained provider boundary inside the unified Workbench as of 2026-08-16.
 
 ## Naming architecture
 
@@ -9,8 +9,8 @@ Status: implemented in desktop `1.2.0` on 2026-08-15.
 | Organization | The Wiii Lab | Publisher and research/product organization |
 | Platform | Wiii | Umbrella identity and stable technical namespace |
 | Desktop product | Wiii Workbench | Workspace for conversations, agents, files, tools, memory, and artifacts |
-| Cloud mode | Wiii Cloud | Account-backed assistant and managed services |
-| Local mode | Neko Chill | No-account ACP agent workspace |
+| Managed capability | Wiii Service | Account-backed runtime, knowledge, memory, and managed services |
+| Local surface | Neko Chill | No-account local-agent workspace within Wiii Workbench |
 | Companion | Neko | State-bearing mascot and product guide |
 | Local runtime | Neko Core | One ACP provider; not the desktop product or mascot name |
 
@@ -61,12 +61,12 @@ installer, or social derivatives must not be redrawn independently.
 Motion is state-driven, brief, interruptible, and reduced-motion safe. Error
 states remain visually calm and communicate failure with adjacent UI text.
 
-## Durable ACP ownership
+## Durable provider ownership
 
 Wiii owns the visible local transcript and append-only UI/runtime facts. The
-ACP provider owns its canonical session and opaque continuation state. Wiii
+provider owns its canonical session and opaque continuation state. Wiii
 persists the provider session ID as `backendSessionId` beside its local session
-UUID.
+UUID. ACP uses `session/resume`; Codex App Server uses `thread/resume`.
 
 On process replacement or app restart:
 

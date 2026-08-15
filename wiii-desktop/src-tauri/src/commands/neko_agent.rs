@@ -176,8 +176,8 @@ fn probe(id: &str, name: &str, candidates: &[&str], version_arg: &str) -> AgentI
     }
 }
 
-/// v0 roster (spec FR-003): Gemini CLI is the acceptance reference;
-/// `neko` is reserved for neko-core's upcoming `neko acp` server.
+/// Local runtime roster. Detection is read-only and never inspects provider
+/// credentials; each runtime remains the authority for its own account.
 #[tauri::command]
 pub fn neko_detect_agents() -> Vec<AgentInfo> {
     vec![
@@ -198,6 +198,16 @@ pub fn neko_detect_agents() -> Vec<AgentInfo> {
                 &["neko.exe", "neko.cmd", "neko"]
             } else {
                 &["neko"]
+            },
+            "--version",
+        ),
+        probe(
+            "codex",
+            "Codex",
+            if cfg!(windows) {
+                &["codex.exe", "codex.cmd", "codex"]
+            } else {
+                &["codex"]
             },
             "--version",
         ),

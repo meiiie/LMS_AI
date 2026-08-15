@@ -37,6 +37,8 @@ interface PendingRequest {
   timeout?: ReturnType<typeof setTimeout>;
 }
 
+type JsonRpcId = number | string;
+
 const METHOD_NOT_FOUND = -32601;
 const INTERNAL_ERROR = -32603;
 
@@ -100,7 +102,7 @@ export class AcpJsonRpcClient {
     if (!trimmed) return;
 
     let frame: {
-      id?: number;
+      id?: JsonRpcId | null;
       method?: string;
       params?: unknown;
       result?: unknown;
@@ -114,7 +116,7 @@ export class AcpJsonRpcClient {
     }
 
     // Agent → client request
-    if (frame.id !== undefined && frame.method) {
+    if (frame.id !== undefined && frame.id !== null && frame.method) {
       const id = frame.id;
       this.handlers.onAgentRequest(frame.method, frame.params).then(
         (result) => this.respond(id, { result: result ?? {} }),
@@ -136,7 +138,11 @@ export class AcpJsonRpcClient {
     }
 
     // Response to one of our requests
-    if (frame.id !== undefined) {
+    if (frame.id !== undefined && frame.id !== null) {
+      if (typeof frame.id !== "number") {
+        this.handlers.onProtocolError(`response for unknown request id ${frame.id}`);
+        return;
+      }
       const entry = this.pending.get(frame.id);
       if (!entry) {
         this.handlers.onProtocolError(`response for unknown request id ${frame.id}`);
@@ -155,7 +161,7 @@ export class AcpJsonRpcClient {
     this.handlers.onProtocolError("frame with neither id nor method");
   }
 
-  private respond(id: number, body: { result?: unknown; error?: unknown }): void {
+  private respond(id: JsonRpcId, body: { result?: unknown; error?: unknown }): void {
     void this.transport
       .send(JSON.stringify({ jsonrpc: "2.0", id, ...body }))
       .catch(() => {

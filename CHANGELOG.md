@@ -10,7 +10,38 @@ single source of truth. A stable release tag is always `wiii-v<version>`.
 
 ### Added
 
-- Nothing yet.
+- A host-aware Workbench bootstrap shared by desktop and hosted web, with
+  explicit local-process, workspace, native-window, secret-store, and remote
+  runtime capabilities.
+- Codex App Server integration with provider-owned sign-in, model/reasoning
+  controls, durable threads, streamed turns, approvals, interrupt, and resume.
+- Optional Wiii Knowledge retrieval for local agent sessions, including source
+  provenance and durable model-visible context replay.
+
+### Changed
+
+- Desktop now opens local-first while existing managed-account intent migrates
+  additively; hosted web remains remote-authority-only.
+- Public executable and release artifact metadata now consistently use
+  `Wiii Workbench` while retaining the stable product and package identifiers
+  for in-place upgrades.
+
+### Fixed
+
+- Prevented a Vite 8 React/Zustand chunk cycle that could leave the production
+  hosted-web surface blank.
+- Preserved fast Codex turn-completion notifications delivered before the UI
+  installs its turn waiter.
+
+### Security
+
+- Browser hosts fail closed for native process, filesystem, tray, and local
+  secret-store authority.
+- Retrieved knowledge must cross the durable model-input barrier before a
+  provider can observe it; a failed write blocks dispatch.
+- Subscription and API credentials remain owned by their providers; Wiii does
+  not copy Codex account tokens and does not imitate unsupported Claude
+  subscription login.
 
 ## [1.2.0] - 2026-08-15
 

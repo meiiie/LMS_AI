@@ -20,6 +20,10 @@ from app.repositories.dense_search_repository import get_dense_search_repository
 logger = logging.getLogger(__name__)
 
 
+class HybridSearchUnavailableError(RuntimeError):
+    """Raised when every enabled retrieval path fails operationally."""
+
+
 class HybridSearchService:
     """
     Main service for hybrid search combining Dense and Sparse search.
@@ -136,7 +140,9 @@ class HybridSearchService:
         query: str,
         limit: int = 5,
         domain_id: Optional[str] = None,
-        org_id: Optional[str] = None
+        org_id: Optional[str] = None,
+        *,
+        raise_on_total_failure: bool = False,
     ) -> List[HybridSearchResult]:
         """
         Perform hybrid search combining dense and sparse results.
@@ -221,13 +227,23 @@ class HybridSearchService:
                     if search_method == "sparse_only":
                         # Both failed
                         logger.critical("Both dense and sparse search failed!")
+                        if raise_on_total_failure:
+                            raise HybridSearchUnavailableError(
+                                "dense and sparse retrieval both failed"
+                            )
                         return []
                     search_method = "dense_only"
                 else:
                     logger.info("Sparse search returned %d results", len(sparse_results))
 
             except Exception as e:
+                if isinstance(e, HybridSearchUnavailableError):
+                    raise
                 logger.error("Parallel search failed: %s", e)
+                if raise_on_total_failure:
+                    raise HybridSearchUnavailableError(
+                        "hybrid retrieval failed before a fallback completed"
+                    ) from e
                 return []
 
         # If only one enabled, run sequentially (fallback)
@@ -239,6 +255,10 @@ class HybridSearchService:
                         "Dense-only hybrid search skipped because query embedding is empty for query=%s",
                         query,
                     )
+                    if raise_on_total_failure:
+                        raise HybridSearchUnavailableError(
+                            "dense retrieval could not produce a query embedding"
+                        )
                     return []
                 dense_results = await self._dense_repo.search(
                     query_embedding,
@@ -250,6 +270,10 @@ class HybridSearchService:
                 search_method = "dense_only"
             except Exception as e:
                 logger.error("Dense search failed: %s", e)
+                if raise_on_total_failure:
+                    raise HybridSearchUnavailableError(
+                        "dense retrieval failed"
+                    ) from e
                 return []
 
         elif run_sparse:
@@ -264,11 +288,19 @@ class HybridSearchService:
                 search_method = "sparse_only"
             except Exception as e:
                 logger.error("Sparse search failed: %s", e)
+                if raise_on_total_failure:
+                    raise HybridSearchUnavailableError(
+                        "sparse retrieval failed"
+                    ) from e
                 return []
 
         else:
             # Neither enabled
             logger.warning("Both dense and sparse weights are 0, no search performed")
+            if raise_on_total_failure:
+                raise HybridSearchUnavailableError(
+                    "no knowledge retrieval path is enabled"
+                )
             return []
         
         # Merge results based on what succeeded

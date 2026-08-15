@@ -22,8 +22,8 @@ provider- and domain-extensible.
 
 - **Durable work** — conversations, provider sessions, files, artifacts, and
   recovery state survive process replacement and app restarts.
-- **Local + cloud agents** — use Wiii Cloud or run ACP-compatible local agents
-  through the no-account **Neko Chill** workspace.
+- **Composable runtimes** — use Neko Core, Gemini CLI, Codex App Server, or a
+  managed Wiii Service without changing the Workbench interaction model.
 - **Files + live artifacts** — inspect project files, follow edits, and open
   code, Markdown, HTML previews, diagrams, and generated visual work beside the
   conversation.
@@ -52,8 +52,8 @@ The repository contains two primary runtime surfaces:
 
 - [`maritime-ai-service/`](maritime-ai-service/) — FastAPI backend,
   orchestration, RAG, memory, integrations, deployment assets, and tests.
-- [`wiii-desktop/`](wiii-desktop/) — Tauri v2 desktop workbench, React client,
-  Neko Chill, artifact workspace, and embed surfaces.
+- [`wiii-desktop/`](wiii-desktop/) — the shared React Workbench plus its Tauri
+  desktop host, hosted-web target, local runtimes, artifacts, and embeds.
 
 Shared architecture, governance, research, and brand sources live in
 [`docs/`](docs/).
@@ -142,6 +142,7 @@ target, coverage, and local screenshot output must stay out of source control.
 - [Project mental model](docs/WIII_PROJECT_MENTAL_MODEL.md)
 - [Codebase map](docs/architecture/WIII_CODEBASE_MAP.md)
 - [Workbench identity and durable ACP boundary](docs/architecture/WIII_WORKBENCH_IDENTITY_AND_ACP.md)
+- [Unified Workbench and host boundary](docs/architecture/WIII_UNIFIED_WORKBENCH.md)
 - [Wiii Connect architecture](docs/architecture/wiii-connect/README.md)
 - [Desktop engineering guide](wiii-desktop/README.md)
 - [Backend engineering guide](maritime-ai-service/README.md)

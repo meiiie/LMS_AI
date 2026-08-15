@@ -125,21 +125,21 @@ describe("Neko Chill shell UI", () => {
     expect(screen.queryByRole("button", { name: "Đi tới tin nhắn mới nhất" })).toBeNull();
   });
 
-  it("exposes the mode menu state and closes it with Escape", () => {
+  it("exposes the Workbench space menu and closes it with Escape", () => {
     render(<NekoChillApp />);
 
-    const switcher = screen.getByRole("button", { name: "Chuyển chế độ" });
+    const switcher = screen.getByRole("button", { name: "Chuyển không gian" });
     expect(switcher.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(switcher);
     expect(switcher.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("menu", { name: "Chọn chế độ" })).toBeTruthy();
-    expect(screen.getByRole("menuitemradio", { name: /Neko Chill/i }).getAttribute("aria-checked"))
+    expect(screen.getByRole("menu", { name: "Chọn không gian" })).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: /Không gian cục bộ/i }).getAttribute("aria-checked"))
       .toBe("true");
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(switcher.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("menu", { name: "Chọn chế độ" })).toBeNull();
+    expect(screen.queryByRole("menu", { name: "Chọn không gian" })).toBeNull();
   });
 
   it("groups every persisted session and searches all local history from Ctrl+K", () => {

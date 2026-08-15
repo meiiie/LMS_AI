@@ -11,8 +11,9 @@ one inspectable workspace.
 | **The Wiii Lab** | Organization and publisher |
 | **Wiii** | Platform, runtime, and stable technical namespace |
 | **Wiii Workbench** | Desktop/web workspace used by people |
-| **Wiii Cloud** | Account-backed managed mode |
-| **Neko Chill** | No-account local-agent workspace inside Wiii Workbench |
+| **Local Workbench / Neko Chill** | Account-free desktop surface for local runtimes and project files |
+| **Wiii Service** | Optional account-backed runtime, knowledge, memory, organization, and synchronization capability |
+| **Hosted Wiii** | Web deployment of the same Workbench contracts using remote authority only |
 | **Neko** | Mascot and product companion |
 | **Neko Core** | One ACP-compatible local runtime provider |
 | **Wiii Connect** | Governed boundary for external systems and capabilities |
@@ -58,17 +59,24 @@ without server-side authorization.
 Owns durable records and retrieval substrate: PostgreSQL/pgvector, optional
 graph context, object storage, caches, migrations, and evidence artifacts.
 
-## The two session authorities
+## Session and capability authorities
 
-Wiii Workbench owns the visible local transcript, workspace, and UI event log.
-An ACP provider owns its provider session and opaque continuation state. Wiii
+Wiii Workbench owns the visible transcript, workspace presentation, and UI event
+log. Each runtime owns its provider session and opaque continuation state. Wiii
 stores the provider session identifier alongside its local session and resumes
 it after process replacement. It never duplicates the visible transcript by
 blindly loading provider history into an already restored UI.
 
+Runtime, knowledge, account, and host authority are independent. For example,
+a local Codex thread may use Wiii Knowledge without moving execution into Wiii
+Service. Conversely, a hosted web page may use a managed runtime but can never
+claim access to a local process or project folder.
+
 A fact can influence a model only after it enters the ordered model-visible
-event stream. UI-only state, an unrecorded tool response, or an inferred crash
-outcome is not model knowledge.
+event stream and crosses its durability barrier. This includes user input,
+retrieved knowledge, permission decisions, and provider control changes.
+UI-only state, an unrecorded tool response, or an inferred crash outcome is not
+model knowledge.
 
 ## The side-effect rule
 

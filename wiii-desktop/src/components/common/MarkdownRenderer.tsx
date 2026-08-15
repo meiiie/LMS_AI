@@ -3,7 +3,6 @@ import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
 import { normalizeAssistantMarkdown } from "@/lib/assistant-markdown";
 import { MarkdownLiteSegment } from "./MarkdownLiteSegment";
 import { splitWidgetBlocks } from "./widget-segments";
-import { MarkdownLiteSegment } from "./MarkdownLiteSegment";
 
 const InlineHtmlWidget = lazy(() => import("./InlineHtmlWidget"));
 const RichMarkdownSegment = lazy(async () => {

@@ -5,20 +5,26 @@ AI conversations, local and cloud agents, project files, tools, memory, and
 live artifacts. The interface is Vietnamese-first and uses the approved Neko
 companion identity.
 
-## Product modes
+## Workbench surfaces
 
-| Mode | Purpose |
+| Surface | Purpose |
 | --- | --- |
-| **Wiii Cloud** | Account-backed chat, retrieval, memory, organizations, connected tools, and managed services |
-| **Neko Chill** | No-account workspace for ACP-compatible local agents, durable sessions, project files, tool approvals, and live artifacts |
-| **Embed** | A constrained Wiii surface for external hosts such as web products and LMS adapters |
+| **Local Workbench (Neko Chill)** | No-account desktop workspace for Neko Core, Gemini CLI, Codex, durable sessions, project files, approvals, and live artifacts |
+| **Wiii Service** | Optional account-backed runtime, retrieval, memory, organizations, connected tools, and synchronization |
+| **Hosted web** | The same Workbench contracts with remote runtimes; browser builds never advertise local process or filesystem authority |
+| **Embed** | A constrained Wiii surface for explicit external hosts and adapters |
 | **Neko Motion Lab** | Isolated preview of mascot states, transitions, and reduced-motion behavior |
 
-Neko Chill owns the visible transcript and stores the provider session ID. If
-an ACP provider advertises durable resume, a replacement process reconnects
-with `session/resume`; failed recovery is surfaced instead of silently creating
-a different session. Interrupted mutations remain `unknown outcome` and are
+The Workbench owns the visible transcript and stores each provider session ID.
+ACP runtimes reconnect with `session/resume`; Codex reconnects with
+`thread/resume`. Failed recovery is surfaced instead of silently creating a
+different session. Interrupted mutations remain `unknown outcome` and are
 never replayed automatically.
+
+Wiii Knowledge is independent from the selected runtime. When enabled, its
+retrieved evidence and citation metadata cross the same durability barrier as
+the user prompt before any model can observe them. A RAG outage degrades that
+connection without disabling local files or agents.
 
 ## Key capabilities
 
@@ -33,7 +39,7 @@ never replayed automatically.
 - Wiii Connect surfaces for ACP, MCP, documents, embeds, OAuth applications,
   and host capabilities.
 - Organization-aware authentication, settings, feature controls, and admin
-  views in cloud mode.
+  views through Wiii Service.
 - Frameless native window, tray, splash screen, Neko-branded NSIS installer,
   and light/dark/system themes.
 
@@ -78,6 +84,9 @@ npm run build
 # Standalone embed
 npm run build:embed
 
+# Hosted web
+npm run build:web
+
 # Windows NSIS installer
 npm run tauri build -- --bundles nsis
 ```
@@ -117,6 +126,7 @@ wiii-desktop/
 |-- src/
 |   |-- components/          Cloud workbench, shared UI, artifacts, settings
 |   |-- neko-chill/          Local ACP workspace, runtime, persistence, files
+|   |-- workbench/           Host, capability, account, knowledge, and surface contracts
 |   |-- neko-motion-lab/     Mascot state and motion research surface
 |   |-- pointy-host/         Explicit host-control bridge
 |   |-- stores/              Persisted and ephemeral application state
@@ -136,6 +146,9 @@ installer derivatives.
 
 - Never render raw internal tool JSON as the final answer.
 - Keep source references visible for document-grounded answers.
+- Never expose local process or filesystem controls on a hosted-web host.
+- Keep provider login and billing ownership explicit; Wiii never stores Codex
+  tokens and does not offer third-party Claude subscription login.
 - Fail closed when permission is unanswered.
 - Keep mutating host actions behind preview and explicit approval.
 - Preserve session IDs and recovery state; do not convert resume failure into a

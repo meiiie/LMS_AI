@@ -1,6 +1,6 @@
 /**
- * #893 — the login wall must never be a dead end: the escape hatch switches
- * the shell mode to Neko Chill (no account required).
+ * #893/#923 — the desktop login wall must never be a dead end: the Workbench
+ * boundary owns navigation back to the account-free local surface.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -40,26 +40,27 @@ vi.mock("@/components/common/WiiiAvatar", () => ({
 }));
 
 import { LoginScreen } from "@/components/auth/LoginScreen";
-import { useModeStore } from "@/neko-chill/stores/mode-store";
 
-describe("LoginScreen — Neko Chill escape hatch (#893)", () => {
+describe("LoginScreen — local Workbench escape hatch (#923)", () => {
   beforeEach(() => {
     cleanup();
     storage.clear();
-    useModeStore.setState({ mode: "wiii", isLoaded: true });
   });
 
-  it("switches the shell mode to neko-chill and persists it", async () => {
-    render(<LoginScreen />);
+  it("delegates navigation to the Workbench boundary", async () => {
+    const onOpenLocal = vi.fn();
+    render(<LoginScreen onOpenLocal={onOpenLocal} />);
     const escape = await screen.findByTestId("login-neko-chill-escape");
-    expect(escape.textContent).toContain("Neko Chill");
+    expect(escape.textContent).toContain("không gian cục bộ");
 
     fireEvent.click(escape);
+    expect(onOpenLocal).toHaveBeenCalledTimes(1);
+  });
 
-    expect(useModeStore.getState().mode).toBe("neko-chill");
-    // The selection persists so the next launch lands there directly.
-    await vi.waitFor(() => {
-      expect(storage.get("neko-chill-mode.json:mode")).toBe("neko-chill");
-    });
+  it("does not advertise local authority on hosted web", () => {
+    render(<LoginScreen />);
+    expect(screen.queryByTestId("login-neko-chill-escape")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /localhost:8000/i }));
+    expect(screen.getByText(/Bản web kết nối Wiii Service từ xa/i)).toBeTruthy();
   });
 });

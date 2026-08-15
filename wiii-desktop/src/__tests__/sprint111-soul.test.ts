@@ -208,7 +208,7 @@ describe("App — Wiii loading screen and reconnect", () => {
   it("should use WiiiAvatar in loading screen", async () => {
     const src = await import("@/App?raw");
     const code = (src as any).default || src;
-    expect(code).toContain("Wiii đang thức dậy...");
+    expect(code).toContain("Wiii đang mở Workbench...");
     expect(code).toContain('WiiiAvatar state="thinking"');
   });
 

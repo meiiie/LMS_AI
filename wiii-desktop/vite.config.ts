@@ -61,7 +61,15 @@ function manualChunks(id: string) {
     return "vendor-katex";
   }
 
-  if (normalizedId.includes("/node_modules/react/") || normalizedId.includes("/node_modules/react-dom/")) {
+  // React-facing state primitives must initialize before feature chunks.
+  // Leaving Zustand in the entry chunk creates a production-only cycle:
+  // settings-store -> entry(create) -> settings-store, yielding a blank page.
+  if (
+    normalizedId.includes("/node_modules/react/")
+    || normalizedId.includes("/node_modules/react-dom/")
+    || normalizedId.includes("/node_modules/zustand/")
+    || normalizedId.includes("/node_modules/use-sync-external-store/")
+  ) {
     return "vendor-react";
   }
 

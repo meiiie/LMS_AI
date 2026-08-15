@@ -49,6 +49,22 @@ export type NekoSessionEventData =
       delivery?: "staged";
     }
   | {
+      type: "knowledge-context";
+      source: "wiii-knowledge";
+      contextId: string;
+      query: string;
+      renderedContext: string;
+      sources: Array<{
+        sourceId: string;
+        title: string;
+        documentId: string;
+        pageNumber: number;
+        score: number;
+      }>;
+      providerInstanceId: string;
+      delivery?: "staged";
+    }
+  | {
       type: "permission-decision";
       requestId: string;
       optionId: string | null;
@@ -64,7 +80,7 @@ export type NekoSessionEventData =
   | {
       type: "dispatch-invoked";
       targetEventId: string;
-      action: "prompt" | "cancel" | "permission";
+      action: "prompt" | "knowledge" | "cancel" | "permission";
       providerInstanceId: string;
     }
   | {
@@ -151,7 +167,9 @@ function isRuntimeProvider(value: unknown): value is RuntimeProviderSnapshot {
     typeof provider.sessionId === "string" &&
     typeof provider.providerId === "string" &&
     typeof provider.instanceId === "string" &&
-    (provider.kind === "acp" || provider.kind === "wiii-cloud") &&
+    (provider.kind === "acp" ||
+      provider.kind === "codex-app-server" ||
+      provider.kind === "wiii-cloud") &&
     (provider.backendSessionId === undefined ||
       provider.backendSessionId === null ||
       typeof provider.backendSessionId === "string") &&
@@ -181,6 +199,31 @@ function isValidEventData(data: Record<string, unknown>): boolean {
         isStringOrNull(data.providerInstanceId) &&
         (data.delivery === undefined || data.delivery === "staged")
       );
+    case "knowledge-context":
+      return (
+        data.source === "wiii-knowledge" &&
+        typeof data.contextId === "string" &&
+        data.contextId.length > 0 &&
+        typeof data.query === "string" &&
+        typeof data.renderedContext === "string" &&
+        data.renderedContext.length <= 16_000 &&
+        Array.isArray(data.sources) &&
+        data.sources.every((value) => {
+          if (!value || typeof value !== "object") return false;
+          const source = value as Record<string, unknown>;
+          return (
+            typeof source.sourceId === "string" &&
+            typeof source.title === "string" &&
+            typeof source.documentId === "string" &&
+            typeof source.pageNumber === "number" &&
+            Number.isFinite(source.pageNumber) &&
+            typeof source.score === "number" &&
+            Number.isFinite(source.score)
+          );
+        }) &&
+        typeof data.providerInstanceId === "string" &&
+        (data.delivery === undefined || data.delivery === "staged")
+      );
     case "permission-decision":
       return (
         typeof data.requestId === "string" &&
@@ -198,7 +241,7 @@ function isValidEventData(data: Record<string, unknown>): boolean {
       return (
         typeof data.targetEventId === "string" &&
         data.targetEventId.length > 0 &&
-        ["prompt", "cancel", "permission"].includes(data.action as string) &&
+        ["prompt", "knowledge", "cancel", "permission"].includes(data.action as string) &&
         typeof data.providerInstanceId === "string"
       );
     case "control-change":
@@ -217,7 +260,9 @@ function isValidEventData(data: Record<string, unknown>): boolean {
       return (
         typeof data.providerId === "string" &&
         typeof data.instanceId === "string" &&
-        (data.kind === "acp" || data.kind === "wiii-cloud") &&
+        (data.kind === "acp" ||
+          data.kind === "codex-app-server" ||
+          data.kind === "wiii-cloud") &&
         RUNTIME_DETACH_REASONS.includes(data.reason as RuntimeDetachReason)
       );
     case "runtime-attach-failed":
