@@ -38,6 +38,7 @@ Refs #
 - [ ] Security/auth/privacy
 - [ ] Database/migration
 - [ ] Breaking change
+- [ ] Release/version/signing
 
 ## Risk Checklist
 
@@ -51,6 +52,8 @@ Refs #
 - [ ] Feature flags and default behavior were considered.
 - [ ] Database migrations are included or explicitly not required.
 - [ ] Rollback path is clear.
+- [ ] Version surfaces and changelog are synchronized when this changes a release.
+- [ ] Public binary claims distinguish candidate, signed stable, and unsigned output.
 
 ## Verification
 

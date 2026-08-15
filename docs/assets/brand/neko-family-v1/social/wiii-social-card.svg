@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Wiii — a durable AI workbench</title>
+  <desc id="desc">The approved Neko Peek identity and Wiii platform positioning for social sharing.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171716"/><stop offset="1" stop-color="#2A2928"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.14" r="0.8">
+      <stop offset="0" stop-color="#BBDDF2" stop-opacity="0.2"/><stop offset="1" stop-color="#BBDDF2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F6F2EA"/><stop offset="1" stop-color="#D9D5CF"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="170%" height="180%">
+      <feDropShadow dx="0" dy="20" stdDeviation="18" flood-color="#080808" flood-opacity="0.38"/>
+    </filter>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#F5F0E6" stroke-opacity="0.027"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <g filter="url(#shadow)"><rect x="80" y="85" width="380" height="460" rx="78" fill="url(#tile)"/></g>
+  <g transform="translate(111 166) scale(1.25)">
+    <path fill="#2A2928" d="M28 148C20 104 43 70 82 57c38-13 91-10 125 16 28 22 37 60 25 94-14 42-53 62-105 61-54-1-91-30-99-80Z"/>
+    <path fill="#F5F0E6" d="M61 133c-7-22-6-53 1-77 5-18 18-25 34-15 21-11 49-14 76-8 10-18 28-18 37 1 10 21 12 52 4 78-8 26-36 42-72 43-36 1-70-7-80-22Z"/>
+    <path fill="#454241" d="M31 136c31 23 72 38 117 41 33 2 61-7 84-29 3 24-7 47-29 62-23 16-59 22-100 16-43-6-71-31-77-63-2-10 0-19 5-27Z"/>
+    <ellipse cx="111" cy="103" rx="10" ry="15" fill="#2A2928"/><ellipse cx="157" cy="100" rx="10" ry="15" fill="#2A2928"/>
+  </g>
+  <g font-family="Manrope, Inter, Segoe UI, Arial, sans-serif">
+    <text x="530" y="132" fill="#BBDDF2" font-size="17" font-weight="700" letter-spacing="4">THE WIII LAB</text>
+    <text x="524" y="260" fill="#F5F0E6" font-size="104" font-weight="720" letter-spacing="-5">Wiii</text>
+    <text x="530" y="320" fill="#C0BBB5" font-size="29">A durable AI workbench</text>
+    <text x="530" y="360" fill="#C0BBB5" font-size="29">for people and agents.</text>
+    <g transform="translate(530 423)">
+      <rect width="550" height="72" rx="20" fill="#FFFFFF" fill-opacity="0.055" stroke="#FFFFFF" stroke-opacity="0.1"/>
+      <circle cx="36" cy="36" r="7" fill="#BBDDF2"/>
+      <text x="62" y="32" fill="#F5F0E6" font-size="15" font-weight="700" letter-spacing="1.4">LOCAL + CLOUD · FILES + TOOLS</text>
+      <text x="62" y="53" fill="#98948F" font-size="13">Durable sessions · permission-aware execution</text>
+    </g>
+    <text x="530" y="554" fill="#8E8A85" font-size="14" font-weight="600" letter-spacing="2.2">OPEN SOURCE · WIII.HOLILIHU.ONLINE</text>
+  </g>
+</svg>

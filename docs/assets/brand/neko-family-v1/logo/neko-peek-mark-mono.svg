@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Neko Peek monochrome</title>
+  <desc id="desc">Single-color Neko Peek mark with negative-space eyes and tail fold.</desc>
+  <path fill="#2A2928" d="M28 148C20 104 43 70 82 57c38-13 91-10 125 16 28 22 37 60 25 94-14 42-53 62-105 61-54-1-91-30-99-80Z"/>
+  <path d="M35 133c31 22 70 35 112 38 33 2 59-6 81-26" fill="none" stroke="#F5F0E6" stroke-width="8" stroke-linecap="round"/>
+  <ellipse cx="111" cy="103" rx="10" ry="15" fill="#F5F0E6"/>
+  <ellipse cx="157" cy="100" rx="10" ry="15" fill="#F5F0E6"/>
+</svg>

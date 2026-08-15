@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 640" role="img" aria-labelledby="title desc">
+  <title id="title">Wiii — a durable AI workbench</title>
+  <desc id="desc">Neko Peek beside the Wiii product name and a concise map of its agent workspace capabilities.</desc>
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171716"/>
+      <stop offset="0.58" stop-color="#222120"/>
+      <stop offset="1" stop-color="#292827"/>
+    </linearGradient>
+    <radialGradient id="sky" cx="0.72" cy="0.08" r="0.72">
+      <stop offset="0" stop-color="#BBDDF2" stop-opacity="0.19"/>
+      <stop offset="0.52" stop-color="#BBDDF2" stop-opacity="0.035"/>
+      <stop offset="1" stop-color="#BBDDF2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F4F0E8"/>
+      <stop offset="1" stop-color="#D8D4CE"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="24" stdDeviation="20" flood-color="#080808" flood-opacity="0.34"/>
+    </filter>
+    <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse">
+      <path d="M38 0H0V38" fill="none" stroke="#F5F0E6" stroke-opacity="0.026" stroke-width="1"/>
+    </pattern>
+    <clipPath id="round-canvas"><rect x="24" y="24" width="1552" height="592" rx="54"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#round-canvas)">
+    <rect x="24" y="24" width="1552" height="592" fill="url(#canvas)"/>
+    <rect x="24" y="24" width="1552" height="592" fill="url(#sky)"/>
+    <rect x="24" y="24" width="1552" height="592" fill="url(#grid)"/>
+    <circle cx="1438" cy="110" r="220" fill="#BBDDF2" opacity="0.025"/>
+    <circle cx="1438" cy="110" r="146" fill="none" stroke="#BBDDF2" stroke-opacity="0.09"/>
+    <circle cx="1438" cy="110" r="92" fill="none" stroke="#BBDDF2" stroke-opacity="0.09"/>
+
+    <g filter="url(#shadow)">
+      <rect x="92" y="96" width="390" height="448" rx="78" fill="url(#tile)"/>
+      <rect x="93" y="97" width="388" height="446" rx="77" fill="none" stroke="#FFFFFF" stroke-opacity="0.34" stroke-width="2"/>
+    </g>
+    <g transform="translate(124 160) scale(1.28)">
+      <path fill="#2A2928" d="M28 148C20 104 43 70 82 57c38-13 91-10 125 16 28 22 37 60 25 94-14 42-53 62-105 61-54-1-91-30-99-80Z"/>
+      <path fill="#F5F0E6" d="M61 133c-7-22-6-53 1-77 5-18 18-25 34-15 21-11 49-14 76-8 10-18 28-18 37 1 10 21 12 52 4 78-8 26-36 42-72 43-36 1-70-7-80-22Z"/>
+      <path fill="#454241" d="M31 136c31 23 72 38 117 41 33 2 61-7 84-29 3 24-7 47-29 62-23 16-59 22-100 16-43-6-71-31-77-63-2-10 0-19 5-27Z"/>
+      <ellipse cx="111" cy="103" rx="10" ry="15" fill="#2A2928"/>
+      <ellipse cx="157" cy="100" rx="10" ry="15" fill="#2A2928"/>
+    </g>
+
+    <g font-family="Manrope, Inter, Segoe UI, Arial, sans-serif">
+      <text x="566" y="132" fill="#BBDDF2" font-size="18" font-weight="700" letter-spacing="5">THE WIII LAB / OPEN SOURCE</text>
+      <text x="560" y="250" fill="#F5F0E6" font-size="104" font-weight="720" letter-spacing="-5">Wiii</text>
+      <text x="563" y="306" fill="#B9B4AE" font-size="31" font-weight="430" letter-spacing="-0.5">A durable AI workbench for people and agents.</text>
+
+      <g transform="translate(562 366)">
+        <rect width="216" height="66" rx="18" fill="#FFFFFF" fill-opacity="0.055" stroke="#FFFFFF" stroke-opacity="0.09"/>
+        <circle cx="28" cy="33" r="6" fill="#BBDDF2"/>
+        <text x="49" y="28" fill="#F5F0E6" font-size="14" font-weight="680">DURABLE</text>
+        <text x="49" y="47" fill="#999590" font-size="12">sessions + memory</text>
+      </g>
+      <g transform="translate(794 366)">
+        <rect width="216" height="66" rx="18" fill="#FFFFFF" fill-opacity="0.055" stroke="#FFFFFF" stroke-opacity="0.09"/>
+        <circle cx="28" cy="33" r="6" fill="#F5F0E6"/>
+        <text x="49" y="28" fill="#F5F0E6" font-size="14" font-weight="680">AGENTIC</text>
+        <text x="49" y="47" fill="#999590" font-size="12">local + cloud runtimes</text>
+      </g>
+      <g transform="translate(1026 366)">
+        <rect width="216" height="66" rx="18" fill="#FFFFFF" fill-opacity="0.055" stroke="#FFFFFF" stroke-opacity="0.09"/>
+        <circle cx="28" cy="33" r="6" fill="#A9A6A6"/>
+        <text x="49" y="28" fill="#F5F0E6" font-size="14" font-weight="680">CONNECTED</text>
+        <text x="49" y="47" fill="#999590" font-size="12">files + tools + apps</text>
+      </g>
+
+      <line x1="562" y1="484" x2="1428" y2="484" stroke="#F5F0E6" stroke-opacity="0.13"/>
+      <text x="562" y="533" fill="#A9A6A6" font-size="15" font-weight="600" letter-spacing="2.5">CONVERSATIONS  ·  ARTIFACTS  ·  ACP  ·  MCP  ·  RAG  ·  INTEGRATIONS</text>
+      <text x="1428" y="533" fill="#F5F0E6" fill-opacity="0.45" font-size="13" text-anchor="end">wiii.holilihu.online</text>
+    </g>
+  </g>
+  <rect x="24.5" y="24.5" width="1551" height="591" rx="53.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.12"/>
+</svg>

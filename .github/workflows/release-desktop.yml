@@ -1,0 +1,177 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'wiii-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    environment: ${{ startsWith(github.ref, 'refs/tags/') && 'release' || 'candidate' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: wiii-desktop/package-lock.json
+
+      - name: Select stable Rust
+        shell: pwsh
+        run: rustup default stable
+
+      - name: Validate release metadata
+        shell: pwsh
+        run: |
+          $arguments = @('tools/release/wiii_release.py', 'check', '--out', 'artifacts/release-check.json')
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $arguments += @('--tag', '${{ github.ref_name }}')
+          }
+          python @arguments
+
+      - name: Run release tool tests
+        run: python -m unittest tools.release.test_wiii_release -v
+
+      - name: Install desktop dependencies
+        working-directory: wiii-desktop
+        run: npm ci
+
+      - name: Test desktop
+        working-directory: wiii-desktop
+        run: npm test -- --run
+
+      - name: Build web surfaces
+        working-directory: wiii-desktop
+        run: |
+          npm run build
+          npm run build:embed
+
+      - name: Import stable code-signing certificate
+        if: startsWith(github.ref, 'refs/tags/')
+        id: signing
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WIII_WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WIII_WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw 'Stable releases require the protected Wiii Windows signing secrets.'
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'wiii-release-certificate.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $certificate.Thumbprint) { throw 'The Wiii signing certificate could not be imported.' }
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+          Remove-Item -LiteralPath $certificatePath -Force
+
+      - name: Create stable signing configuration
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: wiii-desktop
+        shell: pwsh
+        run: |
+          $configuration = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = '${{ steps.signing.outputs.thumbprint }}'
+                digestAlgorithm = 'sha256'
+                timestampUrl = 'http://timestamp.digicert.com'
+              }
+            }
+          }
+          $configuration | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 release-signing.json
+
+      - name: Build candidate installer
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        working-directory: wiii-desktop
+        run: npm run tauri -- build --bundles nsis
+
+      - name: Build signed stable installer
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: wiii-desktop
+        run: npm run tauri -- build --bundles nsis --config release-signing.json
+
+      - name: Normalize and verify release assets
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $source = Get-ChildItem 'wiii-desktop/src-tauri/target/release/bundle/nsis' -Filter '*-setup.exe'
+          if ($source.Count -ne 1) { throw "Expected one NSIS installer, found $($source.Count)." }
+          $releaseDirectory = New-Item -ItemType Directory -Force -Path artifacts/release
+          $publicName = "Wiii-Workbench_${version}_windows-x64-setup.exe"
+          $installer = Join-Path $releaseDirectory.FullName $publicName
+          Copy-Item -LiteralPath $source.FullName -Destination $installer
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne 'Valid') { throw "Stable installer signature is $($signature.Status)." }
+          }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          "$hash  $publicName" | Set-Content -Encoding ascii "$installer.sha256"
+          python tools/release/wiii_release.py notes $version --out artifacts/release/release-notes.md
+          python tools/release/wiii_release.py manifest --artifact $installer --version $version --git-sha '${{ github.sha }}' --out "artifacts/release/Wiii-Workbench_${version}_release-manifest.json"
+
+      - name: Upload candidate or stable bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: Wiii-Workbench-${{ github.sha }}-windows-x64
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-stable:
+    name: Attest and publish stable release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download verified release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: Wiii-Workbench-${{ github.sha }}-windows-x64
+          path: artifacts/release
+
+      - name: Attest stable release provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: |
+            artifacts/release/*.exe
+            artifacts/release/*.sha256
+            artifacts/release/*-manifest.json
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#wiii-v}"
+          gh release create "$GITHUB_REF_NAME" artifacts/release/*.exe artifacts/release/*.sha256 artifacts/release/*-manifest.json --verify-tag --title "Wiii $version" --notes-file artifacts/release/release-notes.md

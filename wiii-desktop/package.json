@@ -1,7 +1,16 @@
 {
   "name": "wiii-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.2.0",
+  "description": "Wiii — an open-source durable AI workbench by The Wiii Lab",
+  "author": "The Wiii Lab",
+  "license": "MIT",
+  "homepage": "https://wiii.holilihu.online",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/meiiie/wiii.git",
+    "directory": "wiii-desktop"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
