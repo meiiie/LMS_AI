@@ -26,6 +26,9 @@ single source of truth. A stable release tag is always `wiii-v<version>`.
   social surfaces.
 - A repository-wide release tool for synchronized versions, release notes,
   checksums, and machine-readable artifact manifests.
+- Governed Linux x64 (`.deb` and `.AppImage`) plus macOS Apple Silicon and
+  Intel (`.dmg`) desktop release candidates, with platform-specific checksums
+  and manifests.
 
 ### Changed
 
@@ -38,6 +41,14 @@ single source of truth. A stable release tag is always `wiii-v<version>`.
   retaining stable internal identifiers for upgrade compatibility.
 - Unified backend package/runtime and desktop metadata under the repository
   `VERSION` source of truth.
+- Desktop release validation now runs once before a fail-independent platform
+  matrix; stable publication attests and checks the complete artifact set.
+- Stable publication now verifies exact filenames, sidecars, manifest
+  version/commit bindings, and the Windows signer thumbprint, with a protected
+  and publicly disclosed Windows-only break-glass path for hosted-runner
+  outages.
+- Linux AppImage packaging now includes the media framework needed for Wiii
+  voice playback.
 
 ### Fixed
 

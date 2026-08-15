@@ -65,6 +65,11 @@
     "copyright": "Copyright \u00a9 2026 The Wiii Lab",
     "shortDescription": "Wiii \u2014 durable AI workbench by The Wiii Lab",
     "longDescription": "An open-source AI workbench for durable conversations, local and cloud agents, project files, tools, memory, artifacts, and permission-aware integrations.",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser",
