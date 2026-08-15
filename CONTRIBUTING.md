@@ -123,8 +123,9 @@ public artifacts must follow the
 
 ## Review and merge
 
-Resolve required checks and review findings. Do not self-approve protected work
-or bypass branch protection merely to finish faster. Squash merge is preferred
-when it preserves a clear issue-linked history.
+Resolve required checks, actionable review findings, and review conversations.
+Human and CODEOWNERS approvals are risk-based rather than branch-required; do
+not use a second account merely to manufacture approval. Squash merge is
+preferred when it preserves a clear issue-linked history.
 
 For help choosing an issue type or support channel, see [SUPPORT.md](SUPPORT.md).

@@ -69,4 +69,16 @@ This is reversible. If the admin-override policy is rescinded (see "When to reco
 
 ---
 
+## 2026-08-16 — Owner-directed review-policy migration — main
+
+This was a deliberate policy change with an immediately corrected configuration gap, recorded here for a complete audit trail.
+
+- **Authority and ticket**: repository owner direction; issue #925.
+- **Intent**: retain PR traceability and required CI while removing mandatory approval, CODEOWNERS approval, and last-push approval. `@wiiiii123` remains an ownership contact, not a mechanical merge token.
+- **Initial change**: `DELETE .../required_pull_request_reviews` removed the approval block. This also temporarily removed the classic-protection PR requirement and was broader than intended.
+- **Correction**: `PATCH .../required_pull_request_reviews` restored the PR requirement with `required_approving_review_count: 0`, `dismiss_stale_reviews: false`, `require_code_owner_reviews: false`, and `require_last_push_approval: false`.
+- **Merge activity during the gap**: PR #924 was merged through GitHub's PR flow only after `Gate Summary`, all independent CI jobs, and all review conversations were green/resolved. No direct push, force-push, or branch deletion occurred.
+- **Final verification**: strict required status `Gate Summary`; PR block present with zero approvals; conversation resolution and linear history enabled; force-push and deletion disabled; `enforce_admins: false` retained.
+- **Rollback**: patch the same endpoint to `required_approving_review_count: 1` and re-enable the desired review flags, then update the policy documents in a PR.
+
 ---
