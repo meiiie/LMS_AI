@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "license": "AGPL-3.0-only",
+  "author": "Meiiie (The Wiii Lab)",
   "type": "module",
   "scripts": {
     "dev": "vite",
