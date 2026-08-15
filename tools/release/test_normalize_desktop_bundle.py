@@ -24,21 +24,21 @@ class DesktopBundleNormalizerTests(unittest.TestCase):
     def test_normalizes_every_release_target(self) -> None:
         cases = {
             "windows-x64": [
-                ("release/bundle/nsis/Wiii Workbench_1.2.0_x64-setup.exe", "windows-x64-setup.exe"),
+                ("release/bundle/nsis/Wiii_1.2.0_x64-setup.exe", "windows-x64-setup.exe"),
             ],
             "linux-x64": [
-                ("release/bundle/deb/Wiii Workbench_1.2.0_amd64.deb", "linux-x64.deb"),
-                ("release/bundle/appimage/Wiii Workbench_1.2.0_amd64.AppImage", "linux-x64.AppImage"),
+                ("release/bundle/deb/Wiii_1.2.0_amd64.deb", "linux-x64.deb"),
+                ("release/bundle/appimage/Wiii_1.2.0_amd64.AppImage", "linux-x64.AppImage"),
             ],
             "macos-arm64": [
                 (
-                    "aarch64-apple-darwin/release/bundle/dmg/Wiii Workbench_1.2.0_aarch64.dmg",
+                    "aarch64-apple-darwin/release/bundle/dmg/Wiii_1.2.0_aarch64.dmg",
                     "macos-arm64-unnotarized.dmg",
                 ),
             ],
             "macos-x64": [
                 (
-                    "x86_64-apple-darwin/release/bundle/dmg/Wiii Workbench_1.2.0_x64.dmg",
+                    "x86_64-apple-darwin/release/bundle/dmg/Wiii_1.2.0_x64.dmg",
                     "macos-x64-unnotarized.dmg",
                 ),
             ],

@@ -22,8 +22,9 @@ single source of truth. A stable release tag is always `wiii-v<version>`.
 
 - Desktop now opens local-first while existing managed-account intent migrates
   additively; hosted web remains remote-authority-only.
-- Public application and executable metadata now consistently use
-  `Wiii Workbench` while retaining the stable package identifier.
+- Public executable and release artifact metadata now consistently use
+  `Wiii Workbench` while retaining the stable product and package identifiers
+  for in-place upgrades.
 
 ### Fixed
 

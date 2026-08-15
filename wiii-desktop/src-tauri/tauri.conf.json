@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "Wiii Workbench",
+  "productName": "Wiii",
   "mainBinaryName": "Wiii Workbench",
   "version": "1.2.0",
   "identifier": "com.wiii-lab.wiii-desktop",
