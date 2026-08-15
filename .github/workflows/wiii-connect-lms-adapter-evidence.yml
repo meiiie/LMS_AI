@@ -1,13 +1,12 @@
-name: LMS Test Course Evidence
+name: Wiii Connect — LMS Adapter Evidence
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - ".github/workflows/lms-test-course-evidence.yml"
-      - "docs/integration/WIII_LMS_DOC_TO_COURSE_CONTRACT.md"
+      - ".github/workflows/wiii-connect-lms-adapter-evidence.yml"
+      - "maritime-ai-service/docs/integration/WIII_CONNECT_LMS_ADAPTER.md"
       - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
-      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
       - "tools/wiii_self_harness/**"
       - "maritime-ai-service/scripts/runtime_evidence_output.py"
       - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
@@ -21,10 +20,9 @@ on:
   push:
     branches: [main]
     paths:
-      - ".github/workflows/lms-test-course-evidence.yml"
-      - "docs/integration/WIII_LMS_DOC_TO_COURSE_CONTRACT.md"
+      - ".github/workflows/wiii-connect-lms-adapter-evidence.yml"
+      - "maritime-ai-service/docs/integration/WIII_CONNECT_LMS_ADAPTER.md"
       - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
-      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
       - "tools/wiii_self_harness/**"
       - "maritime-ai-service/scripts/runtime_evidence_output.py"
       - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
@@ -40,7 +38,7 @@ on:
   workflow_dispatch:
     inputs:
       run_lms_replay:
-        description: "Run the guarded LMS test-course replay."
+        description: "Run the guarded Wiii Connect LMS adapter replay."
         required: true
         type: boolean
         default: false
@@ -72,7 +70,7 @@ concurrency:
 
 jobs:
   contract:
-    name: LMS Replay Probe Contract
+    name: LMS adapter replay contract
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -99,12 +97,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run LMS replay probe unit tests
+      - name: Test LMS adapter replay probe
         working-directory: maritime-ai-service
         run: python -m pytest tests/unit/test_probe_live_lms_test_course_replay.py tests/unit/test_runtime_evidence_output.py -q --tb=short
 
   live-lms-evidence:
-    name: Live LMS Test Course Replay Evidence
+    name: Live LMS adapter evidence
     runs-on: ubuntu-latest
     environment: wiii-runtime-evidence
     timeout-minutes: 45
@@ -147,7 +145,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate LMS replay evidence
+      - name: Generate LMS adapter evidence
         working-directory: maritime-ai-service
         env:
           TRANSPORT_MODE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.transport_mode || 'asgi' }}
@@ -205,7 +203,7 @@ jobs:
             "${args[@]}" \
             --out lms-test-course-evidence.json
 
-      - name: Validate LMS replay evidence
+      - name: Validate LMS adapter evidence
         working-directory: maritime-ai-service
         run: |
           python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \

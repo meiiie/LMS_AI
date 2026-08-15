@@ -6,7 +6,6 @@ on:
     paths:
       - ".github/workflows/runtime-ledger-browser-replay-evidence.yml"
       - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
-      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
       - "tools/wiii_self_harness/**"
       - "tools/wiii_self_harness/test_validate_runtime_evidence_artifact.py"
       - "maritime-ai-service/scripts/wiii_runtime_flow_acceptance.py"
@@ -25,7 +24,6 @@ on:
     paths:
       - ".github/workflows/runtime-ledger-browser-replay-evidence.yml"
       - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
-      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
       - "tools/wiii_self_harness/**"
       - "tools/wiii_self_harness/test_validate_runtime_evidence_artifact.py"
       - "maritime-ai-service/scripts/wiii_runtime_flow_acceptance.py"

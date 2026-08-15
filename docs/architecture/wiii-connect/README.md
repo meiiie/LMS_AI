@@ -1,16 +1,16 @@
 # Wiii Connect Blueprint
 
-Status: Draft for implementation
+Status: Active architecture
 
 Owner: Architecture maintainers
 
-Created: 2026-05-27
+Updated: 2026-08-15
 
 Related issue: #720
 
 ## Purpose
 
-Wiii Connect is the planned connection and capability control layer for Wiii.
+Wiii Connect is the connection and capability control layer for Wiii.
 It exists so Wiii can reason about external apps, LMS, host bridges, documents,
 visual runtimes, and future MCP tools through one contract instead of scattered
 tool-specific checks.

@@ -6,7 +6,6 @@ on:
     paths:
       - ".github/workflows/subagent-boundary-evidence.yml"
       - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
-      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
       - "tools/wiii_self_harness/**"
       - "maritime-ai-service/scripts/runtime_evidence_output.py"
       - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
@@ -23,7 +22,6 @@ on:
     paths:
       - ".github/workflows/subagent-boundary-evidence.yml"
       - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
-      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
       - "tools/wiii_self_harness/**"
       - "maritime-ai-service/scripts/runtime_evidence_output.py"
       - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
