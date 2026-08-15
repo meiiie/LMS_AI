@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   buildCodeStudioActiveSessionContext,
+  MAX_RETAINED_CODE_STUDIO_SESSIONS,
+  MAX_RETAINED_CODE_STUDIO_VERSIONS,
   resolveCodeStudioSessionIdForVisualSession,
   useCodeStudioStore,
 } from "@/stores/code-studio-store";
@@ -26,6 +28,33 @@ describe("code-studio-store", () => {
       expect(state.sessions["vs_1"].title).toBe("Chart");
       expect(state.sessions["vs_1"].status).toBe("streaming");
       expect(state.sessions["vs_1"].code).toBe("");
+    });
+
+    it("bounds completed session history without evicting live streams", () => {
+      const store = useCodeStudioStore.getState();
+      for (let index = 0; index < MAX_RETAINED_CODE_STUDIO_SESSIONS + 1; index += 1) {
+        const id = `vs_${index}`;
+        store.openSession(id, id, "html", 1);
+        store.completeSession(id, `<p>${index}</p>`, "html", 1);
+      }
+
+      const state = useCodeStudioStore.getState();
+      expect(Object.keys(state.sessions)).toHaveLength(MAX_RETAINED_CODE_STUDIO_SESSIONS);
+      expect(state.sessions.vs_0).toBeUndefined();
+      expect(state.sessions[`vs_${MAX_RETAINED_CODE_STUDIO_SESSIONS}`]).toBeDefined();
+    });
+
+    it("bounds full-code version history within a retained session", () => {
+      const store = useCodeStudioStore.getState();
+      for (let version = 1; version <= MAX_RETAINED_CODE_STUDIO_VERSIONS + 1; version += 1) {
+        store.openSession("vs_versions", "Versions", "html", version);
+        store.completeSession("vs_versions", `<p>${version}</p>`, "html", version);
+      }
+
+      const session = useCodeStudioStore.getState().sessions.vs_versions;
+      expect(session.versions).toHaveLength(MAX_RETAINED_CODE_STUDIO_VERSIONS);
+      expect(session.versions[0].version).toBe(2);
+      expect(session.versions.at(-1)?.version).toBe(MAX_RETAINED_CODE_STUDIO_VERSIONS + 1);
     });
 
     it("resets streaming state for existing complete session (new version)", () => {

@@ -47,6 +47,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
 class FakeDriver implements Driver {
   readonly kind = "acp" as const;
+  readonly backendSessionId: string;
   readonly runtime: Driver["runtime"] = {
     capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
     contextContinuity: "process",
@@ -61,7 +62,9 @@ class FakeDriver implements Driver {
   constructor(
     readonly sessionId: string,
     readonly emit: (event: DriverEvent) => void,
-  ) {}
+  ) {
+    this.backendSessionId = `backend-${sessionId}`;
+  }
   async start(): Promise<void> {}
   async prompt(text: string): Promise<void> {
     this.prompts.push(text);
@@ -83,7 +86,11 @@ class FakeDriver implements Driver {
 }
 
 let driver: FakeDriver;
-let launchConfig: { workspace: typeof WORKSPACE; profileId?: string } | undefined;
+let launchConfig: {
+  workspace: typeof WORKSPACE;
+  profileId?: string;
+  backendSessionId?: string | null;
+} | undefined;
 
 async function setup(): Promise<string> {
   _setDriverFactoryForTests(async (agent, sessionId, launch, onEvent) => {
@@ -111,6 +118,8 @@ describe("neko-session-store", () => {
     expect(useNekoSessionStore.getState().activeSessionId).toBe(id);
     expect(session(id).workspace).toEqual(WORKSPACE);
     expect(launchConfig?.workspace).toEqual(WORKSPACE);
+    expect(launchConfig?.backendSessionId).toBeNull();
+    expect(session(id).backendSessionId).toBe(`backend-${id}`);
 
     await useNekoSessionStore.getState().sendPrompt("Xin chào");
     expect(driver.prompts).toEqual(["Xin chào"]);
@@ -158,6 +167,8 @@ describe("neko-session-store", () => {
       sessionId: id,
       title: "Tiêu đề từ agent",
       updatedAt: "2026-08-13T12:00:00.000Z",
+      continuityLevel: "recovered",
+      revision: 4,
     });
 
     expect(session(id)).toMatchObject({
@@ -168,6 +179,7 @@ describe("neko-session-store", () => {
     expect(session(id).updatedAt).toBeGreaterThanOrEqual(
       Date.parse("2026-08-13T12:00:00.000Z"),
     );
+    expect(session(id).statusDetail).toContain("không tự chạy lại");
     await useNekoSessionStore.getState().setConfigOption("mode", "plan");
     expect(driver.configChanges).toEqual([{ optionId: "mode", value: "plan" }]);
     expect(session(id).pendingControlId).toBeNull();
@@ -306,6 +318,7 @@ describe("neko-session-store", () => {
       type: "activity",
       sessionId: id,
       activity: { id: "t1", title: "Write(hello.txt)", kind: "file", status: "pending",
+        operation: "update", locations: [{ path: "C:/tmp/project/hello.txt" }],
       },
     });
     emit({ type: "answer-delta", sessionId: id, text: "Chào " });
@@ -319,6 +332,8 @@ describe("neko-session-store", () => {
         kind: "file",
         status: "failed",
         detail: "Denied by user",
+        operation: "update",
+        locations: [{ path: "C:/tmp/project/hello.txt" }],
       },
     });
     emit({ type: "turn-finished", sessionId: id, stopReason: "end_turn" });
@@ -333,6 +348,9 @@ describe("neko-session-store", () => {
     });
     expect(blocks[2]).toMatchObject({ content: "Chào bạn!" });
     expect(session(id).status).toBe("idle");
+    expect(
+      session(id).events.filter((event) => event.data.type === "workspace-activity"),
+    ).toHaveLength(2);
   });
 
   it("passes permission requests through and resolves them on the driver", async () => {

@@ -116,7 +116,117 @@ async function startDriverWithSessionResult(
   return driver;
 }
 
+async function startDurableDriver(
+  events: DriverEvent[],
+  transport: FakeTransport,
+  resumeSessionId?: string,
+): Promise<AcpDriver> {
+  const driver = new AcpDriver({
+    sessionId: "local-durable",
+    cwd: "C:/tmp/project",
+    ...(resumeSessionId ? { resumeSessionId } : {}),
+    transport,
+    onEvent: (event) => events.push(event),
+  });
+  const starting = driver.start();
+  await tick();
+  transport.inject({
+    jsonrpc: "2.0",
+    id: transport.sent[0].id,
+    result: {
+      protocolVersion: 1,
+      agentCapabilities: {
+        loadSession: true,
+        sessionCapabilities: { list: {}, resume: {}, close: {} },
+      },
+    },
+  });
+  await tick();
+  const sessionRequest = transport.sent[1];
+  transport.inject({
+    jsonrpc: "2.0",
+    id: sessionRequest.id,
+    result: resumeSessionId
+      ? { configOptions: [], modes: { currentModeId: "default", availableModes: [] } }
+      : { sessionId: "neko-durable-new", configOptions: [] },
+  });
+  await starting;
+  return driver;
+}
+
 describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
+  it("creates a durable ACP session when the agent advertises resume", async () => {
+    const events: DriverEvent[] = [];
+    const transport = new FakeTransport();
+    const driver = await startDurableDriver(events, transport);
+
+    expect(transport.sent[1]).toMatchObject({
+      method: "session/new",
+      params: { cwd: "C:/tmp/project", mcpServers: [] },
+    });
+    expect(driver.backendSessionId).toBe("neko-durable-new");
+    expect(driver.runtime.contextContinuity).toBe("resumable");
+  });
+
+  it("resumes the provider-owned session without replay or a replacement session/new", async () => {
+    const events: DriverEvent[] = [];
+    const transport = new FakeTransport();
+    const driver = await startDurableDriver(events, transport, "neko-durable-existing");
+
+    expect(transport.sent[1]).toMatchObject({
+      method: "session/resume",
+      params: {
+        sessionId: "neko-durable-existing",
+        cwd: "C:/tmp/project",
+        mcpServers: [],
+      },
+    });
+    expect(transport.sent.some((frame) => frame.method === "session/load")).toBe(false);
+    expect(transport.sent.some((frame) => frame.method === "session/new")).toBe(false);
+    expect(driver.backendSessionId).toBe("neko-durable-existing");
+    expect(driver.runtime.contextContinuity).toBe("resumable");
+  });
+
+  it("fails visibly instead of losing context when a stored session cannot resume", async () => {
+    const events: DriverEvent[] = [];
+    const transport = new FakeTransport();
+    const driver = new AcpDriver({
+      sessionId: "local-legacy",
+      cwd: "C:/tmp/project",
+      resumeSessionId: "neko-durable-existing",
+      transport,
+      onEvent: (event) => events.push(event),
+    });
+    const starting = driver.start();
+    await tick();
+    transport.inject({
+      jsonrpc: "2.0",
+      id: transport.sent[0].id,
+      result: { protocolVersion: 1, agentCapabilities: {} },
+    });
+
+    await expect(starting).rejects.toThrow("không hỗ trợ session/resume");
+    expect(transport.sent.some((frame) => frame.method === "session/new")).toBe(false);
+  });
+
+  it("closes a durable ACP lease before terminating its transport", async () => {
+    const events: DriverEvent[] = [];
+    const transport = new FakeTransport();
+    const driver = await startDurableDriver(events, transport, "neko-durable-existing");
+
+    const disposing = driver.dispose();
+    await tick();
+    const closeRequest = transport.sent.at(-1)!;
+    expect(closeRequest).toMatchObject({
+      method: "session/close",
+      params: { sessionId: "neko-durable-existing" },
+    });
+    expect(transport.killed).toBe(false);
+    transport.inject({ jsonrpc: "2.0", id: closeRequest.id, result: {} });
+    await disposing;
+    expect(transport.killed).toBe(true);
+  });
+
   it("normalizes Neko's reported modes during session creation", async () => {
     const events: DriverEvent[] = [];
     const transport = new FakeTransport();
@@ -298,6 +408,7 @@ describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
           sessionUpdate: "session_info_update",
           title: "Agent-generated title",
           updatedAt: "2026-08-13T12:00:00.000Z",
+          _meta: { continuityLevel: "recovered", revision: 7 },
         },
       },
     });
@@ -308,6 +419,8 @@ describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
     expect(events.find((event) => event.type === "session-info")).toMatchObject({
       title: "Agent-generated title",
       updatedAt: "2026-08-13T12:00:00.000Z",
+      continuityLevel: "recovered",
+      revision: 7,
     });
     const controls = events.filter((event) => event.type === "session-controls");
     expect(controls.some((event) =>
@@ -381,6 +494,16 @@ describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
     expect(failed.length).toBeGreaterThan(0);
     for (const e of failed) {
       if (e.type === "activity") expect(e.activity.title).not.toBe("Tool call");
+    }
+
+    const fileActivities = byType("activity").filter(
+      (event) => event.type === "activity" && event.activity.kind === "file",
+    );
+    expect(fileActivities.length).toBeGreaterThan(0);
+    for (const event of fileActivities) {
+      if (event.type !== "activity") continue;
+      expect(event.activity.locations?.[0]?.path).toContain("hello.txt");
+      expect(event.activity.operation).toMatch(/read|update/);
     }
 
     // Our permission answer went back on the agent's rpc id, fail-closed shape.

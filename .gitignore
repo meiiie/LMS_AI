@@ -80,6 +80,8 @@ tools/release/__pycache__/
 !/tools/wiii_self_harness/
 !/tools/wiii_self_harness/**
 tools/wiii_self_harness/__pycache__/
+# Compatibility token for the v1 harness; removed with the v2 cleanup.
+tools/wiii_understand_harness/
 
 # === pip install artifacts ===
 maritime-ai-service/=*

@@ -2,7 +2,7 @@
  * Root App component — initializes stores, mounts layout.
  * Sprint 106: Loading screen during init.
  */
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useAuthStore } from "@/stores/auth-store";
@@ -46,6 +46,8 @@ const PointyPreview = lazy(async () => {
   return { default: mod.PointyPreview };
 });
 
+const NekoMotionLab = lazy(async () => import("@/neko-motion-lab/NekoMotionLab"));
+
 const NekoChillApp = lazy(async () => import("@/neko-chill/NekoChillApp"));
 
 function BootSplash({ label }: { label: string }) {
@@ -59,6 +61,27 @@ function BootSplash({ label }: { label: string }) {
   );
 }
 
+function BootFailure({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div className="grid h-screen place-items-center bg-surface px-6">
+      <section className="w-full max-w-md rounded-2xl border border-border bg-surface-secondary p-6 text-center">
+        <WiiiAvatar state="error" size={44} />
+        <h1 className="mt-4 text-base font-semibold text-text">Wiii chưa khởi động xong</h1>
+        <p className="mt-2 break-words text-sm leading-6 text-text-tertiary">{error}</p>
+        <button
+          type="button"
+          className="mt-5 h-9 rounded-lg bg-text px-4 text-sm font-medium text-surface transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/30"
+          onClick={onRetry}
+        >
+          Thử khởi động lại
+        </button>
+      </section>
+    </div>
+  );
+}
+
+type CloudBootstrapPhase = "settings" | "auth" | "conversations" | "ready" | "failed";
+
 function WiiiCloudApp() {
   const { loadSettings, settings, updateSettings, isLoaded: settingsLoaded } = useSettingsStore();
   const { loadAuth, loginWithTokens, isAuthenticated, isLoaded: authLoaded, authMode, user: authUser, isTokenExpiringSoon, refreshAccessToken } = useAuthStore();
@@ -70,6 +93,9 @@ function WiiiCloudApp() {
   const { loadConversations, isLoaded: chatsLoaded } = useChatStore();
   const { commandPaletteOpen, closeCommandPalette } = useUIStore();
   const { addToast } = useToastStore();
+  const [bootstrapPhase, setBootstrapPhase] = useState<CloudBootstrapPhase>("settings");
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
 
   // Register global keyboard shortcuts
   useKeyboardShortcuts();
@@ -125,21 +151,37 @@ function WiiiCloudApp() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Initialize on mount
+  // One ordered bootstrap owns persisted state initialization. A failed load
+  // now reaches an actionable screen instead of leaving the splash forever.
   useEffect(() => {
+    let cancelled = false;
     async function init() {
-      // 1. Load persisted settings
-      await loadSettings();
-      // 2. Load persisted auth state (Sprint 157)
-      await loadAuth();
-      // 3. Load persisted conversations
-      await loadConversations();
+      setBootstrapError(null);
+      try {
+        setBootstrapPhase("settings");
+        await loadSettings();
+        if (cancelled) return;
+        setBootstrapPhase("auth");
+        await loadAuth();
+        if (cancelled) return;
+        setBootstrapPhase("conversations");
+        await loadConversations();
+        if (!cancelled) setBootstrapPhase("ready");
+      } catch (error) {
+        if (cancelled) return;
+        setBootstrapError(error instanceof Error ? error.message : String(error));
+        setBootstrapPhase("failed");
+      }
     }
-    init();
-  }, [loadSettings, loadAuth, loadConversations]);
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, [bootstrapAttempt, loadSettings, loadAuth, loadConversations]);
 
   // When settings AND auth are loaded, initialize client and start health polling
   useEffect(() => {
+    let cancelled = false;
     // Sprint 218: Guard on BOTH settingsLoaded AND authLoaded to prevent race condition
     // Without authLoaded, API calls fire before OAuth tokens are available → 401
     if (!settingsLoaded || !authLoaded) return;
@@ -183,11 +225,13 @@ function WiiiCloudApp() {
       detectSubdomainOrg();
 
       // Sprint 156: Fetch organizations + restore saved org
-      fetchOrganizations().then(async () => {
+      void fetchOrganizations().then(async () => {
+        if (cancelled) return;
         // Sprint 181: Fetch admin context after auth/org init.
         // Issue #112: await it so the auto-pick branch below can rely on
         // isSystemAdmin() being populated.
         await fetchAdminContext();
+        if (cancelled) return;
         // Sprint 175: If subdomain detected, use it (skip saved org)
         const subdomainOrg = useOrgStore.getState().subdomainOrgId;
         let orgToActivate = subdomainOrg || settings.organization_id;
@@ -211,7 +255,9 @@ function WiiiCloudApp() {
     }
 
     return () => {
+      cancelled = true;
       stopPolling();
+      setOnReconnect(null);
     };
   }, [settingsLoaded, authLoaded, isAuthenticated, settings.server_url, settings.api_key, settings.user_id, settings.user_role, startPolling, stopPolling, fetchDomains, fetchOrganizations, setActiveOrg, setOrgFilter, setOnReconnect, addToast, detectSubdomainOrg, fetchAdminContext, refreshAccessToken]);
 
@@ -266,12 +312,27 @@ function WiiiCloudApp() {
   }, [authMode, authUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Loading screen while stores initialize
-  if (!settingsLoaded || !authLoaded || !chatsLoaded) {
-    return <BootSplash label="Wiii đang thức dậy..." />;
+  if (bootstrapPhase === "failed") {
+    return (
+      <BootFailure
+        error={bootstrapError || "Không thể đọc dữ liệu khởi động."}
+        onRetry={() => setBootstrapAttempt((attempt) => attempt + 1)}
+      />
+    );
+  }
+
+  if (!settingsLoaded || !authLoaded || !chatsLoaded || bootstrapPhase !== "ready") {
+    const label =
+      bootstrapPhase === "settings"
+        ? "Wiii đang đọc cài đặt..."
+        : bootstrapPhase === "auth"
+          ? "Wiii đang khôi phục đăng nhập..."
+          : "Wiii đang mở các cuộc trò chuyện...";
+    return <BootSplash label={label} />;
   }
 
   // Sprint 157: Show login screen when not authenticated
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !settings.server_url) {
     return (
       <ErrorBoundary>
         <Suspense fallback={<BootSplash label="Wiii đang mở cổng đăng nhập..." />}>
@@ -341,6 +402,16 @@ export default function App() {
     return (
       <Suspense fallback={<BootSplash label="Wiii Pointy đang khởi động..." />}>
         <PointyPreview />
+      </Suspense>
+    );
+  }
+
+  // Standalone Neko behavior rig: no auth, cloud polling, chat, or agent
+  // runtime. Research is intentionally isolated from production state.
+  if (window.location.search.includes("preview=neko-motion")) {
+    return (
+      <Suspense fallback={<BootSplash label="Neko Motion Lab đang mở..." />}>
+        <NekoMotionLab />
       </Suspense>
     );
   }

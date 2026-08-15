@@ -12,6 +12,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health::check_server_reachable,
             commands::files::pick_document,
+            commands::files::neko_list_workspace_files,
+            commands::files::neko_read_workspace_file,
+            commands::files::neko_workspace_changes,
+            commands::files::neko_workspace_diff,
             commands::splash::close_splash,
             commands::neko_agent::neko_detect_agents,
             commands::neko_agent::neko_agent_profiles,

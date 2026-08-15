@@ -34,6 +34,7 @@ export interface JsonRpcClientHandlers {
 interface PendingRequest {
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
+  timeout?: ReturnType<typeof setTimeout>;
 }
 
 const METHOD_NOT_FOUND = -32601;
@@ -53,13 +54,21 @@ export class AcpJsonRpcClient {
   }
 
   /** Send a client→agent request and await its result. */
-  request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (this.disposed) return Promise.reject(new Error("client disposed"));
     const id = this.nextId++;
     const frame = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timeout = timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            if (!this.pending.delete(id)) return;
+            reject(new Error(`${method} timed out`));
+          }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timeout });
       this.transport.send(frame).catch((err: unknown) => {
+        const entry = this.pending.get(id);
+        if (entry?.timeout) clearTimeout(entry.timeout);
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       });
@@ -79,7 +88,10 @@ export class AcpJsonRpcClient {
   }
 
   private failAllPending(reason: string): void {
-    for (const [, entry] of this.pending) entry.reject(new Error(reason));
+    for (const [, entry] of this.pending) {
+      if (entry.timeout) clearTimeout(entry.timeout);
+      entry.reject(new Error(reason));
+    }
     this.pending.clear();
   }
 
@@ -131,6 +143,7 @@ export class AcpJsonRpcClient {
         return;
       }
       this.pending.delete(frame.id);
+      if (entry.timeout) clearTimeout(entry.timeout);
       if (frame.error) {
         entry.reject(new Error(frame.error.message ?? `agent error ${frame.error.code}`));
       } else {

@@ -17,6 +17,7 @@ import type {
   PermissionOption,
   TurnStopReason,
 } from "../types";
+import { APP_VERSION } from "../../../lib/constants";
 import {
   AcpJsonRpcClient,
   UnsupportedMethodError,
@@ -38,6 +39,8 @@ interface AcpDriverOptions {
   sessionId: string;
   /** Absolute project directory for `session/new` (ACP requires absolute). */
   cwd: string;
+  /** Provider-owned durable ACP session id from a previous process. */
+  resumeSessionId?: string | null;
   transport: AcpTransport;
   onEvent: DriverEventHandler;
 }
@@ -83,6 +86,36 @@ function activityStatus(status: unknown): DriverActivity["status"] {
     default:
       return "pending";
   }
+}
+
+function activityOperation(
+  kind: unknown,
+  toolName: unknown,
+): DriverActivity["operation"] | undefined {
+  if (kind === "read") return "read";
+  if (kind === "delete") return "delete";
+  if (kind === "move") return "move";
+  if (kind === "edit") {
+    return typeof toolName === "string" && /create/i.test(toolName)
+      ? "create"
+      : "update";
+  }
+  return undefined;
+}
+
+function activityLocations(value: unknown): DriverActivity["locations"] {
+  if (!Array.isArray(value)) return undefined;
+  const locations = value.flatMap((item) => {
+    const location = record(item);
+    if (!location || typeof location.path !== "string" || !location.path) return [];
+    return [{
+      path: location.path,
+      ...(typeof location.line === "number" && Number.isFinite(location.line)
+        ? { line: location.line }
+        : {}),
+    }];
+  });
+  return locations.length ? locations : undefined;
 }
 
 function permissionOptionKind(kind: unknown): PermissionOption["kind"] {
@@ -264,17 +297,21 @@ export class AcpDriver implements Driver {
       "permission-resolution",
       "session-config",
     ],
-    // ACP v0 creates a fresh session/new for each process; Wiii does not
-    // pretend that a restored transcript resumes hidden provider memory.
+    // Upgraded after initialize only when the agent advertises session/resume.
     contextContinuity: "process",
     // cwd scopes the session semantically, but no OS sandbox is enforced.
     workspaceIsolation: "advisory",
   };
 
   private readonly cwd: string;
+  private readonly resumeSessionId: string | null;
   private readonly emit: DriverEventHandler;
   private readonly client: AcpJsonRpcClient;
   private acpSessionId: string | null = null;
+  private supportsClose = false;
+  get backendSessionId(): string | null {
+    return this.acpSessionId;
+  }
   private turnRunning = false;
   private permissionSeq = 0;
   private readonly pendingPermissions = new Map<string, PendingPermission>();
@@ -289,6 +326,7 @@ export class AcpDriver implements Driver {
   constructor(options: AcpDriverOptions) {
     this.sessionId = options.sessionId;
     this.cwd = options.cwd;
+    this.resumeSessionId = options.resumeSessionId ?? null;
     this.emit = options.onEvent;
     this.client = new AcpJsonRpcClient(options.transport, {
       onAgentRequest: (method, params) => this.handleAgentRequest(method, params),
@@ -310,8 +348,12 @@ export class AcpDriver implements Driver {
         fs: { readTextFile: false, writeTextFile: false },
         terminal: false,
       },
-      clientInfo: { name: "wiii-neko-chill", title: "Wiii — Neko Chill", version: "0.1.0" },
-    })) as { protocolVersion?: unknown };
+      clientInfo: {
+        name: "wiii-neko-chill",
+        title: "Wiii Workbench · Neko Chill",
+        version: APP_VERSION,
+      },
+    })) as { protocolVersion?: unknown; agentCapabilities?: unknown };
     // T602: version drift between agents (neko acp vs Gemini CLI) must be an
     // actionable error, not a stream of confusing protocol failures.
     if (
@@ -322,9 +364,20 @@ export class AcpDriver implements Driver {
         `Agent nói ACP v${init.protocolVersion}, Wiii cần v${ACP_PROTOCOL_VERSION} — hãy cập nhật agent hoặc Wiii.`,
       );
     }
-    const session = (await this.client.request("session/new", {
+    const capabilities = record(init?.agentCapabilities);
+    const sessionCapabilities = record(capabilities?.sessionCapabilities);
+    const canResume = capabilities?.loadSession === true && record(sessionCapabilities?.resume) !== null;
+    this.supportsClose = record(sessionCapabilities?.close) !== null;
+    if (this.resumeSessionId && !canResume) {
+      throw new Error(
+        "Phiên này có checkpoint ACP bền vững nhưng agent hiện tại không hỗ trợ session/resume; Wiii sẽ không âm thầm tạo phiên mới và làm mất ngữ cảnh.",
+      );
+    }
+    const method = this.resumeSessionId ? "session/resume" : "session/new";
+    const session = (await this.client.request(method, {
+      ...(this.resumeSessionId ? { sessionId: this.resumeSessionId } : {}),
       cwd: this.cwd,
-      // neko-core refuses client-supplied MCP servers; always empty in v0.
+      // Neko refuses client-supplied MCP servers; Wiii never expands authority here.
       mcpServers: [],
     })) as {
       sessionId?: unknown;
@@ -332,10 +385,14 @@ export class AcpDriver implements Driver {
       modes?: unknown;
       models?: unknown;
     };
-    if (typeof session?.sessionId !== "string" || !session.sessionId) {
-      throw new Error("session/new returned no sessionId");
+    const backendSessionId = method === "session/resume"
+      ? this.resumeSessionId
+      : session?.sessionId;
+    if (typeof backendSessionId !== "string" || !backendSessionId) {
+      throw new Error(`${method} returned no sessionId`);
     }
-    this.acpSessionId = session.sessionId;
+    this.acpSessionId = backendSessionId;
+    this.runtime.contextContinuity = canResume ? "resumable" : "process";
     this.stableControls = normalizeConfigOptions(session.configOptions);
     this.legacyMode = normalizeLegacyMode(session.modes);
     this.legacyModel = normalizeLegacyModel(session.models);
@@ -441,6 +498,13 @@ export class AcpDriver implements Driver {
       pending.resolve({ outcome: { outcome: "cancelled" } });
     }
     this.pendingPermissions.clear();
+    if (this.acpSessionId && this.supportsClose) {
+      await this.client
+        .request("session/close", { sessionId: this.acpSessionId }, 1_000)
+        .catch(() => {
+          /* A crashed or legacy agent may not answer; transport cleanup still wins. */
+        });
+    }
     await this.client.dispose();
   }
 
@@ -510,6 +574,10 @@ export class AcpDriver implements Driver {
         return;
       }
       case "session_info_update": {
+        const meta = record(update._meta);
+        const continuityLevel = meta?.continuityLevel === "durable" || meta?.continuityLevel === "recovered"
+          ? meta.continuityLevel
+          : undefined;
         this.emitEvent({
           type: "session-info",
           sessionId: this.sessionId,
@@ -521,6 +589,10 @@ export class AcpDriver implements Driver {
             typeof update.updatedAt === "string" || update.updatedAt === null
               ? update.updatedAt
               : undefined,
+          ...(continuityLevel ? { continuityLevel } : {}),
+          ...(typeof meta?.revision === "number" && Number.isFinite(meta.revision)
+            ? { revision: meta.revision }
+            : {}),
         });
         return;
       }
@@ -559,6 +631,15 @@ export class AcpDriver implements Driver {
               ? activityStatus(update.status)
               : previous?.status ?? "pending",
           detail: detailSource || previous?.detail,
+          toolName:
+            typeof update.name === "string" && update.name
+              ? update.name
+              : previous?.toolName,
+          operation:
+            activityOperation(update.kind, update.name) ?? previous?.operation,
+          locations: activityLocations(update.locations) ?? previous?.locations,
+          rawInput: update.rawInput ?? previous?.rawInput,
+          rawOutput: update.rawOutput ?? previous?.rawOutput,
         };
         this.activities.set(id, activity);
         this.emitEvent({ type: "activity", sessionId: this.sessionId, activity });

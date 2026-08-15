@@ -1,5 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
-import type { DriverCapability, DriverKind } from "./drivers/types";
+import type {
+  DriverCapability,
+  DriverFileLocation,
+  DriverFileOperation,
+  DriverKind,
+} from "./drivers/types";
 import type { RuntimeProviderSnapshot } from "./runtime-manager";
 
 export const NEKO_SESSION_EVENT_VERSION = 1;
@@ -85,6 +90,16 @@ export type NekoSessionEventData =
       type: "runtime-attach-failed";
       providerId: string;
       reason: string;
+    }
+  | {
+      type: "workspace-activity";
+      activityId: string;
+      title: string;
+      status: "pending" | "in_progress" | "completed" | "cancelled" | "failed";
+      operation: DriverFileOperation | null;
+      locations: DriverFileLocation[];
+      toolName?: string;
+      detail?: string;
     };
 
 /**
@@ -137,6 +152,9 @@ function isRuntimeProvider(value: unknown): value is RuntimeProviderSnapshot {
     typeof provider.providerId === "string" &&
     typeof provider.instanceId === "string" &&
     (provider.kind === "acp" || provider.kind === "wiii-cloud") &&
+    (provider.backendSessionId === undefined ||
+      provider.backendSessionId === null ||
+      typeof provider.backendSessionId === "string") &&
     Array.isArray(provider.capabilities) &&
     provider.capabilities.every((capability) =>
       typeof capability === "string" &&
@@ -204,6 +222,28 @@ function isValidEventData(data: Record<string, unknown>): boolean {
       );
     case "runtime-attach-failed":
       return typeof data.providerId === "string" && typeof data.reason === "string";
+    case "workspace-activity":
+      return (
+        typeof data.activityId === "string" &&
+        typeof data.title === "string" &&
+        ["pending", "in_progress", "completed", "cancelled", "failed"].includes(
+          data.status as string,
+        ) &&
+        (data.operation === null || ["read", "create", "update", "delete", "move"].includes(
+          data.operation as string,
+        )) &&
+        Array.isArray(data.locations) &&
+        data.locations.every((location) => {
+          if (!location || typeof location !== "object") return false;
+          const candidate = location as Record<string, unknown>;
+          return (
+            typeof candidate.path === "string" &&
+            (candidate.line === undefined || typeof candidate.line === "number")
+          );
+        }) &&
+        (data.toolName === undefined || typeof data.toolName === "string") &&
+        (data.detail === undefined || typeof data.detail === "string")
+      );
     default:
       return false;
   }

@@ -11,6 +11,9 @@
 import { create } from "zustand";
 import type { ChatCodeStudioContext, VisualPayload } from "@/api/types";
 
+export const MAX_RETAINED_CODE_STUDIO_SESSIONS = 12;
+export const MAX_RETAINED_CODE_STUDIO_VERSIONS = 20;
+
 /** Metadata from backend code_open/code_complete events — session-level, not per-version. */
 type ChatCodeStudioActiveSession = NonNullable<
   ChatCodeStudioContext["active_session"]
@@ -62,6 +65,24 @@ function resolveStudioLane(
   lane: CodeStudioMetadata["studioLane"],
 ): ChatCodeStudioActiveSession["studio_lane"] {
   return lane || "app";
+}
+
+function makeRoomForSession(
+  sessions: Record<string, CodeStudioSession>,
+): Record<string, CodeStudioSession> {
+  const entries = Object.values(sessions);
+  if (entries.length < MAX_RETAINED_CODE_STUDIO_SESSIONS) return sessions;
+
+  // Prefer completed history. An in-flight session must keep accepting its
+  // remaining SSE chunks even when another code surface opens.
+  const candidate = entries
+    .filter((session) => session.status !== "streaming")
+    .sort((left, right) => left.createdAt - right.createdAt)[0];
+  if (!candidate) return sessions;
+
+  const next = { ...sessions };
+  delete next[candidate.sessionId];
+  return next;
 }
 
 export function buildCodeStudioActiveSessionContext(
@@ -162,10 +183,11 @@ export const useCodeStudioStore = create<CodeStudioState>((set, get) => ({
           },
         };
       }
+      const retainedSessions = makeRoomForSession(state.sessions);
       return {
         activeSessionId: sessionId,
         sessions: {
-          ...state.sessions,
+          ...retainedSessions,
           [sessionId]: {
             sessionId,
             title,
@@ -234,7 +256,9 @@ export const useCodeStudioStore = create<CodeStudioState>((set, get) => ({
             language,
             streamChunks: {},
             activeVersion: version,
-            versions: [...existingVersions, newVersion],
+            versions: [...existingVersions, newVersion].slice(
+              -MAX_RETAINED_CODE_STUDIO_VERSIONS,
+            ),
             visualPayload,
             // Store visual_session_id mapping so CodeStudioCard can link to VisualBlock
             ...(visualSessionId ? { visualSessionId } : {}),

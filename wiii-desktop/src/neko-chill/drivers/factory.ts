@@ -75,6 +75,7 @@ export async function spawnTauriTransport(
 export interface DriverLaunchConfig {
   workspace: WorkspaceRef;
   profileId?: string;
+  backendSessionId?: string | null;
 }
 
 export async function createDriverForAgent(
@@ -101,6 +102,7 @@ export async function createDriverForAgent(
   const driver = new AcpDriver({
     sessionId,
     cwd: launch.workspace.path,
+    resumeSessionId: launch.backendSessionId,
     transport,
     onEvent,
   });

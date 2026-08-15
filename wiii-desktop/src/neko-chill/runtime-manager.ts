@@ -46,6 +46,7 @@ export interface RuntimeProviderSnapshot extends DriverRuntimeDescriptor {
   providerId: string;
   instanceId: string;
   kind: DriverKind;
+  backendSessionId: string | null;
 }
 
 interface RuntimeBinding {
@@ -315,6 +316,7 @@ export class RuntimeRegistry {
         providerId,
         instanceId,
         kind: driver.kind,
+        backendSessionId: driver.backendSessionId ?? null,
         capabilities: [...new Set(driver.runtime.capabilities)],
         contextContinuity: driver.runtime.contextContinuity,
         workspaceIsolation: driver.runtime.workspaceIsolation,

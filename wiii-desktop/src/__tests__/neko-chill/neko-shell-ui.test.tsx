@@ -1,12 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import NekoChillApp from "@/neko-chill/NekoChillApp";
-import { formatReasoningLabel } from "@/neko-chill/components/NekoTranscript";
+import {
+  formatReasoningLabel,
+  shouldVirtualizeTranscript,
+} from "@/neko-chill/components/NekoTranscript";
 import { useNekoAgentStore } from "@/neko-chill/stores/neko-agent-store";
 import {
   type NekoSession,
   useNekoSessionStore,
 } from "@/neko-chill/stores/neko-session-store";
+import { useNekoWorkspaceStore } from "@/neko-chill/stores/neko-workspace-store";
 
 function makeSession(
   id: string,
@@ -57,6 +61,7 @@ describe("Neko Chill shell UI", () => {
       hydrationError: null,
       hydrate: vi.fn(async () => {}),
     });
+    useNekoWorkspaceStore.setState({ sessions: {} });
   });
 
   it("keeps history closed on hydration failure and exposes a retry", () => {
@@ -85,6 +90,39 @@ describe("Neko Chill shell UI", () => {
     expect(formatReasoningLabel("Keep **inner emphasis** here")).toBe(
       "Keep **inner emphasis** here",
     );
+  });
+
+  it("virtualizes only sessions long enough to benefit", () => {
+    expect(shouldVirtualizeTranscript(50)).toBe(false);
+    expect(shouldVirtualizeTranscript(51)).toBe(true);
+  });
+
+  it("lets readers pause tail-following and jump back to the newest message", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên dài",
+          { path: "C:/work/neko", name: "Neko" },
+          { status: "idle", statusDetail: undefined, messages: [
+            { id: "one", role: "user", text: "Tin nhắn" },
+          ] },
+        ),
+      },
+      activeSessionId: "active",
+    });
+    render(<NekoChillApp />);
+
+    const transcript = screen.getByTestId("neko-transcript");
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, value: 100, writable: true },
+    });
+    fireEvent.scroll(transcript);
+    const jump = screen.getByRole("button", { name: "Đi tới tin nhắn mới nhất" });
+    fireEvent.click(jump);
+    expect(screen.queryByRole("button", { name: "Đi tới tin nhắn mới nhất" })).toBeNull();
   });
 
   it("exposes the mode menu state and closes it with Escape", () => {
@@ -229,6 +267,32 @@ describe("Neko Chill shell UI", () => {
     expect(screen.queryByTestId("session-sidebar")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Hiện cây dự án và phiên" }));
     expect(screen.getByTestId("session-sidebar")).toBeTruthy();
+  });
+
+  it("opens, closes, and dismisses the session workspace with Escape", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên workspace",
+          { path: "C:/work/neko", name: "Neko" },
+          { status: "idle", statusDetail: undefined },
+        ),
+      },
+      activeSessionId: "active",
+    });
+
+    render(<NekoChillApp />);
+    fireEvent.click(screen.getByRole("button", { name: "Mở workspace" }));
+    expect(screen.getByTestId("neko-workspace-pane")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Files/ }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("neko-workspace-pane")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mở workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Đóng workspace" }));
+    expect(screen.queryByTestId("neko-workspace-pane")).toBeNull();
   });
 
   it("gives an empty live session a useful, non-executing start state", () => {

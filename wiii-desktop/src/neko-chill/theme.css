@@ -1,11 +1,10 @@
 /**
- * Neko Chill design tokens — waku-fidelity palette (#893, task #12).
+ * Neko Chill design tokens — Neko Family v1.
  *
- * Values studied from references/waku (theme.rs — design PARAMETERS, not
- * code; the GPL wall covers expression, and these are reproduced by hand
- * in our own system). Scoped to .nk-root so the cloud surface keeps wiii's
- * own theme. Light is the :root default; .dark (Tailwind class strategy)
- * flips the palette.
+ * The neutral workbench remains deliberately quiet. Cocoa Lift is the
+ * accessible light-theme action ink; Sky is the dark-theme live/status
+ * accent. Scoped to .nk-root so organization branding in Wiii Cloud remains
+ * independent. Light is the default; .dark flips the palette.
  */
 
 .nk-root {
@@ -19,14 +18,14 @@
 
   --nk-border: rgba(28, 32, 41, 0.08);
   --nk-border-strong: rgba(28, 32, 41, 0.15);
-  --nk-focus-soft: rgba(80, 92, 118, 0.12);
+  --nk-focus-soft: rgba(69, 66, 65, 0.14);
 
   --nk-text: #242424;
   --nk-text-2: #666666;
   --nk-text-3: #858585;
   --nk-ghost: #a4a4a4;
 
-  --nk-accent: #c85f44;
+  --nk-accent: #454241;
   --nk-inverse: #202227;
   --nk-on-inverse: #f8f8f9;
 
@@ -49,14 +48,14 @@
 
   --nk-border: rgba(229, 233, 240, 0.07);
   --nk-border-strong: rgba(229, 233, 240, 0.14);
-  --nk-focus-soft: rgba(170, 184, 215, 0.12);
+  --nk-focus-soft: rgba(187, 221, 242, 0.14);
 
   --nk-text: #e2e2e2;
   --nk-text-2: #a3a3a3;
   --nk-text-3: #7d7d7d;
   --nk-ghost: #575757;
 
-  --nk-accent: #e2795b;
+  --nk-accent: #bbddf2;
   --nk-inverse: #e7e9ec;
   --nk-on-inverse: #17181c;
 

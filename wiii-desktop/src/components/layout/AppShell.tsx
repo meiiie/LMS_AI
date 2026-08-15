@@ -14,7 +14,9 @@ import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 import { ToastContainer } from "@/components/common/Toast";
 import { useUIStore } from "@/stores/ui-store";
+import { useChatStore } from "@/stores/chat-store";
 import { useConnectionStore } from "@/stores/connection-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { slideDown } from "@/lib/animations";
 
 const ChatView = lazy(async () => {
@@ -111,7 +113,14 @@ export function AppShell() {
   const { sidebarOpen, activeView, setSidebarOpen, toggleSidebar } =
     useUIStore();
   const hasRightPanel = useUIStore((s) => s.hasRightPanel());
-  const { status, checkHealth } = useConnectionStore();
+  const rightPane = useUIStore((s) => s.rightPane);
+  const closeWorkspacePane = useUIStore((s) => s.closeWorkspacePane);
+  const activeConversationId = useChatStore((s) => s.activeConversationId);
+  const [workspaceConversationId, setWorkspaceConversationId] = useState<string | null>(
+    activeConversationId,
+  );
+  const { status, isChecking, errorMessage, checkHealth } = useConnectionStore();
+  const serverUrl = useSettingsStore((state) => state.settings.server_url);
   const isMobile = useIsMobile();
 
   const showDisconnected = status === "disconnected";
@@ -148,6 +157,15 @@ export function AppShell() {
     mediaQuery.addListener(handleChange);
     return () => mediaQuery.removeListener(handleChange);
   }, [setSidebarOpen]);
+
+  // A selected preview/artifact belongs to one conversation. Never carry a
+  // stale resource id into another thread.
+  useEffect(() => {
+    if (workspaceConversationId !== activeConversationId) {
+      closeWorkspacePane();
+      setWorkspaceConversationId(activeConversationId);
+    }
+  }, [activeConversationId, closeWorkspacePane, workspaceConversationId]);
 
   return (
     <div className="flex flex-col h-screen">
@@ -190,13 +208,19 @@ export function AppShell() {
                 <WifiOff size={14} className="shrink-0 text-red-500" />
                 <span className="flex-1 text-red-700 dark:text-red-300">
                   Mình mất liên lạc với server rồi.
+                  <span className="ml-1 text-red-600/80 dark:text-red-300/80">
+                    {serverUrl || "Chưa chọn địa chỉ server"}
+                    {errorMessage ? ` · ${errorMessage}` : ""}
+                  </span>
                 </span>
                 <button
                   onClick={checkHealth}
+                  disabled={isChecking}
+                  aria-busy={isChecking}
                   className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
                 >
-                  <RefreshCw size={12} />
-                  Thử lại nhé
+                  <RefreshCw size={12} className={isChecking ? "animate-spin" : ""} />
+                  {isChecking ? "Đang thử…" : "Thử lại nhé"}
                 </button>
               </motion.div>
             )}
@@ -239,9 +263,9 @@ export function AppShell() {
                   <Panel id="right-panel" defaultSize={55} minSize={30}>
                     <div className="h-full flex flex-col overflow-hidden">
                       <Suspense fallback={null}>
-                        <ArtifactPanel inline />
-                        <CodeStudioPanel inline />
-                        <PreviewPanel inline />
+                        {rightPane.kind === "artifact" && <ArtifactPanel inline />}
+                        {rightPane.kind === "code-studio" && <CodeStudioPanel inline />}
+                        {rightPane.kind === "preview" && <PreviewPanel inline />}
                       </Suspense>
                     </div>
                   </Panel>
@@ -269,9 +293,9 @@ export function AppShell() {
           {/* Mobile fallback: panels render as fixed overlays on small screens */}
           {isMobile && (
             <>
-              <PreviewPanel />
-              <ArtifactPanel />
-              <CodeStudioPanel />
+              {rightPane.kind === "preview" && <PreviewPanel />}
+              {rightPane.kind === "artifact" && <ArtifactPanel />}
+              {rightPane.kind === "code-studio" && <CodeStudioPanel />}
             </>
           )}
         </Suspense>
