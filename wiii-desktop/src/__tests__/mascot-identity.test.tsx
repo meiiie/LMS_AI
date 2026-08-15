@@ -29,4 +29,11 @@ describe("Wiii Neko Peek identity", () => {
     expect(index.default).not.toContain("wiii-workbench-mark.svg");
     expect(index.default).toContain("/icon-192.png?v=6");
   });
+
+  it("lets the Rust shell own the single tray icon", async () => {
+    const configModule = await import("../../src-tauri/tauri.conf.json?raw");
+    const config = JSON.parse(configModule.default);
+
+    expect(config.app).not.toHaveProperty("trayIcon");
+  });
 });
