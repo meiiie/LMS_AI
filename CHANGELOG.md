@@ -43,6 +43,10 @@ single source of truth. A stable release tag is always `wiii-v<version>`.
   `VERSION` source of truth.
 - Desktop release validation now runs once before a fail-independent platform
   matrix; stable publication attests and checks the complete artifact set.
+- Stable publication now verifies exact filenames, sidecars, manifest
+  version/commit bindings, and the Windows signer thumbprint, with a protected
+  and publicly disclosed Windows-only break-glass path for hosted-runner
+  outages.
 - Linux AppImage packaging now includes the media framework needed for Wiii
   voice playback.
 

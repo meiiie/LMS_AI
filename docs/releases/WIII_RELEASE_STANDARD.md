@@ -62,11 +62,12 @@ The workflow expects these protected repository or environment secrets:
 - `WIII_WINDOWS_CERTIFICATE_PASSWORD`
 
 Use two GitHub environments: `candidate` contains no secrets and may run without
-approval; `release` contains the signing secrets and requires human approval.
-Use a code-signing certificate controlled by the project owner. Restrict the
-secrets to the `release` environment, rotate before expiry, and revoke
-immediately after suspected exposure. Never commit a PFX, password, private
-updater key, or decoded certificate.
+approval; `release` contains the signing secrets and requires approval from the
+project owner or an explicitly delegated release/security maintainer. Use a
+code-signing certificate controlled by the project owner. Restrict the secrets
+to the `release` environment, rotate before expiry, and revoke immediately after
+suspected exposure. Never commit a PFX, password, private updater key, or
+decoded certificate.
 
 ## 3. Required gates
 
@@ -80,8 +81,9 @@ Before a stable tag is created:
 6. The tagged commit is the exact commit approved for release.
 
 The stable workflow additionally verifies the tag, Windows installer
-Authenticode status, the complete five-binary/four-manifest matrix, SHA-256
-sidecars, JSON manifests, and GitHub provenance attestation.
+Authenticode status and exact signer thumbprint, the complete
+five-binary/four-manifest matrix, every SHA-256 sidecar, manifest version and
+commit bindings, and GitHub provenance attestation.
 
 ## 4. Operator commands
 
@@ -172,3 +174,30 @@ Automatic desktop updates are deliberately not enabled until The Wiii Lab can
 guarantee long-term custody and recovery of the Tauri updater signing key. Once
 enabled, updater signatures are a permanent trust contract and cannot be
 treated as an optional release detail.
+
+## 8. Protected emergency publication
+
+The normal stable contract is the complete four-target matrix. A Windows-only
+break-glass release is allowed only when all of these conditions hold:
+
+1. A reviewed stable tag contains a time-critical security or recovery fix.
+2. A confirmed GitHub-hosted Linux or macOS runner outage prevents the complete
+   matrix from finishing; a failing Wiii build is not an outage exemption.
+3. The maintainer manually dispatches `Desktop Release` on that tag with
+   `release_scope=windows-only-emergency` and a meaningful public incident or
+   outage reason.
+4. The project owner or delegated release/security maintainer approves the
+   protected `release` environment deployment.
+5. Tag/version validation, the Windows Authenticode signer/thumbprint gate,
+   checksum and manifest verification, and provenance attestation all pass.
+
+The GitHub Release notes must state that Linux and macOS are missing and include
+the submitted reason. No unsigned Windows package or unreviewed commit may use
+this path. When hosted runners recover, rerun the workflow on the same tag with
+`release_scope=complete`; the workflow verifies and attests the full matrix,
+backfills the missing assets, and replaces the temporary availability notice.
+
+Every break-glass use must be recorded in a public issue or security advisory,
+reviewed after recovery, and included in the next changelog. Repeated platform
+build failures require a fix or a new release; they must not be normalized into
+routine emergency publication.
