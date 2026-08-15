@@ -14,12 +14,13 @@ import { useOrgStore } from "@/stores/org-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
-import { useModeStore } from "@/neko-chill/stores/mode-store";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useScheduledTaskNotifications } from "@/hooks/useScheduledTaskNotifications";
 import { WiiiAvatar } from "@/components/common/WiiiAvatar";
 import { initClient } from "@/api/client";
 import { buildAuthUserFromPayload, toCompatibilitySettingsRole } from "@/lib/auth-user";
+import { WorkbenchApp } from "@/workbench/WorkbenchApp";
+import { detectWorkbenchHost, type WorkbenchHost } from "@/workbench/host";
 
 const AppShell = lazy(async () => {
   const mod = await import("@/components/layout/AppShell");
@@ -82,7 +83,7 @@ function BootFailure({ error, onRetry }: { error: string; onRetry: () => void })
 
 type CloudBootstrapPhase = "settings" | "auth" | "conversations" | "ready" | "failed";
 
-function WiiiCloudApp() {
+function WiiiCloudApp({ onOpenLocal }: { onOpenLocal?: () => void }) {
   const { loadSettings, settings, updateSettings, isLoaded: settingsLoaded } = useSettingsStore();
   const { loadAuth, loginWithTokens, isAuthenticated, isLoaded: authLoaded, authMode, user: authUser, isTokenExpiringSoon, refreshAccessToken } = useAuthStore();
   const { startPolling, stopPolling, setOnReconnect } = useConnectionStore();
@@ -336,7 +337,7 @@ function WiiiCloudApp() {
     return (
       <ErrorBoundary>
         <Suspense fallback={<BootSplash label="Wiii đang mở cổng đăng nhập..." />}>
-          <LoginScreen />
+          <LoginScreen onOpenLocal={onOpenLocal} />
         </Suspense>
       </ErrorBoundary>
     );
@@ -345,7 +346,7 @@ function WiiiCloudApp() {
   return (
     <ErrorBoundary>
       <Suspense fallback={<BootSplash label="Wiii đang mở không gian trò chuyện..." />}>
-        <AppShell />
+        <AppShell onOpenLocal={onOpenLocal} />
       </Suspense>
       <Suspense fallback={null}>
         <CommandPalette open={commandPaletteOpen} onClose={closeCommandPalette} />
@@ -355,34 +356,30 @@ function WiiiCloudApp() {
 }
 
 /**
- * Shell-level mode gate (issue #886, FR-001/FR-002).
+ * Host-aware Workbench boundary (#923).
  *
- * WiiiCloudApp mounts ONLY in cloud mode, so its init effects (client,
- * polling, OAuth, org context) can never run while Neko Chill is active —
- * the no-login guarantee is structural, not conditional.
+ * The inactive surface stays unmounted. Desktop can run a local agent without
+ * cloud bootstrap; hosted web can only open remotely-backed capabilities.
  */
-export function ModeGate() {
-  const { mode, isLoaded, loadMode } = useModeStore();
-
-  useEffect(() => {
-    void loadMode();
-  }, [loadMode]);
-
-  if (!isLoaded) {
-    return <BootSplash label="Wiii đang thức dậy..." />;
-  }
-
-  if (mode === "neko-chill") {
-    return (
-      <ErrorBoundary>
-        <Suspense fallback={<BootSplash label="Neko Chill đang thức dậy..." />}>
-          <NekoChillApp />
-        </Suspense>
-      </ErrorBoundary>
-    );
-  }
-
-  return <WiiiCloudApp />;
+export function WorkbenchGate({ host = detectWorkbenchHost() }: { host?: WorkbenchHost }) {
+  return (
+    <WorkbenchApp
+      host={host}
+      loadingFallback={<BootSplash label="Wiii đang mở Workbench..." />}
+      renderLocal={({ openManaged }) => (
+        <ErrorBoundary>
+          <Suspense fallback={<BootSplash label="Wiii đang mở không gian cục bộ..." />}>
+            <NekoChillApp onOpenManaged={openManaged} />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      renderManaged={({ openLocal }) => (
+        <WiiiCloudApp
+          onOpenLocal={host.capabilities.localProcess ? openLocal : undefined}
+        />
+      )}
+    />
+  );
 }
 
 export default function App() {
@@ -416,5 +413,5 @@ export default function App() {
     );
   }
 
-  return <ModeGate />;
+  return <WorkbenchGate />;
 }

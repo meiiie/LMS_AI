@@ -1,13 +1,13 @@
 # Wiii codebase map
 
 **Status:** Canonical
-**Updated:** 2026-08-15
+**Updated:** 2026-08-16
 
 ## Top-level ownership
 
 | Path | Owner and purpose |
 | --- | --- |
-| `wiii-desktop/` | Wiii Workbench: React UI, Tauri host, Neko Chill, ACP client, sessions, workspace, previews, artifacts |
+| `wiii-desktop/` | Wiii Workbench: shared React UI, Tauri/web hosts, local and managed runtimes, sessions, workspace, previews, artifacts |
 | `maritime-ai-service/` | Wiii Core: FastAPI, orchestration, providers, RAG, memory, policy, organizations, integrations, deployment |
 | `docs/` | Current architecture, operations, research, release, and brand sources |
 | `tools/release/` | Version synchronization, notes, hashes, and release manifest |
@@ -21,6 +21,8 @@
 | Path | Responsibility |
 | --- | --- |
 | `wiii-desktop/src/neko-chill/` | Local ACP workspace, durable session projection, runtime manager |
+| `wiii-desktop/src/workbench/` | Host/capability derivation, surface bootstrap, provider ownership policy, optional Wiii Knowledge connection |
+| `wiii-desktop/src/neko-chill/drivers/codex/` | Codex App Server account, model, thread, turn, approval, and stream adapter |
 | `wiii-desktop/src/components/layout/` | Main shell, workspace panes, artifact and preview surfaces, window controls |
 | `wiii-desktop/src/stores/` | Persisted UI, connection, settings, and Code Studio state |
 | `wiii-desktop/src-tauri/src/` | Native commands, file access, tray, lifecycle, platform integration |
@@ -50,6 +52,8 @@ explicit migration protects installed state.
 
 - Session replay, ACP continuation, slash commands, model controls: start in
   `wiii-desktop/src/neko-chill/` and the ACP provider contract.
+- Desktop/web authority or runtime/knowledge composition: start in
+  `wiii-desktop/src/workbench/`; browser capabilities must fail closed.
 - Files, diff, HTML/Markdown preview, workspace layout: start in desktop layout,
   workspace stores, and native file commands.
 - Chat/SSE behavior: start at `app/api/v1/chat_stream.py`, then the coordinator,

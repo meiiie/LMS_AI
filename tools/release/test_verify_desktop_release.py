@@ -33,16 +33,16 @@ class DesktopReleaseVerifierTests(unittest.TestCase):
     def _create_release(self, root: Path, targets: tuple[str, ...]) -> Path:
         output_root = root / "platforms"
         raw_paths = {
-            "windows-x64": ("release/bundle/nsis/Wiii_1.2.0_x64-setup.exe",),
+            "windows-x64": ("release/bundle/nsis/Wiii Workbench_1.2.0_x64-setup.exe",),
             "linux-x64": (
-                "release/bundle/deb/Wiii_1.2.0_amd64.deb",
-                "release/bundle/appimage/Wiii_1.2.0_amd64.AppImage",
+                "release/bundle/deb/Wiii Workbench_1.2.0_amd64.deb",
+                "release/bundle/appimage/Wiii Workbench_1.2.0_amd64.AppImage",
             ),
             "macos-arm64": (
-                "aarch64-apple-darwin/release/bundle/dmg/Wiii_1.2.0_aarch64.dmg",
+                "aarch64-apple-darwin/release/bundle/dmg/Wiii Workbench_1.2.0_aarch64.dmg",
             ),
             "macos-x64": (
-                "x86_64-apple-darwin/release/bundle/dmg/Wiii_1.2.0_x64.dmg",
+                "x86_64-apple-darwin/release/bundle/dmg/Wiii Workbench_1.2.0_x64.dmg",
             ),
         }
         for target in targets:

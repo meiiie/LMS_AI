@@ -1,6 +1,6 @@
 /**
- * T204 — ModeGate: entering Neko Chill mounts the local surface INSTEAD of
- * the cloud app (FR-001/FR-002). The no-login guarantee is structural:
+ * WorkbenchGate: entering the local surface mounts it INSTEAD of the managed
+ * app. The no-login guarantee is structural:
  * WiiiCloudApp (and with it every cloud init effect) never mounts.
  */
 
@@ -49,20 +49,32 @@ vi.mock("@/components/common/WiiiAvatar", () => ({
   WiiiAvatar: () => <span data-testid="avatar-stub" />,
 }));
 
-import { ModeGate } from "@/App";
-import { useModeStore } from "@/neko-chill/stores/mode-store";
+import { WorkbenchGate } from "@/App";
+import { useWorkbenchStore } from "@/workbench/workbench-store";
 
-describe("ModeGate (App.tsx seam)", () => {
+const desktop = {
+  kind: "desktop" as const,
+  capabilities: {
+    localProcess: true,
+    localWorkspace: true,
+    nativeWindow: true,
+    tray: true,
+    secureSecretStore: false,
+    remoteRuntime: true,
+  },
+};
+
+describe("WorkbenchGate (App.tsx seam)", () => {
   beforeEach(() => {
     storage.clear();
-    useModeStore.setState({ mode: "wiii", isLoaded: false });
+    useWorkbenchStore.setState({ surface: "local", isLoaded: false });
   });
   afterEach(() => cleanup());
 
   it("mounts the Neko Chill surface instead of the cloud app", async () => {
     storage.set("neko-chill-mode.json:mode", "neko-chill");
 
-    render(<ModeGate />);
+    render(<WorkbenchGate host={desktop} />);
 
     await waitFor(() =>
       expect(screen.getByTestId("neko-chill-root")).toBeTruthy(),
@@ -73,9 +85,9 @@ describe("ModeGate (App.tsx seam)", () => {
   });
 
   it("shows the boot splash until the persisted mode is loaded", () => {
-    // loadMode resolves async; before isLoaded the gate must not guess.
+    // Store load resolves async; before isLoaded the gate must not guess.
     storage.set("neko-chill-mode.json:mode", "neko-chill");
-    render(<ModeGate />);
+    render(<WorkbenchGate host={desktop} />);
     expect(screen.queryByTestId("neko-chill-root")).toBeNull();
   });
 });

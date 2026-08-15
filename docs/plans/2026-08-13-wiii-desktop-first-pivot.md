@@ -1,6 +1,12 @@
-# Wiii Desktop-First Pivot
+# Wiii Desktop-First Pivot (superseded)
 
-Status: Adopted (maintainer directive, 2026-08-13)
+> Superseded on 2026-08-16 by the
+> [Unified Workbench architecture](../architecture/WIII_UNIFIED_WORKBENCH.md).
+> Desktop remains local-first, but hosted web is now a supported remote-authority
+> host rather than a maintenance-only product fork. This file is retained only
+> as decision history.
+
+Status: Superseded (2026-08-16)
 
 Owner: Maintainer; execution delegated to the engineering agent with standing
 authority (see issue for provenance).

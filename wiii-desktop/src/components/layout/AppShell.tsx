@@ -8,7 +8,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { AnimatePresence, motion } from "motion/react";
-import { WifiOff, RefreshCw, Menu } from "lucide-react";
+import { WifiOff, RefreshCw, Menu, Laptop } from "lucide-react";
 import { TitleBar } from "./TitleBar";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
@@ -109,7 +109,7 @@ function useIsMobile(breakpoint = 768) {
   return isMobile;
 }
 
-export function AppShell() {
+export function AppShell({ onOpenLocal }: { onOpenLocal?: () => void }) {
   const { sidebarOpen, activeView, setSidebarOpen, toggleSidebar } =
     useUIStore();
   const hasRightPanel = useUIStore((s) => s.hasRightPanel());
@@ -169,7 +169,20 @@ export function AppShell() {
 
   return (
     <div className="flex flex-col h-screen">
-      <TitleBar />
+      <TitleBar
+        trailing={onOpenLocal ? (
+          <button
+            type="button"
+            onClick={onOpenLocal}
+            className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-text-tertiary transition-colors hover:bg-surface-tertiary hover:text-text"
+            aria-label="Mở không gian cục bộ"
+            title="Không gian cục bộ"
+          >
+            <Laptop aria-hidden="true" size={14} />
+            <span className="hidden xl:inline">Cục bộ</span>
+          </button>
+        ) : undefined}
+      />
       <div className="flex flex-1 overflow-hidden">
         <div
           className={`shrink-0 sidebar-slide ${!isInChat ? "sidebar-hidden" : sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}

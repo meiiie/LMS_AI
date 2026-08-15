@@ -8,7 +8,7 @@
  */
 
 /** Stable identifier vocabulary shared by all drivers. */
-export type DriverKind = "acp" | "wiii-cloud";
+export type DriverKind = "acp" | "codex-app-server" | "wiii-cloud";
 
 /**
  * Operations a live provider explicitly promises to support. Consumers must

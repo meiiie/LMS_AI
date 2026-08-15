@@ -30,6 +30,23 @@ describe("Neko session event validation", () => {
       action: "prompt",
       providerInstanceId: "provider-1",
     }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "knowledge-context",
+      source: "wiii-knowledge",
+      contextId: "context-1",
+      query: "rule 15",
+      renderedContext: "[1] evidence",
+      sources: [{
+        sourceId: "chunk-1",
+        title: "COLREG",
+        documentId: "colreg.pdf",
+        pageNumber: 15,
+        score: 0.9,
+      }],
+      providerInstanceId: "provider-1",
+      delivery: "staged",
+    }))).toBe(true);
   });
 
   it.each([

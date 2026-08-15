@@ -13,7 +13,6 @@ import type { AuthUser } from "@/stores/auth-store";
 import type { AppSettings } from "@/api/types";
 import { WiiiMascot } from "@/components/common/WiiiMascot";
 import { TitleBar } from "@/components/layout/TitleBar";
-import { useModeStore } from "@/neko-chill/stores/mode-store";
 import {
   buildAuthUserFromPayload,
   toCompatibilitySettingsRole,
@@ -62,7 +61,7 @@ export function normalizeServerEndpoint(value: string): string {
   return normalized;
 }
 
-export function LoginScreen() {
+export function LoginScreen({ onOpenLocal }: { onOpenLocal?: () => void }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDevMode, setShowDevMode] = useState(false);
@@ -504,7 +503,7 @@ export function LoginScreen() {
           Chào mừng đến Wiii Workbench
         </h1>
         <p className="mt-2 mb-7 text-[15px] text-text-tertiary text-center">
-          Trợ lý AI thông minh cho học tập và nghiên cứu
+          Không gian AI bền vững cho dự án, tri thức và agent của bạn
         </p>
 
         <section className="mb-4 w-full rounded-xl border border-border bg-surface/80" aria-label="Kết nối Wiii server">
@@ -569,7 +568,9 @@ export function LoginScreen() {
                 </p>
               ) : (
                 <p className="mt-2 text-[10px] leading-4 text-text-quaternary">
-                  Bản desktop không dùng địa chỉ nội bộ của WebView làm API endpoint.
+                  {onOpenLocal
+                    ? "Bản desktop không dùng địa chỉ nội bộ của WebView làm API endpoint."
+                    : "Bản web kết nối Wiii Service từ xa; không mở tiến trình hoặc tệp cục bộ."}
                 </p>
               )}
             </div>
@@ -718,15 +719,17 @@ export function LoginScreen() {
           </div>
         )}
 
-        {/* Desktop-first escape hatch (#893): the login wall must never be a
-            dead end — Neko Chill works without any account. */}
-        <button
-          onClick={() => void useModeStore.getState().setMode("neko-chill")}
-          className="mt-4 text-sm text-text-secondary hover:text-text-primary underline underline-offset-4 transition-colors"
-          data-testid="login-neko-chill-escape"
-        >
-          Dùng không cần tài khoản — mở Neko Chill
-        </button>
+        {/* Desktop-only escape hatch. Hosted web has no local process or
+            workspace authority, so it must never advertise this action. */}
+        {onOpenLocal ? (
+          <button
+            onClick={onOpenLocal}
+            className="mt-4 text-sm text-text-secondary hover:text-text-primary underline underline-offset-4 transition-colors"
+            data-testid="login-neko-chill-escape"
+          >
+            Dùng không cần tài khoản — mở không gian cục bộ
+          </button>
+        ) : null}
 
         {/* Developer mode toggle */}
         {!showDevMode ? (

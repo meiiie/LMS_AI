@@ -7,6 +7,7 @@
  */
 import type { AcpTransport } from "./acp/client";
 import { AcpDriver } from "./acp/driver";
+import { CodexAppServerDriver } from "./codex/driver";
 import type { Driver, DriverEventHandler } from "./types";
 import type { DetectedAgent } from "../stores/neko-agent-store";
 import { isAbsoluteWorkspacePath, type WorkspaceRef } from "../workspace";
@@ -15,6 +16,7 @@ import { isAbsoluteWorkspacePath, type WorkspaceRef } from "../workspace";
 const ACP_ARGS: Record<string, string[]> = {
   gemini: ["--experimental-acp"],
   neko: ["acp"],
+  codex: ["app-server"],
 };
 
 /**
@@ -99,13 +101,21 @@ export async function createDriverForAgent(
       : []),
   ];
   const transport = await spawnTauriTransport(agent.binary, args);
-  const driver = new AcpDriver({
-    sessionId,
-    cwd: launch.workspace.path,
-    resumeSessionId: launch.backendSessionId,
-    transport,
-    onEvent,
-  });
+  const driver: Driver = agent.id === "codex"
+    ? new CodexAppServerDriver({
+        sessionId,
+        cwd: launch.workspace.path,
+        resumeThreadId: launch.backendSessionId,
+        transport,
+        onEvent,
+      })
+    : new AcpDriver({
+        sessionId,
+        cwd: launch.workspace.path,
+        resumeSessionId: launch.backendSessionId,
+        transport,
+        onEvent,
+      });
   try {
     // Let RuntimeRegistry own the process before initialize/session-new can hang.
     ownDriver?.(driver);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Check, FolderOpen, LoaderCircle, ShieldCheck } from "lucide-react";
 import {
   loadAgentProfiles,
@@ -7,6 +7,11 @@ import {
   type DetectedAgent,
 } from "../stores/neko-agent-store";
 import { useNekoSessionStore } from "../stores/neko-session-store";
+import { spawnTauriTransport } from "../drivers/factory";
+import {
+  CodexAccountSession,
+  type CodexAccountSummary,
+} from "../drivers/codex/account";
 import {
   chooseWorkspaceFolder,
   type WorkspaceRef,
@@ -34,8 +39,15 @@ export function NewSessionView() {
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [startingAgentId, setStartingAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [codexAccount, setCodexAccount] = useState<CodexAccountSummary | null>(null);
+  const [codexAccountState, setCodexAccountState] = useState<
+    "idle" | "checking" | "signed-out" | "signed-in" | "logging-in" | "error"
+  >("idle");
+  const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
+  const codexAccountSession = useRef<CodexAccountSession | null>(null);
   const recent = useMemo(() => recentWorkspaces(), [sessions]);
   const neko = agents.find((agent) => agent.id === "neko" && agent.found);
+  const codex = agents.find((agent) => agent.id === "codex" && agent.found);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +68,46 @@ export function NewSessionView() {
       cancelled = true;
     };
   }, [neko?.binary, workspace?.path]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const previous = codexAccountSession.current;
+    codexAccountSession.current = null;
+    if (previous) void previous.dispose();
+    setCodexAccount(null);
+    setCodexLoginUrl(null);
+    if (!workspace || !codex?.binary) {
+      setCodexAccountState("idle");
+      return;
+    }
+
+    setCodexAccountState("checking");
+    void spawnTauriTransport(codex.binary, ["app-server"])
+      .then(async (transport) => {
+        const session = new CodexAccountSession(transport);
+        if (cancelled) {
+          await session.dispose();
+          return;
+        }
+        codexAccountSession.current = session;
+        const account = await session.start();
+        if (cancelled) return;
+        setCodexAccount(account);
+        setCodexAccountState(account.authenticated ? "signed-in" : "signed-out");
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setCodexAccountState("error");
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+
+    return () => {
+      cancelled = true;
+      const current = codexAccountSession.current;
+      codexAccountSession.current = null;
+      if (current) void current.dispose();
+    };
+  }, [codex?.binary, workspace?.path]);
 
   const chooseWorkspace = async () => {
     const selected = await chooseWorkspaceFolder();
@@ -79,6 +131,27 @@ export function NewSessionView() {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setStartingAgentId(null);
+    }
+  };
+
+  const loginCodex = async () => {
+    const session = codexAccountSession.current;
+    if (!session) return;
+    setCodexAccountState("logging-in");
+    setError(null);
+    try {
+      const challenge = await session.beginChatGptLogin();
+      setCodexLoginUrl(challenge.authUrl);
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(challenge.authUrl);
+      await session.waitForLogin(challenge.loginId);
+      const account = await session.read();
+      setCodexAccount(account);
+      setCodexLoginUrl(null);
+      setCodexAccountState(account.authenticated ? "signed-in" : "signed-out");
+    } catch (cause) {
+      setCodexAccountState("error");
+      setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
@@ -197,6 +270,7 @@ export function NewSessionView() {
                           || !workspace
                           || startingAgentId !== null
                           || (agent.id === "neko" && profileLoading)
+                          || (agent.id === "codex" && codexAccountState !== "signed-in")
                         }
                         onClick={() => void start(agent)}
                         data-testid={`start-${agent.id}`}
@@ -234,6 +308,45 @@ export function NewSessionView() {
                           <p className="mt-1.5 pl-[94px] text-[10.5px] text-[var(--nk-ghost)]">
                             Provider {selectedProfile.provider} · {selectedProfile.model ?? "model do profile quyết định"}
                           </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {agent.id === "codex" && agent.found ? (
+                      <div className="mt-3 border-t border-[var(--nk-border)] pt-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[11.5px] font-medium text-[var(--nk-text-2)]">
+                              {codexAccountState === "checking"
+                                ? "Đang kiểm tra tài khoản Codex…"
+                                : codexAccountState === "signed-in"
+                                  ? `Codex đã sẵn sàng${codexAccount?.planType ? ` · ${codexAccount.planType}` : ""}`
+                                  : codexAccountState === "logging-in"
+                                    ? "Hoàn tất đăng nhập trong trình duyệt…"
+                                    : "Cần kết nối tài khoản Codex"}
+                            </p>
+                            <p className="mt-0.5 text-[10.5px] text-[var(--nk-ghost)]">
+                              Codex sở hữu token, model và chi phí; Wiii không đọc hoặc lưu thông tin đăng nhập.
+                            </p>
+                          </div>
+                          {codexAccountState === "signed-out" || codexAccountState === "error" ? (
+                            <button
+                              type="button"
+                              className="shrink-0 rounded-lg border border-[var(--nk-border-strong)] px-2.5 py-1.5 text-[11.5px] text-[var(--nk-text-2)] hover:bg-[var(--nk-raised)]"
+                              onClick={() => void loginCodex()}
+                            >
+                              Đăng nhập
+                            </button>
+                          ) : null}
+                        </div>
+                        {codexLoginUrl && codexAccountState === "logging-in" ? (
+                          <button
+                            type="button"
+                            className="mt-2 max-w-full truncate text-left text-[10.5px] text-[var(--nk-accent)] underline underline-offset-2"
+                            title={codexLoginUrl}
+                            onClick={() => void import("@tauri-apps/plugin-shell").then(({ open }) => open(codexLoginUrl))}
+                          >
+                            Mở lại trang đăng nhập Codex
+                          </button>
                         ) : null}
                       </div>
                     ) : null}

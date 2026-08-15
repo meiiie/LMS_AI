@@ -3,9 +3,9 @@
  * centered column, quiet thinking rail, dot-status tool rows, shared
  * MarkdownRenderer for answers, with measured row virtualization for long sessions.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, Command, FolderGit2 } from "lucide-react";
+import { ArrowDown, BookOpen, Command, FolderGit2 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import type { ContentBlock } from "@/api/types";
 import type { NekoSession } from "../stores/neko-session-store";
@@ -15,6 +15,23 @@ export const NEKO_TRANSCRIPT_VIRTUALIZATION_THRESHOLD = 50;
 
 export function shouldVirtualizeTranscript(messageCount: number): boolean {
   return messageCount > NEKO_TRANSCRIPT_VIRTUALIZATION_THRESHOLD;
+}
+
+export function dispatchedKnowledgeContexts(session: NekoSession) {
+  const dispatched = new Set(
+    session.events.flatMap((event) =>
+      event.data.type === "dispatch-invoked" && event.data.action === "knowledge"
+        ? [event.data.targetEventId]
+        : [],
+    ),
+  );
+  return session.events.flatMap((event) =>
+    event.eventId &&
+    event.data.type === "knowledge-context" &&
+    dispatched.has(event.eventId)
+      ? [event.data]
+      : [],
+  );
 }
 
 /** Remove one matching outer emphasis pair without interpreting reasoning as HTML. */
@@ -109,6 +126,10 @@ export function NekoTranscript({
   const lastMessage = session.messages[messageCount - 1];
   const lastBlockCount = lastMessage?.blocks?.length ?? 0;
   const useVirtual = shouldVirtualizeTranscript(messageCount);
+  const knowledgeContexts = useMemo(
+    () => dispatchedKnowledgeContexts(session),
+    [session.events],
+  );
   const virtualizer = useVirtualizer({
     count: messageCount,
     getScrollElement: () => scrollRef.current,
@@ -213,6 +234,30 @@ export function NekoTranscript({
         ) : (
           session.messages.map((message) => <MessageRow key={message.id} message={message} />)
         )}
+        {knowledgeContexts.map((context) => (
+          <details
+            key={context.contextId}
+            className="my-2 rounded-xl border border-[var(--nk-border)] bg-[var(--nk-composer)] px-3 py-2"
+            data-testid="knowledge-evidence"
+          >
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-[11.5px] font-medium text-[var(--nk-text-2)]">
+              <BookOpen aria-hidden="true" className="h-3.5 w-3.5 text-[var(--nk-accent)]" />
+              Wiii Knowledge · {context.sources.length} nguồn đã đưa vào model
+            </summary>
+            <ol className="mt-2 space-y-1 border-t border-[var(--nk-border)] pt-2 text-[10.5px] text-[var(--nk-text-3)]">
+              {context.sources.map((source, index) => (
+                <li key={source.sourceId} className="flex gap-2">
+                  <span className="tabular-nums text-[var(--nk-text-2)]">[{index + 1}]</span>
+                  <span className="min-w-0 truncate">
+                    {source.title}
+                    {source.documentId ? ` · ${source.documentId}` : ""}
+                    {source.pageNumber > 0 ? ` · trang ${source.pageNumber}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        ))}
         {session.pendingPermission ? (
           <PermissionCard
             request={session.pendingPermission}

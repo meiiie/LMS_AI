@@ -118,6 +118,7 @@ import {
 } from "@/neko-chill/stores/neko-session-store";
 import { deletePersistedSession, persistSessionNow } from "@/neko-chill/persistence";
 import { saveStoreStrict } from "@/lib/storage";
+import { useKnowledgeConnectionStore } from "@/workbench/knowledge";
 
 const AGENT: DetectedAgent = {
   id: "neko",
@@ -244,6 +245,10 @@ describe("neko-chill persistence", () => {
       hydrationError: null,
     });
     useNekoAgentStore.setState({ agents: [AGENT], isLoading: false });
+    useKnowledgeConnectionStore.setState({
+      status: "disconnected",
+      error: null,
+    });
     useFakeFactory();
   });
   afterEach(() => {
@@ -371,6 +376,76 @@ describe("neko-chill persistence", () => {
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().hydrate();
     expect(useNekoSessionStore.getState().sessions[id].eventHighWaterMark).toBe(5);
+  });
+
+  it("persists model-visible knowledge before dispatch and replays it without retrieval", async () => {
+    const retrieve = vi.fn(async () => ({
+      contextId: "context-1",
+      query: "quy tắc 15",
+      renderedContext: "[1] Bằng chứng quy tắc 15",
+      sources: [{
+        sourceId: "chunk-1",
+        title: "COLREG",
+        documentId: "colreg.pdf",
+        pageNumber: 15,
+        content: "Bằng chứng quy tắc 15",
+        score: 0.9,
+      }],
+    }));
+    useKnowledgeConnectionStore.setState({ status: "ready", retrieve });
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+
+    await useNekoSessionStore.getState().sendPrompt("quy tắc 15");
+
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(spawned[0].prompts[0]).toContain("<wiii_knowledge>");
+    expect(spawned[0].promptSawDurableEvents[0]).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "knowledge-context",
+          contextId: "context-1",
+          delivery: "staged",
+        }),
+      }),
+    ]));
+    expect(useNekoSessionStore.getState().sessions[id].events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "dispatch-invoked",
+          action: "knowledge",
+        }),
+      }),
+    ]));
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().hydrate();
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(useNekoSessionStore.getState().sessions[id].events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "knowledge-context", contextId: "context-1" }),
+      }),
+    ]));
+  });
+
+  it("never exposes retrieved context when its durability barrier fails", async () => {
+    const retrieve = vi.fn(async () => ({
+      contextId: "context-failed",
+      query: "private evidence",
+      renderedContext: "[1] private evidence",
+      sources: [],
+    }));
+    useKnowledgeConnectionStore.setState({ status: "ready", retrieve });
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    failTranscriptWrites = true;
+
+    await useNekoSessionStore.getState().sendPrompt("private evidence");
+
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(spawned[0].prompts).toEqual([]);
+    expect(useNekoSessionStore.getState().sessions[id].events.some(
+      (event) => event.data.type === "knowledge-context",
+    )).toBe(false);
   });
 
   it("recovers a self-contained session when the index cache write fails", async () => {

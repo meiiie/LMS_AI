@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { WiiiMark } from "@/components/common/WiiiMark";
-import { useModeStore } from "./stores/mode-store";
 import { useNekoAgentStore } from "./stores/neko-agent-store";
 import {
   disposeAllNekoRuntimes,
@@ -39,6 +38,7 @@ import {
 } from "./command-items";
 import type { ComposerInsertRequest } from "./components/NekoComposer";
 import { chooseWorkspaceFolder } from "./workspace";
+import { useKnowledgeConnectionStore } from "@/workbench/knowledge";
 import "./theme.css";
 
 function useCompactWorkspace(breakpoint = 1040) {
@@ -54,10 +54,13 @@ function useCompactWorkspace(breakpoint = 1040) {
   return compact;
 }
 
-function ModeSwitcher() {
-  const { setMode } = useModeStore();
+function ModeSwitcher({ onOpenManaged }: { onOpenManaged: () => void }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const knowledgeStatus = useKnowledgeConnectionStore((state) => state.status);
+  const knowledgeError = useKnowledgeConnectionStore((state) => state.error);
+  const connectKnowledge = useKnowledgeConnectionStore((state) => state.connect);
+  const disconnectKnowledge = useKnowledgeConnectionStore((state) => state.disconnect);
 
   useEffect(() => {
     if (!open) return;
@@ -80,20 +83,20 @@ function ModeSwitcher() {
       <button
         type="button"
         data-testid="mode-switcher"
-        aria-label="Chuyển chế độ"
+        aria-label="Chuyển không gian"
         aria-haspopup="menu"
         aria-expanded={open}
         className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-semibold text-[var(--nk-text)] transition-colors hover:bg-[var(--nk-overlay)]"
         onClick={() => setOpen((value) => !value)}
       >
         <WiiiMark className="shrink-0" size={17} />
-        <span>Neko Chill</span>
+        <span>Wiii Workbench</span>
         <ChevronDown aria-hidden="true" className="h-3 w-3 text-[var(--nk-text-3)]" />
       </button>
       {open ? (
         <div
           role="menu"
-          aria-label="Chọn chế độ"
+          aria-label="Chọn không gian"
           className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-[var(--nk-border-strong)] bg-[var(--nk-composer)] p-1 shadow-lg"
           data-testid="mode-switcher-menu"
         >
@@ -102,11 +105,14 @@ function ModeSwitcher() {
             role="menuitemradio"
             aria-checked="false"
             className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--nk-overlay)]"
-            onClick={() => void setMode("wiii")}
+            onClick={() => {
+              setOpen(false);
+              onOpenManaged();
+            }}
           >
-            <span className="block text-[13px] font-medium text-[var(--nk-text)]">Wiii Cloud</span>
+            <span className="block text-[13px] font-medium text-[var(--nk-text)]">Wiii Service</span>
             <span className="block text-[11.5px] text-[var(--nk-text-3)]">
-              Trợ lý học tập và nghiên cứu · tài khoản cloud
+              Runtime được quản lý · RAG, memory và đồng bộ
             </span>
           </button>
           <button
@@ -117,13 +123,64 @@ function ModeSwitcher() {
             onClick={() => setOpen(false)}
           >
             <span className="flex items-center justify-between text-[13px] font-medium text-[var(--nk-text)]">
-              Neko Chill
+              Không gian cục bộ
               <Check aria-hidden="true" className="h-3.5 w-3.5 text-[var(--nk-text-2)]" />
             </span>
             <span className="block text-[11.5px] text-[var(--nk-text-3)]">
-              Agent cục bộ · không cần tài khoản
+              Agent và tệp dự án trên máy · không cần tài khoản Wiii
             </span>
           </button>
+          <div className="my-1 border-t border-[var(--nk-border)]" />
+          <div className="px-3 pb-1 pt-1">
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--nk-ghost)]">
+              Tri thức tùy chọn
+            </span>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={knowledgeStatus === "connecting"}
+            className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--nk-overlay)] disabled:opacity-60"
+            onClick={() => {
+              if (knowledgeStatus === "ready") disconnectKnowledge();
+              else void connectKnowledge();
+            }}
+          >
+            <span className="flex items-center justify-between text-[13px] font-medium text-[var(--nk-text)]">
+              Wiii Knowledge
+              <span className={`h-2 w-2 rounded-full ${
+                knowledgeStatus === "ready"
+                  ? "bg-[var(--nk-success)]"
+                  : knowledgeStatus === "connecting"
+                    ? "animate-pulse bg-[var(--nk-accent)]"
+                    : knowledgeStatus === "degraded"
+                      ? "bg-[var(--nk-danger)]"
+                      : "bg-[var(--nk-ghost)]"
+              }`} />
+            </span>
+            <span className="block text-[11.5px] text-[var(--nk-text-3)]">
+              {knowledgeStatus === "ready"
+                ? "Đang thêm RAG có nguồn vào lượt nhắn · bấm để ngắt"
+                : knowledgeStatus === "connecting"
+                  ? "Đang kiểm tra Wiii Service…"
+                  : knowledgeStatus === "degraded"
+                    ? knowledgeError ?? "Kết nối đang gián đoạn"
+                    : "Tắt mặc định · agent cục bộ vẫn hoạt động độc lập"}
+            </span>
+          </button>
+          {knowledgeStatus === "degraded" ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="mx-2 mb-1 rounded-md px-2 py-1 text-[11px] text-[var(--nk-accent)] hover:bg-[var(--nk-overlay)]"
+              onClick={() => {
+                setOpen(false);
+                onOpenManaged();
+              }}
+            >
+              Mở Wiii Service để đăng nhập hoặc cấu hình
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -198,7 +255,9 @@ function SessionRecoveryState({
   );
 }
 
-export default function NekoChillApp() {
+export default function NekoChillApp({
+  onOpenManaged = () => {},
+}: { onOpenManaged?: () => void }) {
   const detect = useNekoAgentStore((state) => state.detect);
   const hydrate = useNekoSessionStore((state) => state.hydrate);
   const hydrated = useNekoSessionStore((state) => state.hydrated);
@@ -344,7 +403,7 @@ export default function NekoChillApp() {
     <div className="nk-root flex h-screen flex-col bg-[var(--nk-canvas)] text-[var(--nk-text)]">
       <TitleBar
         minimal
-        leading={<ModeSwitcher />}
+        leading={<ModeSwitcher onOpenManaged={onOpenManaged} />}
         commandCenter={{
           label: "Tìm phiên hoặc chạy lệnh",
           onClick: () => setCommandCenterOpen(true),
@@ -353,7 +412,7 @@ export default function NekoChillApp() {
       />
       {!desktopChrome ? (
         <div className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--nk-border)] bg-[var(--nk-sidebar)] px-2">
-          <ModeSwitcher />
+          <ModeSwitcher onOpenManaged={onOpenManaged} />
           <div className="flex-1" />
           <button
             type="button"

@@ -40,6 +40,11 @@ import {
   type RuntimeDisposalResult,
   type RuntimeProviderSnapshot,
 } from "../runtime-manager";
+import {
+  buildKnowledgeAugmentedPrompt,
+  useKnowledgeConnectionStore,
+  type KnowledgeContext,
+} from "@/workbench/knowledge";
 
 export interface NekoMessage {
   id: string;
@@ -756,9 +761,33 @@ export const useNekoSessionStore = create<NekoSessionState>()(
 
         if (!provider) return;
         const providerInstanceId = provider.instanceId;
+        // Acquire the turn before optional remote retrieval. Otherwise a slow
+        // knowledge request could let a second composer submission pass.
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current) current.status = "dispatching";
+        });
+        let knowledgeContext: KnowledgeContext | null = null;
+        let modelPrompt = text;
+        if (useKnowledgeConnectionStore.getState().status === "ready") {
+          try {
+            knowledgeContext = await useKnowledgeConnectionStore.getState().retrieve(text);
+            modelPrompt = buildKnowledgeAugmentedPrompt(text, knowledgeContext);
+          } catch (error) {
+            // Retrieval is an independent capability. A degraded knowledge
+            // connection must remain visible but must not disable local work.
+            set((state) => {
+              const current = state.sessions[sessionId];
+              if (current) {
+                current.statusDetail = `Wiii Knowledge tạm không dùng được; agent tiếp tục không có RAG: ${error instanceof Error ? error.message : String(error)}`;
+              }
+            });
+          }
+        }
         const messageId = uuidv4();
         const previousTitle = get().sessions[sessionId]?.title;
         let inputEventId: string | null = null;
+        let knowledgeEventId: string | null = null;
         set((state) => {
           const s = state.sessions[sessionId];
           if (!s) return;
@@ -771,6 +800,24 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             providerInstanceId,
             delivery: "staged",
           }).eventId!;
+          if (knowledgeContext) {
+            knowledgeEventId = appendOwnedSessionEvent(s, "model", {
+              type: "knowledge-context",
+              source: "wiii-knowledge",
+              contextId: knowledgeContext.contextId,
+              query: knowledgeContext.query,
+              renderedContext: knowledgeContext.renderedContext,
+              sources: knowledgeContext.sources.map((source) => ({
+                sourceId: source.sourceId,
+                title: source.title,
+                documentId: source.documentId,
+                pageNumber: source.pageNumber,
+                score: source.score,
+              })),
+              providerInstanceId,
+              delivery: "staged",
+            }).eventId!;
+          }
           // Acquire the turn synchronously. No second composer submission may
           // pass while the first prompt waits for its durability barrier.
           s.status = "dispatching";
@@ -793,6 +840,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             if (current) {
               current.messages = current.messages.filter((message) => message.id !== messageId);
               removeEventById(current.events as NekoSessionEvent[], inputEventId);
+              removeEventById(current.events as NekoSessionEvent[], knowledgeEventId);
               if (current.messages.length === 0 && previousTitle) {
                 current.title = previousTitle;
               }
@@ -809,7 +857,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         let promptStarted = false;
         try {
           const driver = runtimes.requireInstance(sessionId, providerInstanceId, "prompt");
-          const invocation = driver.prompt(text);
+          const invocation = driver.prompt(modelPrompt);
           promptStarted = true;
           set((state) => {
             const current = state.sessions[sessionId];
@@ -820,6 +868,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 action: "prompt",
                 providerInstanceId,
               });
+              if (knowledgeEventId) {
+                appendOwnedSessionEvent(current, "model", {
+                  type: "dispatch-invoked",
+                  targetEventId: knowledgeEventId,
+                  action: "knowledge",
+                  providerInstanceId,
+                });
+              }
             }
           });
           const persistInvocation = persistSessionNowOrReport(sessionId, "xác nhận dispatch prompt", {
@@ -847,6 +903,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             if (!promptStarted) {
               current.messages = current.messages.filter((message) => message.id !== messageId);
               removeEventById(current.events as NekoSessionEvent[], inputEventId);
+              removeEventById(current.events as NekoSessionEvent[], knowledgeEventId);
               if (current.messages.length === 0 && previousTitle) {
                 current.title = previousTitle;
               }
