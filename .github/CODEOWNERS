@@ -1,7 +1,7 @@
 # Default ownership for repository review routing.
 #
 # Multiple owners on a line are OR'd for approval: any one of them can
-# approve. This is intentional — it lets @meiiie and @wiiiii123 cross-review
+# approve. This is intentional: it lets @meiiie and @wiiiii123 cross-review
 # each other's PRs without requiring a third party and without triggering
 # the self-approval deadlock documented in docs/operations/BYPASS_LOG.md.
 #
@@ -13,6 +13,11 @@
 /.github/                           @meiiie @wiiiii123
 /docs/                              @meiiie @wiiiii123
 /docs/operations/                   @meiiie @wiiiii123
+/docs/releases/                     @meiiie @wiiiii123
+/tools/release/                     @meiiie @wiiiii123
+/.github/workflows/release-desktop.yml @meiiie @wiiiii123
+/VERSION                            @meiiie @wiiiii123
+/CHANGELOG.md                       @meiiie @wiiiii123
 /maritime-ai-service/app/core/      @meiiie @wiiiii123
 /maritime-ai-service/app/auth/      @meiiie @wiiiii123
 /maritime-ai-service/alembic/       @meiiie @wiiiii123

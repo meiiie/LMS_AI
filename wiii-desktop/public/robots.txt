@@ -1,4 +1,4 @@
-# Wiii AI — by The Wiii Lab
+# Wiii Workbench — by The Wiii Lab
 # https://wiii.holilihu.online
 
 User-agent: *

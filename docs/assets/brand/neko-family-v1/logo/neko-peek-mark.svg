@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Neko Peek</title>
+  <desc id="desc">A warm ivory cat peeking from a curled graphite tail.</desc>
+  <path fill="#2A2928" d="M28 148C20 104 43 70 82 57c38-13 91-10 125 16 28 22 37 60 25 94-14 42-53 62-105 61-54-1-91-30-99-80Z"/>
+  <path fill="#F5F0E6" d="M61 133c-7-22-6-53 1-77 5-18 18-25 34-15 21-11 49-14 76-8 10-18 28-18 37 1 10 21 12 52 4 78-8 26-36 42-72 43-36 1-70-7-80-22Z"/>
+  <path fill="#454241" d="M31 136c31 23 72 38 117 41 33 2 61-7 84-29 3 24-7 47-29 62-23 16-59 22-100 16-43-6-71-31-77-63-2-10 0-19 5-27Z"/>
+  <ellipse cx="111" cy="103" rx="10" ry="15" fill="#2A2928"/>
+  <ellipse cx="157" cy="100" rx="10" ry="15" fill="#2A2928"/>
+</svg>

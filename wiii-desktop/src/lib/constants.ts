@@ -1,8 +1,8 @@
 /** App version */
-export const APP_VERSION = "0.1.0";
+export const APP_VERSION = "1.2.0";
 
 /** App name */
-export const APP_NAME = "Wiii";
+export const APP_NAME = "Wiii Workbench";
 
 function isLocalBrowserHost(): boolean {
   if (typeof window === "undefined") return false;
@@ -25,7 +25,16 @@ export const DEFAULT_SERVER_URL = (() => {
     (typeof import.meta !== "undefined" && import.meta.env?.DEV) ||
     isLocalBrowserHost()
   ) {
-    return "http://localhost:8080";
+    return "http://localhost:8000";
+  }
+  if (
+    typeof window !== "undefined" &&
+    "__TAURI_INTERNALS__" in window
+  ) {
+    // A packaged Tauri page is served from tauri.localhost, not from Wiii's
+    // API. First launch must ask for a real endpoint instead of silently
+    // sending requests to the WebView origin.
+    return "";
   }
   return typeof window !== "undefined" ? window.location.origin : "";
 })();
