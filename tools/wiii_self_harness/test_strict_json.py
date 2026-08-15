@@ -8,11 +8,9 @@ import strict_json
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUNTIME_JSON_READER_MODULES = (
-    "run_wiii_self_harness.py",
+    "run_wiii_repository_harness.py",
     "validate_runtime_evidence_registry.py",
     "validate_runtime_evidence_artifact.py",
-    "validate_runtime_evidence_bundle.py",
-    "validate_self_harness_report_bundle.py",
     "report_runtime_evidence_coverage.py",
 )
 
