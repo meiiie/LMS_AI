@@ -237,6 +237,7 @@ class LLMPool:
         provider_name: str,
         tier_key: str,
         requested_provider: Optional[str] = None,
+        model_name: Optional[str] = None,
     ) -> Any:
         """Attach lightweight runtime metadata for downstream failover helpers."""
         return tag_runtime_metadata_impl(
@@ -244,6 +245,7 @@ class LLMPool:
             provider_name=provider_name,
             tier_key=tier_key,
             requested_provider=requested_provider,
+            model_name=model_name,
             logger_obj=logger,
         )
 

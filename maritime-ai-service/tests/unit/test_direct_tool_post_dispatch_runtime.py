@@ -70,6 +70,11 @@ async def test_process_direct_tool_post_dispatch_appends_events_and_reflection()
             "name": "tool_web_search",
             "result": "search result",
             "id": "call-1",
+            "metadata": {
+                "schema_version": "tool_result_metadata.v1",
+                "status": "completed",
+                "result_kind": "text",
+            },
         }
     ]
     assert messages == [{"content": "search result", "tool_call_id": "call-1"}]

@@ -9,6 +9,7 @@ from app.engine.agentic_rag.corrective_rag_runtime_support import (
     build_cache_hit_result_impl,
     build_final_result_impl,
     build_thinking_payload_impl,
+    cache_hit_matches_runtime_scope_impl,
     collect_evidence_images_impl,
     get_query_embedding_impl,
     store_cache_response_impl,
@@ -71,17 +72,31 @@ async def process_impl(
                 )
 
                 if cache_result.hit:
-                    logger.info(
-                        "[CRAG] CACHE HIT! similarity=%.3f lookup_time=%.1fms",
-                        cache_result.similarity,
-                        cache_result.lookup_time_ms,
-                    )
-                    return await build_cache_hit_result_impl(
+                    scope_matches, scope_details = cache_hit_matches_runtime_scope_impl(
                         cache_result=cache_result,
-                        query=query,
                         context=context,
-                        result_cls=result_cls,
                     )
+                    if not scope_matches:
+                        logger.info(
+                            "[CRAG] Cache hit ignored due to runtime model mismatch "
+                            "(requested_provider=%s requested_model=%s cached_provider=%s cached_model=%s)",
+                            scope_details["requested_provider"],
+                            scope_details["requested_model"],
+                            scope_details["cached_provider"] or "<unscoped>",
+                            scope_details["cached_model"] or "<unscoped>",
+                        )
+                    else:
+                        logger.info(
+                            "[CRAG] CACHE HIT! similarity=%.3f lookup_time=%.1fms",
+                            cache_result.similarity,
+                            cache_result.lookup_time_ms,
+                        )
+                        return await build_cache_hit_result_impl(
+                            cache_result=cache_result,
+                            query=query,
+                            context=context,
+                            result_cls=result_cls,
+                        )
 
                 logger.debug("[CRAG] Cache MISS, proceeding with full pipeline")
             else:

@@ -3133,6 +3133,28 @@ html.dark .shiki span {
   background: color-mix(in srgb, var(--accent-teal) 8%, transparent);
 }
 
+.tool-strip[data-state-tone="warning"] .tool-strip__dot {
+  color: var(--accent-orange);
+  border-color: color-mix(in srgb, var(--accent-orange) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent-orange) 8%, white);
+}
+
+.tool-strip[data-state-tone="warning"] .tool-strip__state {
+  color: color-mix(in srgb, var(--accent-orange) 82%, var(--text));
+  background: color-mix(in srgb, var(--accent-orange) 8%, transparent);
+}
+
+.tool-strip[data-state-tone="muted"] .tool-strip__dot {
+  color: var(--text-tertiary);
+  border-color: color-mix(in srgb, var(--text-tertiary) 28%, var(--border));
+  background: color-mix(in srgb, var(--text-tertiary) 8%, white);
+}
+
+.tool-strip[data-state-tone="muted"] .tool-strip__state {
+  color: color-mix(in srgb, var(--text-tertiary) 82%, var(--text));
+  background: color-mix(in srgb, var(--text-tertiary) 9%, transparent);
+}
+
 .assistant-response {
   margin: 0.85rem 0 0.65rem 1.72rem;
   max-width: 68ch;

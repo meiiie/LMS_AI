@@ -40,7 +40,7 @@ def prepare_direct_tool_call_response(
         )
         if raw_tool_calls:
             logger_obj.warning(
-                "[DIRECT] Converted raw JSON assistant content into %d structured tool call(s): %s",
+                "[DIRECT] Converted raw assistant content into %d structured tool call(s): %s",
                 len(raw_tool_calls),
                 [call.get("name") for call in raw_tool_calls],
             )

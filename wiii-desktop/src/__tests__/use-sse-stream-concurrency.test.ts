@@ -10,7 +10,7 @@ import { useCharacterStore } from "@/stores/character-store";
 import { usePageContextStore } from "@/stores/page-context-store";
 import { useHostContextStore } from "@/stores/host-context-store";
 import { useModelStore } from "@/stores/model-store";
-import type { VisualPayload } from "@/api/types";
+import type { ToolExecutionBlockData, VisualPayload } from "@/api/types";
 import { sendMessageStream } from "@/api/chat";
 import {
   fetchWiiiConnectFacebookPages,
@@ -123,6 +123,7 @@ beforeEach(() => {
   vi.mocked(fetchWiiiConnectFacebookPages).mockReset();
   useModelStore.setState({
     activeProvider: "auto",
+    activeModel: null,
     nextTurnProvider: null,
     providers: [],
     isLoading: false,
@@ -229,6 +230,7 @@ describe("useSSEStream concurrency", () => {
     const sendMessageStreamMock = vi.mocked(sendMessageStream);
     useModelStore.setState({
       activeProvider: "openrouter",
+      activeModel: null,
       nextTurnProvider: null,
       providers: [
         {
@@ -241,6 +243,7 @@ describe("useSSEStream concurrency", () => {
           reasonCode: null,
           reasonLabel: null,
           selectedModel: "qwen/qwen3.6-plus:free",
+          modelOptions: [],
           strictPin: true,
           verifiedAt: "2026-04-04T00:00:00Z",
         },
@@ -262,6 +265,145 @@ describe("useSSEStream concurrency", () => {
     expect(sendMessageStreamMock.mock.calls[0]?.[0]).toMatchObject({
       provider: "openrouter",
       model: "qwen/qwen3.6-plus:free",
+    });
+  });
+
+  it("sends a concrete user-selected model override with the stream request", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    useModelStore.setState({
+      activeProvider: "nvidia",
+      activeModel: "nvidia/nemotron-3-ultra-550b-a55b",
+      nextTurnProvider: null,
+      providers: [
+        {
+          id: "nvidia",
+          displayName: "NVIDIA NIM",
+          available: true,
+          isPrimary: false,
+          isFallback: true,
+          state: "selectable",
+          reasonCode: null,
+          reasonLabel: null,
+          selectedModel: "qwen/qwen3-next-80b-a3b-instruct",
+          modelOptions: [],
+          strictPin: true,
+          verifiedAt: "2026-06-05T00:00:00Z",
+        },
+      ],
+    });
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Xin chào bằng Nemotron");
+    });
+
+    expect(sendMessageStreamMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageStreamMock.mock.calls[0]?.[0]).toMatchObject({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+    });
+  });
+
+  it("prefers the active conversation model over the global default", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    useSettingsStore.setState((state) => ({
+      settings: {
+        ...state.settings,
+        model_provider: "nvidia",
+        nvidia_model: "qwen/qwen3-next-80b-a3b-instruct",
+      },
+    }));
+    useModelStore.setState({
+      activeProvider: "nvidia",
+      activeModel: "qwen/qwen3-next-80b-a3b-instruct",
+      nextTurnProvider: null,
+    });
+    useChatStore.setState({
+      activeConversationId: "conv-session-model",
+      conversations: [
+        {
+          id: "conv-session-model",
+          title: "Session model",
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+          messages: [],
+          model_provider: "nvidia",
+          model: "nvidia/nemotron-3-ultra-550b-a55b",
+        },
+      ],
+    });
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Dung model cua session");
+    });
+
+    expect(sendMessageStreamMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageStreamMock.mock.calls[0]?.[0]).toMatchObject({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+    });
+  });
+
+  it("fills a conversation provider-only selection with the active provider model", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    useSettingsStore.setState((state) => ({
+      settings: {
+        ...state.settings,
+        model_provider: "nvidia",
+        nvidia_model: "nvidia/nemotron-3-ultra-550b-a55b",
+      },
+    }));
+    useModelStore.setState({
+      activeProvider: "nvidia",
+      activeModel: "nvidia/nemotron-3-ultra-550b-a55b",
+      nextTurnProvider: null,
+    });
+    useChatStore.setState({
+      activeConversationId: "conv-provider-only",
+      conversations: [
+        {
+          id: "conv-provider-only",
+          title: "Provider only",
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+          messages: [],
+          model_provider: "nvidia",
+        },
+      ],
+    });
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Dung model dang chon cho session");
+    });
+
+    expect(sendMessageStreamMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageStreamMock.mock.calls[0]?.[0]).toMatchObject({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+    });
+    expect(useChatStore.getState().conversations[0]).toMatchObject({
+      model_provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
     });
   });
 
@@ -398,6 +540,67 @@ describe("useSSEStream concurrency", () => {
     expect(useChatStore.getState().streamingLifecycleEvents).toHaveLength(0);
     expect(useChatStore.getState().lastCompletedLifecycleEvents).toHaveLength(0);
     useChatStore.getState().clearStreaming();
+  });
+
+  it("preserves tool_call policy inside stored tool metadata", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    sendMessageStreamMock.mockImplementationOnce(async (_request, handlers) => {
+      handlers.onToolCall?.({
+        content: {
+          id: "tc-policy",
+          name: "tool_fetch_url",
+          args: { url: "https://example.com/weather" },
+          metadata: {
+            schema_version: "tool_result_metadata.v1",
+            status: "blocked",
+            result_kind: "policy",
+            reason_code: "not_allowed_by_path_policy",
+          },
+          policy: {
+            allowed: false,
+            path: "weather_lookup",
+            reason: "not_allowed_by_path_policy",
+          },
+        },
+        node: "direct",
+      });
+      handlers.onDone();
+      return {
+        lastEventId: null,
+        sawDone: true,
+        eventOrder: ["tool_call", "done"],
+      };
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Weather with blocked side tool");
+      await Promise.resolve();
+    });
+
+    const state = useChatStore.getState();
+    const streamingToolBlock = state.streamingBlocks.find(
+      (block) => block.type === "tool_execution" && block.id === "tc-policy",
+    ) as ToolExecutionBlockData | undefined;
+    const assistantToolBlock = state
+      .activeConversation()
+      ?.messages.flatMap((message) => message.blocks || [])
+      .find(
+        (block) => block.type === "tool_execution" && block.id === "tc-policy",
+      ) as ToolExecutionBlockData | undefined;
+    const toolBlock = streamingToolBlock || assistantToolBlock;
+
+    expect(toolBlock?.tool.metadata).toMatchObject({
+      status: "blocked",
+      result_kind: "policy",
+      reason_code: "not_allowed_by_path_policy",
+      policy: {
+        allowed: false,
+        path: "weather_lookup",
+        reason: "not_allowed_by_path_policy",
+      },
+    });
   });
 
   it("sends Wiii Connect Facebook snapshot even when host context is missing", async () => {

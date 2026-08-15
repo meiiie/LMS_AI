@@ -22,10 +22,19 @@ def create_llm_with_model_for_provider_impl(
     if not normalized_provider:
         return None
 
+    def tag_custom_runtime(llm, resolved_model_name: str):
+        return tag_runtime_metadata(
+            llm,
+            provider_name=normalized_provider,
+            tier_key=tier.value,
+            requested_provider=normalized_provider,
+            model_name=resolved_model_name,
+        )
+
     requested_cache_key = f"_custom_{normalized_provider}_{model_name}_{tier.value}"
     if requested_cache_key in pool:
         if not is_model_degraded(normalized_provider, model_name):
-            return pool[requested_cache_key]
+            return tag_custom_runtime(pool[requested_cache_key], model_name)
         pool.pop(requested_cache_key, None)
 
     thinking_budget = thinking_budgets.get(tier.value, 4096)
@@ -69,7 +78,7 @@ def create_llm_with_model_for_provider_impl(
 
         cache_key = f"_custom_{normalized_provider}_{selected_model_name}_{tier.value}"
         if cache_key in pool:
-            return pool[cache_key]
+            return tag_custom_runtime(pool[cache_key], selected_model_name)
 
         llm = provider.create_instance(
             tier=tier.value,
@@ -78,12 +87,7 @@ def create_llm_with_model_for_provider_impl(
             temperature=0.5,
             model_name=selected_model_name,
         )
-        llm = tag_runtime_metadata(
-            llm,
-            provider_name=normalized_provider,
-            tier_key=tier.value,
-            requested_provider=normalized_provider,
-        )
+        llm = tag_custom_runtime(llm, selected_model_name)
         pool[cache_key] = llm
         logger_obj.info(
             "[LLM_POOL] Created custom model LLM: provider=%s model=%s tier=%s budget=%d",

@@ -78,6 +78,30 @@ class TestDomainKeywordRouting:
         result = supervisor._rule_based_route("what about colregs?", config)
         assert result == AgentType.RAG.value
 
+    def test_raw_string_keywords_split_without_single_char_matches(self, supervisor):
+        config = {"routing_keywords": "colregs, solas, marpol"}
+
+        result = supervisor._rule_based_route(
+            "Tra loi mot cau ngan bang tieng Viet: harness-nemotron-pin-ok.",
+            config,
+        )
+        assert result == AgentType.DIRECT.value
+
+        result = supervisor._rule_based_route("Tell me about SOLAS", config)
+        assert result == AgentType.RAG.value
+
+    def test_low_signal_intent_keyword_does_not_route_to_rag(self, supervisor):
+        config = _make_domain_config(["tra", "colregs"])
+
+        result = supervisor._rule_based_route(
+            "Tra loi mot cau ngan bang tieng Viet.",
+            config,
+        )
+        assert result == AgentType.DIRECT.value
+
+        result = supervisor._rule_based_route("What is COLREGs Rule 5?", config)
+        assert result == AgentType.RAG.value
+
     def test_no_match_without_keywords(self, supervisor):
         config = _make_domain_config(["colregs", "solas"])
         result = supervisor._rule_based_route("hi", config)
@@ -183,6 +207,26 @@ class TestDefaultRouting:
 
         result = supervisor._rule_based_route("What is the weather today in Hanoi?", {})
         assert result == AgentType.DIRECT.value
+
+
+    @pytest.mark.asyncio
+    async def test_explicit_web_fetch_preflight_routes_to_direct_without_llm(self, supervisor):
+        state = {
+            "query": (
+                "Bật web_fetch đọc H1 của https://www.iana.org/about rồi trả lời một dòng"
+            ),
+            "context": {},
+            "domain_config": {},
+        }
+
+        result = await supervisor.route(state)
+
+        assert result == AgentType.DIRECT.value
+        assert state["routing_metadata"]["method"] == (
+            "deterministic_explicit_web_fetch_preflight"
+        )
+        assert state["routing_metadata"]["intent"] == "web_search"
+        assert state["routing_metadata"]["web_tool"] == "tool_fetch_url"
 
 
 # =============================================================================

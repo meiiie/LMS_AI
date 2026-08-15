@@ -27,7 +27,11 @@ import { useHostContextStore, type ActionResult } from "@/stores/host-context-st
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
-import { useModelStore } from "@/stores/model-store";
+import {
+  resolveSelectedModelForProvider,
+  useModelStore,
+  type RequestModelSelection,
+} from "@/stores/model-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { StreamBuffer } from "@/lib/stream-buffer";
 import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
@@ -47,11 +51,13 @@ import type {
   ChatDocumentAttachment,
   ChatDocumentContext,
   ChatResponseMetadata,
+  Conversation,
   DisplayPresentationMeta,
   ImageInput,
   MoodType,
   PreviewItemData,
   PreviewType,
+  ToolResultMetadata,
 } from "@/api/types";
 
 const MAX_SSE_RETRIES = 3;
@@ -62,6 +68,43 @@ const IDLE_TIMEOUT_ABORT_REASON = "stream_idle_timeout";
 const STREAM_RESTART_ABORT_REASON = "stream_restart";
 const USER_CANCEL_ABORT_REASON = "user_cancel";
 const TRACE_SSE = import.meta.env.DEV;
+
+function resolveConversationModelSelection(
+  conversation?: Conversation,
+): RequestModelSelection | null {
+  if (!conversation?.model_provider) return null;
+  return {
+    provider: conversation.model_provider,
+    model:
+      conversation.model_provider === "auto"
+        ? null
+        : conversation.model?.trim() || null,
+  };
+}
+
+function completeRequestModelSelection(
+  selection: RequestModelSelection,
+): RequestModelSelection {
+  if (selection.provider === "auto" || selection.model) {
+    return selection;
+  }
+
+  const modelState = useModelStore.getState();
+  const activeModel =
+    modelState.activeProvider === selection.provider
+      ? modelState.activeModel?.trim() || null
+      : null;
+  return {
+    ...selection,
+    model:
+      activeModel
+      || resolveSelectedModelForProvider(
+        selection.provider,
+        modelState.providers,
+        useSettingsStore.getState().settings,
+      ),
+  };
+}
 
 type HostContextForRequest = NonNullable<
   ReturnType<typeof useHostContextStore.getState>["currentContext"]
@@ -371,6 +414,17 @@ function toDisplayMeta(
     stepId: data.step_id,
     stepState: data.step_state,
     presentation: data.presentation,
+  };
+}
+
+function toolMetadataFromContent(content: {
+  metadata?: ToolResultMetadata;
+  policy?: Record<string, unknown>;
+}): ToolResultMetadata | undefined {
+  if (!content.metadata && !content.policy) return undefined;
+  return {
+    ...(content.metadata || {}),
+    ...(content.policy ? { policy: content.policy } : {}),
   };
 }
 
@@ -1211,7 +1265,11 @@ export function useSSEStream() {
             ? data.content
             : [];
         traceEvent("sources", { count: sources.length });
-        useChatStore.getState().setStreamingSources(sources);
+        useChatStore.getState().setStreamingSources(sources, {
+          toolCallId:
+            typeof data.tool_call_id === "string" ? data.tool_call_id : "",
+          toolName: typeof data.tool_name === "string" ? data.tool_name : "",
+        });
       },
       onMetadata: (data) => {
         traceEvent("metadata", { session_id: data.session_id, model: data.model });
@@ -1294,6 +1352,7 @@ export function useSSEStream() {
       onToolCall: (data) => {
         traceEvent("tool_call", { name: data.content.name, node: data.node });
         const store = useChatStore.getState();
+        const toolMetadata = toolMetadataFromContent(data.content);
         if (data.content.name === "tool_think") {
           const personaLabel = String(data.content.args?.persona_label || "").trim();
           if (personaLabel) {
@@ -1306,6 +1365,7 @@ export function useSSEStream() {
             args: data.content.args,
             result: rawThought || undefined,
             node: data.node,
+            metadata: toolMetadata,
           };
           flushBothBuffers();
           store.appendToolCall(tc, toDisplayMeta(data));
@@ -1321,6 +1381,7 @@ export function useSSEStream() {
             args: data.content.args,
             result: rawMessage || undefined,
             node: data.node,
+            metadata: toolMetadata,
           };
           flushBothBuffers();
           store.appendToolCall(tc, toDisplayMeta(data));
@@ -1342,6 +1403,7 @@ export function useSSEStream() {
           name: data.content.name,
           args: data.content.args,
           node: data.node,
+          metadata: toolMetadata,
         };
         store.appendToolCall(tc, toDisplayMeta(data));
         store.appendPhaseToolCall(tc, data.step_id);
@@ -1354,8 +1416,17 @@ export function useSSEStream() {
           return;
         }
         const store = useChatStore.getState();
-        store.updateToolCallResult(data.content.id, data.content.result, toDisplayMeta(data));
-        store.updatePhaseToolCallResult(data.content.id, data.content.result);
+        store.updateToolCallResult(
+          data.content.id,
+          data.content.result,
+          toDisplayMeta(data),
+          data.content.metadata,
+        );
+        store.updatePhaseToolCallResult(
+          data.content.id,
+          data.content.result,
+          data.content.metadata,
+        );
       },
       onStatus: (data) => {
         traceEvent("status", { node: data.node, step: data.step });
@@ -1875,9 +1946,29 @@ export function useSSEStream() {
       useUIStore.getState().revealCodeStudio();
     }
 
-    // Per-request provider selection
+    // Session-bound provider selection. Conversations own their model once set;
+    // global settings are only the default for a new/unbound chat.
+    const conversationSelection = resolveConversationModelSelection(activeConv);
     const { provider: selectedProvider, model: selectedModel } =
-      useModelStore.getState().consumeSelectionForRequest();
+      completeRequestModelSelection(
+        conversationSelection
+        || useModelStore.getState().consumeSelectionForRequest(),
+      );
+    if (!conversationSelection && activeConv?.id) {
+      useChatStore
+        .getState()
+        .setConversationModel(activeConv.id, selectedProvider, selectedModel);
+    } else if (
+      conversationSelection
+      && !conversationSelection.model
+      && selectedProvider !== "auto"
+      && selectedModel
+      && activeConv?.id
+    ) {
+      useChatStore
+        .getState()
+        .setConversationModel(activeConv.id, selectedProvider, selectedModel);
+    }
     const authState = useAuthStore.getState();
     const compatibilityRole = _resolveCompatibilityRole(
       authState.authMode,

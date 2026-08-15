@@ -3,8 +3,8 @@
   "private": true,
   "version": "1.2.0",
   "description": "Wiii — an open-source durable AI workbench by The Wiii Lab",
-  "author": "The Wiii Lab",
-  "license": "MIT",
+  "author": "Meiiie (The Wiii Lab)",
+  "license": "AGPL-3.0-only",
   "homepage": "https://wiii.holilihu.online",
   "repository": {
     "type": "git",

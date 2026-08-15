@@ -211,6 +211,8 @@ EMBEDDING_BENCHMARK_CANDIDATE = "gemini-embedding-2-preview"
 OPENAI_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 OPENAI_LARGE_EMBEDDING_MODEL = "text-embedding-3-large"
 OLLAMA_DEFAULT_EMBEDDING_MODEL = "embeddinggemma"
+NVIDIA_DEFAULT_EMBEDDING_MODEL = "nvidia/nv-embed-v1"
+NVIDIA_BGE_M3_EMBEDDING_MODEL = "baai/bge-m3"
 
 EMBEDDING_MODELS: dict[str, EmbeddingModelMetadata] = {
     DEFAULT_EMBEDDING_MODEL: EmbeddingModelMetadata(
@@ -254,6 +256,20 @@ EMBEDDING_MODELS: dict[str, EmbeddingModelMetadata] = {
         status="available",
         provider="ollama",
     ),
+    NVIDIA_DEFAULT_EMBEDDING_MODEL: EmbeddingModelMetadata(
+        model_name=NVIDIA_DEFAULT_EMBEDDING_MODEL,
+        display_name="NVIDIA NV-Embed V1",
+        dimensions=4096,
+        status="available",
+        provider="nvidia",
+    ),
+    NVIDIA_BGE_M3_EMBEDDING_MODEL: EmbeddingModelMetadata(
+        model_name=NVIDIA_BGE_M3_EMBEDDING_MODEL,
+        display_name="BGE-M3 (NVIDIA NIM)",
+        dimensions=1024,
+        status="available",
+        provider="nvidia",
+    ),
 }
 
 
@@ -296,6 +312,8 @@ def get_embedding_provider(model_name: str | None) -> str:
         return "openai"
     if normalized.startswith(("embeddinggemma", "qwen3-embedding", "all-minilm", "nomic-embed")):
         return "ollama"
+    if normalized.startswith("nvidia/") or normalized in {NVIDIA_BGE_M3_EMBEDDING_MODEL}:
+        return "nvidia"
     return "google"
 
 
@@ -314,6 +332,8 @@ def get_default_embedding_model_for_provider(provider: str | None) -> str | None
         return OPENAI_DEFAULT_EMBEDDING_MODEL
     if provider == "ollama":
         return OLLAMA_DEFAULT_EMBEDDING_MODEL
+    if provider == "nvidia":
+        return NVIDIA_DEFAULT_EMBEDDING_MODEL
     if provider == "zhipu":
         return None
     return DEFAULT_EMBEDDING_MODEL

@@ -66,6 +66,8 @@ async def _convert_bus_event_impl(event: dict) -> StreamEvent:
             tool_args=tc.get("args", {}),
             tool_call_id=tc.get("id", ""),
             node=node,
+            metadata=tc.get("metadata") if isinstance(tc.get("metadata"), dict) else None,
+            policy=tc.get("policy") if isinstance(tc.get("policy"), dict) else None,
         )
     if etype == "tool_result":
         tc = event.get("content", {})
@@ -74,10 +76,28 @@ async def _convert_bus_event_impl(event: dict) -> StreamEvent:
             result_summary=tc.get("result", ""),
             tool_call_id=tc.get("id", ""),
             node=node,
+            metadata=tc.get("metadata") if isinstance(tc.get("metadata"), dict) else None,
         )
     if etype == "sources":
         sources = event.get("content", [])
-        return await create_sources_event(sources if isinstance(sources, list) else [])
+        details = event.get("details") if isinstance(event.get("details"), dict) else {}
+        return await create_sources_event(
+            sources if isinstance(sources, list) else [],
+            node=node,
+            tool_call_id=str(
+                details.get("tool_call_id")
+                or event.get("tool_call_id")
+                or ""
+            ).strip()
+            or None,
+            tool_name=str(
+                details.get("tool_name")
+                or event.get("tool_name")
+                or ""
+            ).strip()
+            or None,
+            details=details,
+        )
     if etype == "answer_delta":
         return await create_answer_event(event.get("content", ""))
     if etype == "thinking_start":

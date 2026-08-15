@@ -9,6 +9,7 @@
 #   docker compose -f docker-compose.prod.yml up -d
 #   docker compose -f docker-compose.prod.yml --profile neo4j up -d      # With Neo4j
 #   docker compose -f docker-compose.prod.yml --profile soul-agi up -d   # With Soul AGI (Ollama + Cloudflared)
+#   VECTOR_INDEX_BACKEND=qdrant docker compose -f docker-compose.prod.yml --profile vector-index up -d
 #   docker compose -f docker-compose.prod.yml --profile soul-agi --profile neo4j up -d  # Full stack
 #
 # Prerequisites:
@@ -88,6 +89,11 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       # Sprint 232: Connect via PgBouncer for connection pooling at scale
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-wiii}:${POSTGRES_PASSWORD}@${DB_HOST:-postgres}:5432/${POSTGRES_DB:-wiii_ai}
+      # Optional Qdrant ANN sidecar. Postgres remains source of truth.
+      - VECTOR_INDEX_BACKEND=${VECTOR_INDEX_BACKEND:-postgres}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - QDRANT_COLLECTION_PREFIX=${QDRANT_COLLECTION_PREFIX:-wiii_prod}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-wiii}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
@@ -276,6 +282,35 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+
+  # =============================================================================
+  # QDRANT - Opt-in ANN sidecar for high-dimensional embedding spaces
+  # =============================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    container_name: wiii-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - wiii-network
+    restart: unless-stopped
+    cpus: "${QDRANT_CPU_LIMIT:-0.75}"
+    mem_limit: "${QDRANT_MEM_LIMIT:-1024M}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${QDRANT_CPU_LIMIT:-0.75}"
+          memory: "${QDRANT_MEM_LIMIT:-1024M}"
+        reservations:
+          cpus: "0.1"
+          memory: "256M"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    profiles:
+      - vector-index
 
   # =============================================================================
   # NEO4J — Optional Graph Database (opt-in via --profile neo4j)
@@ -543,6 +578,8 @@ volumes:
   nginx_logs:
     driver: local
   ollama_data:
+    driver: local
+  qdrant_data:
     driver: local
 
 networks:

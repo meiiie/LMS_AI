@@ -210,6 +210,90 @@ def test_weather_web_search_does_not_return_raw_search_template_after_tool_round
     )
 
 
+def test_weather_web_search_query_contract_enriches_thin_location_args():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="Hai Phong",
+            user_query="thoi tiet Hai Phong hom nay the nao",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Hai Phong hom nay 2026-06-05"
+    )
+
+
+def test_weather_web_search_query_contract_uses_default_city_for_generic_turn():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="",
+            user_query="ua thoi tiet hom nay the nao",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Ho Chi Minh City hom nay 2026-06-05"
+    )
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="",
+            user_query="thoi tiet hom nay bao nhieu do",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Ho Chi Minh City hom nay 2026-06-05"
+    )
+
+
+def test_weather_web_search_query_contract_preserves_existing_date():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="Ha Noi weather today 2026-06-01",
+            user_query="weather now",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "Ha Noi weather today 2026-06-01"
+    )
+
+
+def test_weather_web_search_query_contract_preserves_future_anchor():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="Hai Phong",
+            user_query="thoi tiet Hai Phong ngay mai the nao",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Hai Phong ngay mai"
+    )
+
+
+def test_prefer_official_query_rewrites_weather_search_args(monkeypatch):
+    from app.engine.multi_agent import direct_web_search_policy as policy
+
+    monkeypatch.setattr(policy, "_today_vietnam", lambda: "2026-06-05")
+
+    assert policy._prefer_official_query_for_known_docs(
+        {"q": "Hai Phong"},
+        "thoi tiet Hai Phong hom nay the nao",
+    ) == {"query": "thoi tiet Hai Phong hom nay 2026-06-05"}
+
+
 def test_clean_forced_web_search_query_strips_vietnamese_discourse_marker():
     from app.engine.multi_agent.direct_web_search_policy import (
         _clean_forced_web_search_query,
@@ -273,6 +357,207 @@ def test_weather_lookup_limits_duplicate_web_search_fanout():
         )
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_direct_tool_round_emits_skipped_weather_fanout_events():
+    from app.engine.multi_agent.direct_tool_round_execution_runtime import (
+        _WEATHER_SEARCH_FANOUT_SKIP_RESULT,
+        execute_direct_tool_round,
+    )
+
+    events: list[dict] = []
+    tool_call_events: list[dict] = []
+    messages: list[object] = []
+    dispatch_calls: list[str] = []
+    llm_response = SimpleNamespace(
+        tool_calls=[
+            {
+                "id": "search_1",
+                "name": "tool_web_search",
+                "args": {"query": "thời tiết Hải Phòng hôm nay"},
+            },
+            {
+                "id": "search_2",
+                "name": "tool_web_search",
+                "args": {"q": "Hai Phong"},
+            },
+        ]
+    )
+
+    async def push_event(event):
+        events.append(event)
+
+    async def dispatch_direct_tool_call(**kwargs):
+        dispatch_calls.append(kwargs["tool_call"]["id"])
+        return SimpleNamespace(
+            tool_call_id=kwargs["tool_call"]["id"],
+            tool_name="tool_web_search",
+            tool_args=kwargs["tool_call"]["args"],
+            result="URL: https://example.test/weather\nRealFeel 39C.",
+            matched=True,
+        )
+
+    async def process_direct_tool_post_dispatch(**_kwargs):
+        return SimpleNamespace(
+            active_visual_session_ids=[],
+            visual_emitted_any=False,
+        )
+
+    async def emit_visual_commit_events(**_kwargs):
+        return None
+
+    result = await execute_direct_tool_round(
+        llm_response=llm_response,
+        tool_round=0,
+        tools=[],
+        query="thời tiết Hải Phòng hôm nay",
+        state={"_turn_path_decision": {"path": "web_search"}},
+        messages=messages,
+        tool_call_events=tool_call_events,
+        push_event=push_event,
+        native_tool_messages=False,
+        visual_emitted_any=False,
+        runtime_context_base=None,
+        handoffs_enabled=False,
+        get_tool_by_name=lambda *_args, **_kwargs: None,
+        invoke_tool_with_runtime=lambda *_args, **_kwargs: None,
+        is_search_tool_name=lambda name: name == "tool_web_search",
+        prefer_official_query_for_known_docs=lambda _args, _query: {
+            "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+        },
+        summarize_tool_result_for_stream=lambda _name, value: f"summary:{value}",
+        maybe_emit_host_action_event=lambda **_kwargs: None,
+        maybe_emit_visual_event=lambda **_kwargs: None,
+        emit_visual_commit_events=emit_visual_commit_events,
+        build_direct_tool_reflection=lambda *_args, **_kwargs: "",
+        push_status_only_progress=lambda *_args, **_kwargs: None,
+        build_tool_result_message=lambda content, **_kwargs: SimpleNamespace(
+            content=content
+        ),
+        normalize_tool_call=lambda tool_call: tool_call,
+        infer_direct_reasoning_cue=lambda *_args, **_kwargs: "cue",
+        collect_active_visual_session_ids=lambda _state: [],
+        dispatch_direct_tool_call=dispatch_direct_tool_call,
+        process_direct_tool_post_dispatch=process_direct_tool_post_dispatch,
+        logger_obj=SimpleNamespace(
+            info=lambda *args, **kwargs: None,
+            warning=lambda *args, **kwargs: None,
+        ),
+    )
+
+    assert result.round_tool_names == ["tool_web_search", "tool_web_search"]
+    assert dispatch_calls == ["search_1"]
+    assert [event["type"] for event in events] == ["tool_call", "tool_result"]
+    assert events[0]["content"]["id"] == "search_2"
+    assert events[0]["content"]["args"] == {
+        "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+    }
+    assert events[1]["content"]["id"] == "search_2"
+    assert events[1]["content"]["metadata"]["status"] == "skipped"
+    assert (
+        events[1]["content"]["metadata"]["reason_code"]
+        == "weather_search_fanout_limited"
+    )
+    assert tool_call_events[0]["type"] == "call"
+    assert tool_call_events[0]["args"] == {
+        "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+    }
+    assert tool_call_events[0]["metadata"]["status"] == "skipped"
+    assert tool_call_events[1]["type"] == "result"
+    assert tool_call_events[1]["args"] == {
+        "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+    }
+    assert tool_call_events[1]["result"] == _WEATHER_SEARCH_FANOUT_SKIP_RESULT
+    assert messages[-1].content == _WEATHER_SEARCH_FANOUT_SKIP_RESULT
+
+
+@pytest.mark.asyncio
+async def test_execute_direct_tool_round_keeps_weather_fanout_after_no_source_search():
+    from app.engine.multi_agent.direct_tool_round_execution_runtime import (
+        execute_direct_tool_round,
+    )
+
+    events: list[dict] = []
+    tool_call_events: list[dict] = []
+    messages: list[object] = []
+    dispatch_calls: list[str] = []
+    llm_response = SimpleNamespace(
+        tool_calls=[
+            {
+                "id": "search_1",
+                "name": "tool_web_search",
+                "args": {"query": "thời tiết Hải Phòng hôm nay"},
+            },
+            {
+                "id": "search_2",
+                "name": "tool_web_search",
+                "args": {"query": "weather Hai Phong today"},
+            },
+        ]
+    )
+
+    async def push_event(event):
+        events.append(event)
+
+    async def dispatch_direct_tool_call(**kwargs):
+        dispatch_calls.append(kwargs["tool_call"]["id"])
+        return SimpleNamespace(
+            tool_call_id=kwargs["tool_call"]["id"],
+            tool_name="tool_web_search",
+            tool_args=kwargs["tool_call"]["args"],
+            result="No web results found for this query.",
+            matched=True,
+        )
+
+    async def process_direct_tool_post_dispatch(**_kwargs):
+        return SimpleNamespace(
+            active_visual_session_ids=[],
+            visual_emitted_any=False,
+        )
+
+    async def emit_visual_commit_events(**_kwargs):
+        return None
+
+    await execute_direct_tool_round(
+        llm_response=llm_response,
+        tool_round=0,
+        tools=[],
+        query="thời tiết Hải Phòng hôm nay",
+        state={"_turn_path_decision": {"path": "web_search"}},
+        messages=messages,
+        tool_call_events=tool_call_events,
+        push_event=push_event,
+        native_tool_messages=False,
+        visual_emitted_any=False,
+        runtime_context_base=None,
+        handoffs_enabled=False,
+        get_tool_by_name=lambda *_args, **_kwargs: None,
+        invoke_tool_with_runtime=lambda *_args, **_kwargs: None,
+        is_search_tool_name=lambda name: name == "tool_web_search",
+        prefer_official_query_for_known_docs=lambda args, _query: args,
+        summarize_tool_result_for_stream=lambda _name, value: f"summary:{value}",
+        maybe_emit_host_action_event=lambda **_kwargs: None,
+        maybe_emit_visual_event=lambda **_kwargs: None,
+        emit_visual_commit_events=emit_visual_commit_events,
+        build_direct_tool_reflection=lambda *_args, **_kwargs: "",
+        push_status_only_progress=lambda *_args, **_kwargs: None,
+        build_tool_result_message=lambda content, **_kwargs: SimpleNamespace(
+            content=content
+        ),
+        normalize_tool_call=lambda tool_call: tool_call,
+        infer_direct_reasoning_cue=lambda *_args, **_kwargs: "cue",
+        collect_active_visual_session_ids=lambda _state: [],
+        dispatch_direct_tool_call=dispatch_direct_tool_call,
+        process_direct_tool_post_dispatch=process_direct_tool_post_dispatch,
+        logger_obj=SimpleNamespace(
+            info=lambda *args, **kwargs: None,
+            warning=lambda *args, **kwargs: None,
+        ),
+    )
+
+    assert dispatch_calls == ["search_1", "search_2"]
+    assert events == []
 
 
 def test_build_direct_post_tool_search_template_response_for_forced_web(monkeypatch):
@@ -389,6 +674,35 @@ def test_build_direct_post_tool_search_template_response_skips_empty_template(
     assert response is None
 
 
+def test_build_direct_post_tool_search_template_response_returns_no_source_template():
+    from app.engine.multi_agent import direct_search_template_runtime as runtime
+
+    response = runtime.build_direct_post_tool_search_template_response(
+        query="@web-search một chủ đề rất hẹp",
+        state={"force_skills": ["web-search"]},
+        tool_call_events=[
+            {
+                "type": "result",
+                "name": "tool_web_search",
+                "result": "",
+                "metadata": {
+                    "schema_version": "tool_result_metadata.v1",
+                    "status": "unavailable",
+                    "result_kind": "web_sources",
+                    "reason_code": "no_sources",
+                    "source_count": 0,
+                    "domains": [],
+                },
+            }
+        ],
+        tool_round=0,
+        native_tool_messages=False,
+    )
+
+    assert response is not None
+    assert "chưa tìm được kết quả phù hợp" in response.content
+
+
 @pytest.mark.asyncio
 async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
     from app.engine.multi_agent import direct_forced_web_search_runtime as runtime
@@ -446,6 +760,10 @@ async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
         "thinking_end",
     ]
     assert emitted[2]["content"][0]["url"] == "https://example.test"
+    assert emitted[2]["details"] == {
+        "tool_call_id": "forced_web_search_0",
+        "tool_name": "tool_web_search",
+    }
     thinking_text = " ".join(
         str(event.get("content", ""))
         for event in emitted

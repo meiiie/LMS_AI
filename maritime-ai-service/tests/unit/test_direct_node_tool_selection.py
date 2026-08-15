@@ -155,6 +155,69 @@ def test_select_direct_node_tools_forces_web_search_and_must_include(monkeypatch
     assert captured["user_role"] == "teacher"
 
 
+def test_select_direct_node_tools_force_binds_explicit_web_fetch(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_select_runtime_tools(
+        tools: list[Any],
+        *,
+        query: str,
+        intent: str | None,
+        user_role: str,
+        max_tools: int,
+        must_include: list[str],
+    ) -> list[Any]:
+        captured.update(
+            {
+                "query": query,
+                "intent": intent,
+                "user_role": user_role,
+                "max_tools": max_tools,
+                "must_include": must_include,
+            }
+        )
+        return tools
+
+    monkeypatch.setattr(
+        "app.engine.skills.skill_recommender.select_runtime_tools",
+        fake_select_runtime_tools,
+    )
+
+    fetch_tool = _Tool("tool_fetch_url")
+    search_tool = _Tool("tool_web_search")
+    state: dict[str, Any] = {
+        "_turn_path_decision": {
+            "path": "web_search",
+            "bind_tools": True,
+            "force_tools": True,
+            "allow_all_tools": False,
+            "allowed_tool_names": ["tool_fetch_url"],
+        },
+        "routing_metadata": {"intent": "web_search"},
+    }
+
+    result = select_direct_node_tools(
+        query="Bật web_fetch đọc H1 của https://www.iana.org/about rồi trả lời một dòng",
+        state=state,
+        ctx={"user_role": "student"},
+        routing_intent="web_search",
+        is_short_house_chatter=False,
+        is_identity_turn=False,
+        is_emotional_support_turn=False,
+        is_codebase_source_turn=False,
+        explicit_web_search_turn=True,
+        has_uploaded_document_context=False,
+        needs_web_search=lambda _query: True,
+        collect_direct_tools=lambda *_args, **_kwargs: ([fetch_tool, search_tool], False),
+        direct_required_tool_names=lambda _query, _role: [],
+        logger_obj=logging.getLogger(__name__),
+    )
+
+    assert result.tools == [fetch_tool, search_tool]
+    assert result.force_tools is True
+    assert captured["must_include"] == ["tool_fetch_url"]
+
+
 def test_select_direct_node_tools_respects_governor_when_pointy_is_suppressed(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 

@@ -21,6 +21,9 @@ from app.engine.multi_agent.tool_policy_session import (
     tool_policy_session_from_state,
 )
 from app.engine.multi_agent.tool_collection import _force_skills_from_state
+from app.engine.multi_agent.direct_web_search_policy import (
+    _looks_explicit_web_fetch_query,
+)
 from app.engine.multi_agent.wiii_connect_intent import (
     looks_wiii_connect_external_app_action_request_for_state,
     looks_wiii_connect_facebook_post_request_for_state,
@@ -141,6 +144,13 @@ def select_direct_node_tools(
     if "web-search" in force_skills:
         if _turn_path_allows_tool_name(state, "tool_web_search"):
             force_required_tools.append("tool_web_search")
+    if (
+        "web-fetch" in force_skills
+        or "web_fetch" in force_skills
+        or _looks_explicit_web_fetch_query(query)
+    ):
+        if _turn_path_allows_tool_name(state, "tool_fetch_url"):
+            force_required_tools.append("tool_fetch_url")
     if force_required_tools:
         force_tools = True
         logger_obj.info("[DIRECT] Force-bound via @-mention: required=%s", force_required_tools)

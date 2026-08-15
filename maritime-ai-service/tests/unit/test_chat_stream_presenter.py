@@ -118,6 +118,41 @@ def test_serialize_stream_event_metadata_adds_streaming_version():
     assert payload["streaming_version"] == "v3-graph"
 
 
+def test_serialize_stream_event_sources_preserves_tool_identity():
+    from types import SimpleNamespace
+
+    presenter = _load_chat_stream_presenter()
+
+    event = SimpleNamespace(
+        type="sources",
+        content=[{"title": "Weather", "url": "https://weather.example"}],
+        node="direct",
+        details={
+            "tool_call_id": "tc_search",
+            "tool_name": "tool_web_search",
+        },
+    )
+
+    chunks, counter, should_stop = presenter.serialize_stream_event(
+        event=event,
+        event_counter=4,
+        enable_artifacts=True,
+    )
+
+    assert counter == 5
+    assert should_stop is False
+    data_line = next(
+        line for line in chunks[0].split("\n") if line.startswith("data: ")
+    )
+    payload = json.loads(data_line[6:])
+    assert payload["sources"] == [
+        {"title": "Weather", "url": "https://weather.example"}
+    ]
+    assert payload["node"] == "direct"
+    assert payload["tool_call_id"] == "tc_search"
+    assert payload["tool_name"] == "tool_web_search"
+
+
 def test_serialize_stream_event_skips_artifact_when_disabled():
     from types import SimpleNamespace
 

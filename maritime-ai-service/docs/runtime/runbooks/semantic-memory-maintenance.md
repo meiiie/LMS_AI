@@ -58,6 +58,46 @@ The Prometheus endpoint exposes them with underscores, for example
 - If summarization is failing due to provider errors, memory writes can continue
   while summaries catch up later.
 
+## Qdrant Sidecar Index
+
+Wiii can use Qdrant as an ANN sidecar for high-dimensional active shadow
+embedding spaces such as `nvidia/nv-embed-v1:4096`. PostgreSQL remains the
+source of truth for memory, documents, tenant scope, metadata, and audit data.
+Qdrant stores only vectors plus minimal filter payload.
+
+Local Docker enables the sidecar by default through:
+
+```bash
+VECTOR_INDEX_BACKEND=qdrant
+QDRANT_URL=http://qdrant:6333
+```
+
+Production keeps `VECTOR_INDEX_BACKEND=postgres` unless the operator explicitly
+starts the profile:
+
+```bash
+VECTOR_INDEX_BACKEND=qdrant docker compose -f docker-compose.prod.yml --profile vector-index up -d
+```
+
+After promoting a new active shadow embedding space, rebuild Qdrant from
+Postgres:
+
+```bash
+cd maritime-ai-service
+python scripts/rebuild_qdrant_vector_index.py --batch-size 64
+```
+
+Expected result: `status` is `ok` or `skipped`, and `indexed_points` matches the
+active shadow-vector row count for that entity. If Qdrant is unavailable,
+retrieval falls back to the existing Postgres vector path. Rollback is:
+
+```bash
+VECTOR_INDEX_BACKEND=postgres
+```
+
+Then restart the app process. The Qdrant collection can be kept for future
+rebuilds or dropped independently because it is not authoritative data.
+
 ## When the alert clears
 
 - No new `runtime_semantic_memory_maintenance_runs{status="error"}` samples for

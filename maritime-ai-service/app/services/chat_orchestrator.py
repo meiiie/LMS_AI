@@ -477,6 +477,12 @@ class ChatOrchestrator:
         session_id = prepared_turn.session_id
 
         logger.info("Processing request for user %s with role: %s", user_id, user_role.value)
+        logger.info(
+            "[MODEL_SELECTION] session=%s provider=%s model=%s",
+            session_id,
+            provider or "auto",
+            model or "<provider-default>",
+        )
 
         if prepared_turn.validation.blocked:
             return prepared_turn.validation.blocked_response

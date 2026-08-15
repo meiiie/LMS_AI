@@ -230,6 +230,32 @@ def test_turn_path_governor_treats_supervisor_web_intent_as_tool_signal():
     assert decision.should_keep_tool_name("tool_pointy_show") is False
 
 
+def test_turn_path_governor_explicit_web_fetch_beats_code_studio():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query=(
+                "bat web_fetch doc h1 cua https://www.iana.org/about roi tra loi mot dong"
+            ),
+            needs_web_fetch=True,
+            needs_web_search=True,
+            prefers_code_execution_lane=True,
+            needs_analysis_tool=True,
+        )
+    )
+
+    assert decision.path == "web_search"
+    assert decision.reason == "explicit_web_fetch_url"
+    assert decision.force_tools is True
+    assert decision.should_keep_tool_name("tool_fetch_url") is True
+    assert decision.should_keep_tool_name("tool_web_search") is False
+    assert decision.should_keep_tool_name("tool_create_visual_code") is False
+
+
 def test_turn_path_governor_code_execution_beats_visual_drift():
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,

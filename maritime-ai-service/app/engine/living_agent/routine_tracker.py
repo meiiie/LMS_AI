@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _VN_OFFSET = timedelta(hours=7)
 _ROUTINE_MISSING_ORG_WARNING = "routine_tracking_blocked_missing_org_context"
+_ROUTINE_MISSING_ORG_COLUMN_WARNING = "routine_tracking_blocked_missing_org_column"
 
 
 class RoutineTracker:
@@ -124,6 +125,9 @@ class RoutineTracker:
 
             session_factory = get_shared_session_factory()
             with session_factory() as session:
+                if not self._routine_table_supports_org_scope(session):
+                    self._log_schema_blocked("get_inactive_users", "*")
+                    return []
                 rows = session.execute(
                     text("""
                         SELECT user_id FROM wiii_user_routines
@@ -171,6 +175,9 @@ class RoutineTracker:
 
             session_factory = get_shared_session_factory()
             with session_factory() as session:
+                if not self._routine_table_supports_org_scope(session):
+                    self._log_schema_blocked("compute_frequency", user_id)
+                    return 0.0
                 row = session.execute(
                     text("""
                         SELECT total_messages, created_at FROM wiii_user_routines
@@ -208,6 +215,9 @@ class RoutineTracker:
 
             session_factory = get_shared_session_factory()
             with session_factory() as session:
+                if not self._routine_table_supports_org_scope(session):
+                    self._log_schema_blocked("load_routine", user_id)
+                    return None
                 row = session.execute(
                     text("""
                         SELECT user_id, typical_active_hours, preferred_briefing_time,
@@ -254,6 +264,9 @@ class RoutineTracker:
 
             session_factory = get_shared_session_factory()
             with session_factory() as session:
+                if not self._routine_table_supports_org_scope(session):
+                    self._log_schema_blocked("save_routine", routine.user_id)
+                    return
                 session.execute(
                     text("""
                         INSERT INTO wiii_user_routines
@@ -289,6 +302,35 @@ class RoutineTracker:
 
     def _scope_allows_routine(self, scope: MemoryWriteScope) -> bool:
         return bool(scope.write_allowed and scope.org_id)
+
+    def _routine_table_supports_org_scope(self, session) -> bool:
+        """Return True only when routine storage can be safely org-scoped."""
+        try:
+            from sqlalchemy import text
+
+            row = session.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'wiii_user_routines'
+                      AND column_name = 'organization_id'
+                    """
+                )
+            ).fetchone()
+            return row is not None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[ROUTINE] Failed to inspect routine schema: %s", exc)
+            return False
+
+    def _log_schema_blocked(self, operation: str, user_id: str) -> None:
+        logger.warning(
+            "[ROUTINE] %s blocked user_hash=%s warnings=%s",
+            operation,
+            hash_memory_identifier(user_id),
+            [_ROUTINE_MISSING_ORG_COLUMN_WARNING],
+        )
 
     def _log_scope_blocked(
         self,

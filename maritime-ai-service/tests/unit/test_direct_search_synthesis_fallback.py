@@ -14,6 +14,7 @@ Tests pin down:
 from __future__ import annotations
 
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
+    _looks_no_source_search_result,
     build_search_template_fallback,
     looks_like_search_placeholder_answer,
 )
@@ -135,6 +136,27 @@ def test_empty_events_returns_empty_string() -> None:
 def test_failed_tools_without_urls_returns_empty_string() -> None:
     events = _search_result("Tool unavailable")
     assert build_search_template_fallback("anything", events) == ""
+
+
+def test_no_source_text_detection_accepts_lay_duoc_nguon_marker() -> None:
+    assert _looks_no_source_search_result("chua lay duoc nguon phu hop")
+
+
+def test_no_source_search_metadata_returns_clear_no_source_answer() -> None:
+    events = _search_result("No web results found for this query.")
+    events[1]["metadata"] = {
+        "schema_version": "tool_result_metadata.v1",
+        "status": "unavailable",
+        "result_kind": "web_sources",
+        "reason_code": "no_sources",
+        "source_count": 0,
+        "domains": [],
+    }
+
+    out = build_search_template_fallback("một chủ đề rất hẹp", events)
+
+    assert "chưa tìm được kết quả phù hợp" in out
+    assert "Có thể nguồn dữ liệu" in out
 
 
 def test_handles_arbitrary_url_without_structured_title() -> None:

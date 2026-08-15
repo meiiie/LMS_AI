@@ -165,4 +165,9 @@ issue.
 
 ## License
 
-Wiii is available under the [MIT License](LICENSE).
+Wiii's core product is available under **AGPL-3.0-only** or a separate
+commercial agreement. Independently implemented code under `sdk/` is
+**Apache-2.0**. The Wiii name and branding are not granted by either code
+license. See [LICENSING.md](LICENSING.md),
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md), and
+[TRADEMARKS.md](TRADEMARKS.md).

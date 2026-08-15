@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.engine.multi_agent.state import AgentState
@@ -18,7 +19,126 @@ FORCED_WEB_SEARCH_TOOL_NAMES = (
     "tool_web_search",
     "web_search",
 )
+FORCED_WEB_FETCH_TOOL_NAMES = (
+    "tool_fetch_url",
+    "fetch_url",
+)
+_URL_PATTERN = re.compile(r"https?://[^\s<>\]\)}\"']+")
+_WEB_FETCH_MARKERS = (
+    "web_fetch",
+    "web fetch",
+    "webfetch",
+    "fetch_url",
+    "fetch url",
+    "tool_fetch_url",
+)
+_URL_READ_MARKERS = (
+    "doc h1",
+    "read h1",
+    "heading h1",
+    "lay h1",
+    "lay heading",
+    "doc heading",
+    "doc tieu de",
+    "read title",
+    "doc title",
+    "doc url",
+    "read url",
+    "doc trang",
+    "read page",
+    "crawl",
+)
 _RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
+_WEATHER_QUERY_MARKERS = (
+    "thoi tiet",
+    "nhiet do",
+    "weather",
+    "forecast",
+)
+_WEATHER_CURRENT_MARKERS = (
+    "hom nay",
+    "hien tai",
+    "bay gio",
+    "luc nay",
+    "today",
+    "current",
+    "currently",
+    "right now",
+)
+_WEATHER_NON_CURRENT_TEMPORAL_MARKERS = (
+    "ngay mai",
+    "toi mai",
+    "mai",
+    "ngay kia",
+    "hom qua",
+    "tuan sau",
+    "tuan toi",
+    "thang sau",
+    "cuoi tuan",
+    "thu hai",
+    "thu ba",
+    "thu tu",
+    "thu nam",
+    "thu sau",
+    "thu bay",
+    "chu nhat",
+    "tomorrow",
+    "yesterday",
+    "next week",
+    "next month",
+    "weekend",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+_WEATHER_LOCATION_STOPWORDS = {
+    "a",
+    "ban",
+    "bao",
+    "bay",
+    "biet",
+    "cho",
+    "co",
+    "do",
+    "du",
+    "duoc",
+    "giup",
+    "gio",
+    "hien",
+    "hom",
+    "kiem",
+    "la",
+    "lai",
+    "luc",
+    "minh",
+    "mua",
+    "nao",
+    "nay",
+    "nhieu",
+    "nhiet",
+    "nong",
+    "khong",
+    "ra",
+    "sao",
+    "the",
+    "thoi",
+    "tiet",
+    "tra",
+    "troi",
+    "ua",
+    "xem",
+    "current",
+    "currently",
+    "forecast",
+    "now",
+    "right",
+    "today",
+    "weather",
+}
 
 
 def _force_skills_for_turn(state: AgentState | None) -> set[str]:
@@ -48,7 +168,33 @@ def _has_search_tool_result(tool_call_events: list[dict]) -> bool:
     return any(
         event.get("type") == "result"
         and str(event.get("name") or "").strip().lower() in search_tool_names
-        and str(event.get("result") or "").strip()
+        and (
+            str(event.get("result") or "").strip()
+            or _metadata_marks_no_source_search_result(event)
+        )
+        for event in tool_call_events or []
+    )
+
+
+def _metadata_marks_no_source_search_result(event: dict) -> bool:
+    metadata = event.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    status = str(metadata.get("status") or "").strip().lower()
+    reason = str(metadata.get("reason_code") or "").strip().lower()
+    result_kind = str(metadata.get("result_kind") or "").strip().lower()
+    return reason == "no_sources" or (
+        result_kind == "web_sources"
+        and metadata.get("source_count") == 0
+        and status in {"unavailable", "completed", "failed"}
+    )
+
+
+def _has_no_source_search_tool_result(tool_call_events: list[dict]) -> bool:
+    return any(
+        event.get("type") == "result"
+        and _is_search_tool_name(str(event.get("name") or ""))
+        and _metadata_marks_no_source_search_result(event)
         for event in tool_call_events or []
     )
 
@@ -65,7 +211,147 @@ def _has_fetch_tool_result(tool_call_events: list[dict]) -> bool:
 def _fold_tool_round_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    return " ".join(stripped.lower().replace("đ", "d").split())
+    stripped = stripped.replace("đ", "d").replace("Đ", "D")
+    return " ".join(stripped.lower().split())
+
+
+def _today_vietnam() -> str:
+    return datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
+
+
+def _has_calendar_anchor(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})\b",
+            str(value or ""),
+        )
+    )
+
+
+def _contains_folded_marker(folded: str, markers: tuple[str, ...]) -> bool:
+    for marker in markers:
+        if " " in marker:
+            if marker in folded:
+                return True
+            continue
+        if re.search(rf"\b{re.escape(marker)}\b", folded):
+            return True
+    return False
+
+
+def _has_non_current_weather_temporal_anchor(value: str) -> bool:
+    return _has_calendar_anchor(value) or _contains_folded_marker(
+        _fold_tool_round_text(value),
+        _WEATHER_NON_CURRENT_TEMPORAL_MARKERS,
+    )
+
+
+def _has_weather_temporal_anchor(value: str) -> bool:
+    folded = _fold_tool_round_text(value)
+    return (
+        _has_calendar_anchor(value)
+        or _contains_folded_marker(folded, _WEATHER_CURRENT_MARKERS)
+        or _contains_folded_marker(folded, _WEATHER_NON_CURRENT_TEMPORAL_MARKERS)
+    )
+
+
+def _looks_weather_search_text(value: str) -> bool:
+    folded = _fold_tool_round_text(value)
+    return any(marker in folded for marker in _WEATHER_QUERY_MARKERS)
+
+
+def _looks_current_weather_text(value: str) -> bool:
+    folded = _fold_tool_round_text(value)
+    return _looks_weather_search_text(value) or any(
+        marker in folded for marker in _WEATHER_CURRENT_MARKERS
+    )
+
+
+def _has_weather_location_hint(value: str) -> bool:
+    folded = _fold_tool_round_text(value)
+    if not folded:
+        return False
+    tokens = re.findall(r"[a-z0-9]+", folded)
+    remaining = [
+        token
+        for token in tokens
+        if len(token) > 1 and token not in _WEATHER_LOCATION_STOPWORDS
+    ]
+    return bool(remaining)
+
+
+def _weather_default_city() -> str:
+    try:
+        from app.core.config import settings
+
+        return str(getattr(settings, "living_agent_weather_city", "") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _clean_search_query_text(value: str) -> str:
+    text = _strip_vietnamese_discourse_prefix(str(value or "").strip())
+    text = _strip_vietnamese_polite_suffix(text)
+    text = re.sub(r"(?i)^\s*(?:ua|a|wiii\s+oi|ban\s+oi)[,\s]+", "", text)
+    text = re.sub(
+        r"(?i)\s+(?:nhu\s+the\s+nao|the\s+nao|ra\s+sao|sao)\s*$",
+        "",
+        text,
+    )
+    return text.strip(" .,:;!?-")
+
+
+def _enrich_current_weather_search_query(
+    *,
+    candidate_query: str,
+    user_query: str,
+    today: str | None = None,
+    default_city: str | None = None,
+) -> str:
+    """Return an Odysseus-style web query for live weather fallback.
+
+    Weather without a configured provider should behave like a normal current
+    web lookup: one clear query with subject, temporal anchor, and date. The
+    model may emit a thin argument such as {"query": "Hai Phong"}, which is
+    valid for a weather API but weak for web search.
+    """
+
+    today = today or _today_vietnam()
+    if default_city is None:
+        default_city = _weather_default_city()
+    default_city = str(default_city or "").strip()
+    candidate = _clean_search_query_text(candidate_query)
+    user = _clean_search_query_text(user_query)
+
+    if (
+        _has_weather_location_hint(candidate)
+        and not (
+            _has_weather_temporal_anchor(user)
+            and _has_weather_location_hint(user)
+        )
+    ):
+        base = candidate
+    elif _has_weather_location_hint(user):
+        base = user
+    elif default_city:
+        base = f"thoi tiet {default_city}"
+    else:
+        base = candidate or user or "Vietnam"
+
+    if not _looks_weather_search_text(base):
+        base = f"thoi tiet {base}".strip()
+
+    if not _has_weather_temporal_anchor(base):
+        base = f"{base} hom nay"
+
+    if (
+        today
+        and not _has_calendar_anchor(base)
+        and not _has_non_current_weather_temporal_anchor(base)
+    ):
+        base = f"{base} {today}"
+
+    return " ".join(base.split())
 
 
 def _strip_vietnamese_discourse_prefix(text: str) -> str:
@@ -121,6 +407,40 @@ def _looks_explicit_web_search_query(query: str) -> bool:
     )
 
 
+def _extract_first_url(value: str) -> str:
+    match = _URL_PATTERN.search(str(value or ""))
+    if not match:
+        return ""
+    return match.group(0).strip().rstrip(".,;:)>]}'\"")
+
+
+def _looks_explicit_web_fetch_query(query: str) -> bool:
+    """Detect explicit URL-fetch/read requests without broadening web search."""
+
+    folded = _fold_tool_round_text(query)
+    if not folded or not _extract_first_url(query):
+        return False
+    if any(marker in folded for marker in _WEB_FETCH_MARKERS):
+        return True
+    return any(marker in folded for marker in _URL_READ_MARKERS)
+
+
+def _is_explicit_web_fetch_turn(query: str, state: AgentState | None) -> bool:
+    forced = _force_skills_for_turn(state)
+    return (
+        "web-fetch" in forced
+        or "web_fetch" in forced
+        or _looks_explicit_web_fetch_query(query)
+    )
+
+
+def _is_explicit_web_access_turn(query: str, state: AgentState | None) -> bool:
+    return _is_explicit_web_fetch_turn(query, state) or _is_explicit_web_search_turn(
+        query,
+        state,
+    )
+
+
 def _is_search_tool_name(name: str) -> bool:
     return str(name or "").strip().lower() in {
         "tool_web_search",
@@ -146,6 +466,14 @@ def _is_weather_lookup_query(query: str) -> bool:
 def _prefer_official_query_for_known_docs(args: Any, user_query: str) -> dict:
     normalized_args = dict(args or {}) if isinstance(args, dict) else {}
     current_query = str(normalized_args.get("query") or normalized_args.get("q") or "")
+    if _is_weather_lookup_query(user_query):
+        normalized_args["query"] = _enrich_current_weather_search_query(
+            candidate_query=current_query,
+            user_query=user_query,
+        )
+        normalized_args.pop("q", None)
+        return normalized_args
+
     folded = _fold_tool_round_text(f"{user_query} {current_query}")
     if "openai" in folded and "responses api" in folded:
         normalized_args["query"] = (
@@ -167,6 +495,8 @@ def _should_return_search_template_after_tool_round(
         return False
     if not _looks_explicit_web_search_query(query):
         return False
+    if _has_no_source_search_tool_result(tool_call_events):
+        return True
     search_result_chars = sum(
         len(str(event.get("result") or ""))
         for event in tool_call_events or []

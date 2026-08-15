@@ -37,6 +37,23 @@ _TITLE_LINE_PATTERN = re.compile(
 )
 _BLOCK_SEPARATOR_PATTERN = re.compile(r"\n\s*---+\s*\n")
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+_NO_SOURCE_SEARCH_RESULT_MARKERS = (
+    "no results",
+    "no search results",
+    "no web results",
+    "no sources",
+    "zero results",
+    "0 results",
+    "khong co ket qua",
+    "khong co nguon",
+    "khong tim thay ket qua",
+    "khong tim thay nguon",
+    "khong tim duoc ket qua",
+    "khong tim duoc nguon",
+    "chua tim duoc ket qua",
+    "chua lay duoc nguon",
+    "chua tim duoc nguon",
+)
 
 
 def _host_label(url: str) -> str:
@@ -63,6 +80,52 @@ def _clean_search_text(text: str) -> str:
     cleaned = cleaned.replace("\xa0", " ")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip(" -–•·*")
+
+
+def _fold_no_source_text(value: str) -> str:
+    normalized = str(value or "").replace("đ", "d").replace("Đ", "D")
+    normalized = re.sub(r"\s+", " ", normalized)
+    try:
+        import unicodedata
+
+        normalized = (
+            unicodedata.normalize("NFD", normalized)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
+    except Exception:
+        pass
+    return normalized.lower().strip()
+
+
+def _looks_no_source_search_result(result_text: str) -> bool:
+    folded = _fold_no_source_text(result_text)
+    return bool(folded) and any(
+        marker in folded for marker in _NO_SOURCE_SEARCH_RESULT_MARKERS
+    )
+
+
+def _metadata_marks_no_sources(event: dict[str, Any]) -> bool:
+    metadata = event.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    status = str(metadata.get("status") or "").strip().lower()
+    reason = str(metadata.get("reason_code") or "").strip().lower()
+    result_kind = str(metadata.get("result_kind") or "").strip().lower()
+    source_count = metadata.get("source_count")
+    if reason == "no_sources":
+        return True
+    return (
+        result_kind == "web_sources"
+        and source_count == 0
+        and status in {"unavailable", "completed", "failed"}
+    )
+
+
+def _search_event_marks_no_sources(event: dict[str, Any], result_text: str) -> bool:
+    return _metadata_marks_no_sources(event) or _looks_no_source_search_result(
+        result_text
+    )
 
 
 def _extract_block_url(block: str) -> str:
@@ -469,6 +532,7 @@ def build_search_template_fallback(
     search_hits: list[dict[str, str]] = []
     fetch_summaries: list[dict[str, str]] = []
     seen_urls: set[str] = set()
+    no_source_search_seen = False
 
     call_args_by_id: dict[str, dict[str, Any]] = {}
     call_name_by_id: dict[str, str] = {}
@@ -487,6 +551,8 @@ def build_search_template_fallback(
         event_id = str(event.get("id") or "")
 
         if _is_search_tool(name):
+            if _search_event_marks_no_sources(event, result_text):
+                no_source_search_seen = True
             for hit in _extract_search_hits(result_text, limit=max_hits):
                 if hit["url"] in seen_urls:
                     continue
@@ -509,6 +575,13 @@ def build_search_template_fallback(
                 )
 
     if not search_hits and not fetch_summaries:
+        if no_source_search_seen:
+            return "\n".join(
+                (
+                    _format_intro(query, False, 0),
+                    _format_outro(0).lstrip(),
+                )
+            ).strip()
         return ""
 
     original_search_hit_count = len(search_hits)

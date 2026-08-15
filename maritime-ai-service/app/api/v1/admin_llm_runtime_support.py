@@ -604,19 +604,47 @@ async def update_llm_runtime_config_runtime_impl(
     warnings = list(embedding_transition.warnings)
     from app.engine.model_catalog import is_known_model, is_legacy_google_model
 
+    latest_catalog_response = None
+    try:
+        latest_catalog_response = await build_model_catalog_response_fn(
+            run_live_probe=True,
+            probe_providers=LLMPool.get_request_selectable_providers(),
+        )
+        invalidate_llm_selectability_cache()
+    except Exception as exc:
+        warnings.append("Runtime audit refresh failed after saving policy.")
+        logger.warning("[ADMIN] Runtime audit refresh after policy save failed: %s", exc)
+
+    def _model_known_or_discovered(provider_name: str, model_name: str) -> bool:
+        if is_known_model(provider_name, model_name):
+            return True
+        providers = getattr(latest_catalog_response, "providers", None)
+        if not isinstance(providers, dict):
+            return False
+        entries = providers.get(provider_name) or []
+        for entry in entries:
+            discovered_name = (
+                entry.get("model_name")
+                if isinstance(entry, dict)
+                else getattr(entry, "model_name", None)
+            )
+            if discovered_name == model_name:
+                return True
+        return False
+
     if body.google_model is not None:
         gm = body.google_model.strip()
         if is_legacy_google_model(gm):
             warnings.append(f"google_model '{gm}' is legacy. Consider a current model.")
-        elif not is_known_model("google", gm):
+        elif not _model_known_or_discovered("google", gm):
             warnings.append(f"google_model '{gm}' is not in the known catalog.")
     if body.zhipu_model is not None:
         zm = body.zhipu_model.strip()
-        if not is_known_model("zhipu", zm):
+        if not _model_known_or_discovered("zhipu", zm):
             warnings.append(f"zhipu_model '{zm}' is not in the known catalog.")
     if body.ollama_model is not None:
         om = body.ollama_model.strip()
-        if not is_known_model("ollama", om):
+        if not _model_known_or_discovered("ollama", om):
             warnings.append(f"ollama_model '{om}' is not in the known catalog.")
     if body.openai_model is not None:
         oam = body.openai_model.strip()
@@ -624,19 +652,19 @@ async def update_llm_runtime_config_runtime_impl(
             active_provider=settings_obj.llm_provider,
             openai_base_url=settings_obj.openai_base_url,
         )
-        if not is_known_model(openai_catalog_provider, oam):
+        if not _model_known_or_discovered(openai_catalog_provider, oam):
             warnings.append(
                 f"openai_model '{oam}' is not in the known {openai_catalog_provider} catalog."
             )
     if body.openrouter_model is not None:
         orm = body.openrouter_model.strip()
-        if not is_known_model("openrouter", orm):
+        if not _model_known_or_discovered("openrouter", orm):
             warnings.append(
                 f"openrouter_model '{orm}' is not in the known openrouter catalog."
             )
     if body.nvidia_model is not None:
         nm = body.nvidia_model.strip()
-        if not is_known_model("nvidia", nm):
+        if not _model_known_or_discovered("nvidia", nm):
             warnings.append(
                 f"nvidia_model '{nm}' is not in the known nvidia catalog."
             )
@@ -646,16 +674,6 @@ async def update_llm_runtime_config_runtime_impl(
             current_dimensions=getattr(settings_obj, "embedding_dimensions", None),
         )
     )
-
-    try:
-        await build_model_catalog_response_fn(
-            run_live_probe=True,
-            probe_providers=LLMPool.get_request_selectable_providers(),
-        )
-        invalidate_llm_selectability_cache()
-    except Exception as exc:
-        warnings.append("Runtime audit refresh failed after saving policy.")
-        logger.warning("[ADMIN] Runtime audit refresh after policy save failed: %s", exc)
 
     latest_persisted = persisted_record or get_persisted_llm_runtime_policy()
     return serialize_llm_runtime_fn(

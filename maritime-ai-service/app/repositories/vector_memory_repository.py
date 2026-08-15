@@ -22,6 +22,7 @@ from app.models.semantic_memory import (
     SemanticMemorySearchResult,
 )
 from app.services.embedding_space_registry_service import get_active_embedding_read_space
+from app.services.qdrant_vector_index_service import search_qdrant_sync
 
 logger = logging.getLogger(__name__)
 _VECTOR_MEMORY_REPOSITORY_MISSING_ORG_WARNING = (
@@ -107,6 +108,135 @@ class VectorMemoryRepositoryMixin:
             terms.append(clean)
         return terms[:8]
 
+    def _search_similar_qdrant(
+        self,
+        *,
+        user_id: str,
+        query_embedding: List[float],
+        active_space,
+        org_id: str,
+        fetch_limit: int,
+        threshold: float,
+        memory_types: Optional[List[MemoryType]],
+        use_stanford_ranking: bool,
+        final_limit: int,
+    ) -> List[SemanticMemorySearchResult]:
+        if active_space is None or active_space.storage_kind != "shadow":
+            return []
+        if len(query_embedding) != int(active_space.dimensions):
+            logger.warning(
+                "Qdrant semantic memory search skipped due to embedding dimension mismatch: "
+                "query_dims=%d space_dims=%d space=%s",
+                len(query_embedding),
+                int(active_space.dimensions),
+                active_space.space_fingerprint,
+            )
+            return []
+
+        filters: dict[str, Any] = {
+            "user_id": user_id,
+            "organization_id": org_id,
+        }
+        if memory_types:
+            filters["memory_type"] = [item.value for item in memory_types]
+
+        hits = search_qdrant_sync(
+            entity_type="semantic_memories",
+            space=active_space,
+            query_embedding=query_embedding,
+            limit=fetch_limit,
+            score_threshold=threshold,
+            filters=filters,
+        )
+        if not hits:
+            return []
+
+        seen: set[str] = set()
+        ordered_ids: list[str] = []
+        scores_by_id: dict[str, float] = {}
+        for hit in hits:
+            if hit.point_id in seen:
+                continue
+            seen.add(hit.point_id)
+            ordered_ids.append(hit.point_id)
+            scores_by_id[hit.point_id] = hit.score
+            if len(ordered_ids) >= fetch_limit:
+                break
+        if not ordered_ids:
+            return []
+
+        try:
+            with self._session_factory() as session:
+                params: dict[str, Any] = {
+                    "user_id": user_id,
+                    "org_id": org_id,
+                }
+                id_placeholders: list[str] = []
+                for index, memory_id in enumerate(ordered_ids):
+                    key = f"memory_id_{index}"
+                    params[key] = memory_id
+                    id_placeholders.append(f"CAST(:{key} AS uuid)")
+
+                type_filter = ""
+                if memory_types:
+                    type_filter = "AND sm.memory_type = ANY(:memory_types)"
+                    params["memory_types"] = [item.value for item in memory_types]
+
+                query = text(
+                    f"""
+                    SELECT
+                        sm.id,
+                        sm.content,
+                        sm.memory_type,
+                        sm.importance,
+                        sm.metadata,
+                        sm.created_at,
+                        sm.last_accessed,
+                        sm.access_count
+                    FROM {self.TABLE_NAME} sm
+                    WHERE sm.id IN ({", ".join(id_placeholders)})
+                      AND sm.user_id = :user_id
+                      AND sm.organization_id = :org_id
+                      {type_filter}
+                    """
+                )
+                rows = session.execute(query, params).fetchall()
+        except Exception as exc:
+            logger.warning("[QDRANT] Semantic memory source-of-truth fetch failed: %s", exc)
+            return []
+
+        rows_by_id = {str(row.id): row for row in rows}
+        memories: list[SemanticMemorySearchResult] = []
+        row_data: list[dict[str, Any]] = []
+        for memory_id in ordered_ids:
+            row = rows_by_id.get(memory_id)
+            if row is None:
+                continue
+            similarity = max(0.0, min(1.0, float(scores_by_id.get(memory_id, 0.0))))
+            memories.append(
+                SemanticMemorySearchResult(
+                    id=row.id,
+                    content=row.content,
+                    memory_type=MemoryType(row.memory_type),
+                    importance=row.importance,
+                    similarity=similarity,
+                    metadata=row.metadata or {},
+                    created_at=row.created_at,
+                )
+            )
+            row_data.append(
+                {
+                    "last_accessed": getattr(row, "last_accessed", None),
+                    "access_count": getattr(row, "access_count", None) or 0,
+                }
+            )
+            if len(memories) >= fetch_limit:
+                break
+
+        if use_stanford_ranking and memories:
+            memories = self._stanford_rerank(memories, row_data, final_limit)
+        return memories[:final_limit]
+
     def search_similar(
         self,
         user_id: str,
@@ -171,11 +301,32 @@ class VectorMemoryRepositoryMixin:
                 embedding_str = self._format_embedding(query_embedding)
                 active_space = get_active_embedding_read_space("semantic_memories")
 
+                qdrant_memories = self._search_similar_qdrant(
+                    user_id=user_id,
+                    query_embedding=query_embedding,
+                    active_space=active_space,
+                    org_id=scope.org_id,
+                    fetch_limit=fetch_limit,
+                    threshold=threshold,
+                    memory_types=memory_types,
+                    use_stanford_ranking=use_stanford_ranking,
+                    final_limit=limit,
+                )
+                if qdrant_memories:
+                    logger.debug(
+                        "Qdrant found %d similar memories for user_hash=%s",
+                        len(qdrant_memories),
+                        hash_memory_identifier(user_id),
+                    )
+                    return qdrant_memories
+
                 # Build type filter if specified
                 type_filter = ""
+                alias_type_filter = ""
                 params = {
                     "user_id": user_id,
                     "embedding": embedding_str,
+                    "embedding_dims": len(query_embedding),
                     "threshold": threshold,
                     "limit": fetch_limit
                 }
@@ -184,9 +335,14 @@ class VectorMemoryRepositoryMixin:
                 if memory_types:
                     type_values = [t.value for t in memory_types]
                     type_filter = "AND memory_type = ANY(:memory_types)"
+                    alias_type_filter = "AND sm.memory_type = ANY(:memory_types)"
                     params["memory_types"] = type_values
 
-                if active_space is not None and active_space.storage_kind == "shadow":
+                if (
+                    active_space is not None
+                    and active_space.storage_kind == "shadow"
+                    and len(query_embedding) == int(active_space.dimensions)
+                ):
                     safe_dims = max(1, int(active_space.dimensions))
                     query = text(f"""
                         SELECT
@@ -206,7 +362,7 @@ class VectorMemoryRepositoryMixin:
                          AND sv.dimensions = {safe_dims}
                         WHERE sm.user_id = :user_id
                           AND 1 - ((sv.embedding::vector({safe_dims})) <=> CAST(:embedding AS vector({safe_dims}))) >= :threshold
-                          {type_filter.replace('memory_type', 'sm.memory_type')}
+                          {alias_type_filter}
                           {org_filter.replace('organization_id', 'sm.organization_id')}
                         ORDER BY (sv.embedding::vector({safe_dims})) <=> CAST(:embedding AS vector({safe_dims}))
                         LIMIT :limit
@@ -216,7 +372,33 @@ class VectorMemoryRepositoryMixin:
                     # Cosine similarity = 1 - cosine distance
                     # pgvector <=> returns cosine distance
                     # Sprint 98: Also fetch last_accessed, access_count for Stanford ranking
+                    if active_space is not None and active_space.storage_kind == "shadow":
+                        logger.warning(
+                            "Semantic memory shadow search skipped due to embedding dimension "
+                            "mismatch: query_dims=%d space_dims=%d space=%s",
+                            len(query_embedding),
+                            int(active_space.dimensions),
+                            active_space.space_fingerprint,
+                        )
                     query = text(f"""
+                        WITH candidates AS MATERIALIZED (
+                            SELECT
+                                id,
+                                content,
+                                memory_type,
+                                importance,
+                                metadata,
+                                created_at,
+                                last_accessed,
+                                access_count,
+                                embedding
+                            FROM {self.TABLE_NAME}
+                            WHERE user_id = :user_id
+                              AND embedding IS NOT NULL
+                              AND vector_dims(embedding) = :embedding_dims
+                              {type_filter}
+                              {org_filter}
+                        )
                         SELECT
                             id,
                             content,
@@ -227,11 +409,8 @@ class VectorMemoryRepositoryMixin:
                             last_accessed,
                             access_count,
                             1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
-                        FROM {self.TABLE_NAME}
-                        WHERE user_id = :user_id
-                          AND 1 - (embedding <=> CAST(:embedding AS vector)) >= :threshold
-                          {type_filter}
-                          {org_filter}
+                        FROM candidates
+                        WHERE 1 - (embedding <=> CAST(:embedding AS vector)) >= :threshold
                         ORDER BY embedding <=> CAST(:embedding AS vector)
                         LIMIT :limit
                     """)

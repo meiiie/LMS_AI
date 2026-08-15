@@ -155,9 +155,30 @@ def _try_httpx(url: str) -> Optional[str]:
                 from bs4 import BeautifulSoup
 
                 soup = BeautifulSoup(resp.text, "html.parser")
+                title = ""
+                title_tag = soup.find("title")
+                if title_tag is not None:
+                    title = title_tag.get_text(" ", strip=True)
+
+                h1 = ""
+                h1_tag = soup.find("h1")
+                if h1_tag is not None:
+                    h1 = h1_tag.get_text(" ", strip=True)
+
                 for tag in soup(["script", "style", "nav", "footer", "header"]):
                     tag.decompose()
-                return soup.get_text(separator="\n", strip=True)
+                if title_tag is not None:
+                    title_tag.decompose()
+
+                text = soup.get_text(separator="\n", strip=True)
+                sections: list[str] = []
+                if title:
+                    sections.append(f"Title: {title}")
+                if h1:
+                    sections.append(f"H1: {h1}")
+                if text:
+                    sections.append(text)
+                return "\n\n".join(sections)
             except ImportError:
                 return resp.text
     except Exception as exc:  # noqa: BLE001

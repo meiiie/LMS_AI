@@ -30,6 +30,9 @@ import type {
 import {
   applyLlmProviderPreset,
   GOOGLE_DEFAULT_MODEL,
+  NVIDIA_BASE_URL,
+  NVIDIA_DEFAULT_MODEL,
+  NVIDIA_DEFAULT_MODEL_ADVANCED,
   OPENAI_DEFAULT_MODEL,
   OPENAI_DEFAULT_MODEL_ADVANCED,
   OLLAMA_DEFAULT_BASE_URL,
@@ -48,16 +51,19 @@ import {
   clearGeminiApiKey,
   clearOllamaApiKey,
   clearOpenRouterApiKey,
+  clearNvidiaApiKey,
   clearZhipuApiKey,
   loadOpenAiApiKey,
   loadGeminiApiKey,
   loadOllamaApiKey,
   loadOpenRouterApiKey,
+  loadNvidiaApiKey,
   loadZhipuApiKey,
   storeOpenAiApiKey,
   storeGeminiApiKey,
   storeOllamaApiKey,
   storeOpenRouterApiKey,
+  storeNvidiaApiKey,
   storeZhipuApiKey,
 } from "@/lib/secure-token-storage";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -99,6 +105,11 @@ type RuntimeDraft = {
   openrouter_base_url: string;
   openrouter_model: string;
   openrouter_model_advanced: string;
+  nvidia_api_key: string;
+  clear_nvidia_api_key: boolean;
+  nvidia_base_url: string;
+  nvidia_model: string;
+  nvidia_model_advanced: string;
   zhipu_api_key: string;
   clear_zhipu_api_key: boolean;
   zhipu_base_url: string;
@@ -150,6 +161,7 @@ const PROVIDERS: RuntimeProvider[] = [
   "zhipu",
   "openai",
   "openrouter",
+  "nvidia",
   "ollama",
 ];
 const VISION_PROVIDERS: VisionProvider[] = [
@@ -157,6 +169,7 @@ const VISION_PROVIDERS: VisionProvider[] = [
   "google",
   "openai",
   "openrouter",
+  "nvidia",
   "ollama",
   "zhipu",
 ];
@@ -203,6 +216,7 @@ const AGENT_PROFILE_PROVIDER_OPTIONS: RuntimeProvider[] = [
   "zhipu",
   "openai",
   "openrouter",
+  "nvidia",
   "ollama",
 ];
 const TIMEOUT_OVERRIDE_PROVIDERS: RuntimeProvider[] = [
@@ -210,6 +224,7 @@ const TIMEOUT_OVERRIDE_PROVIDERS: RuntimeProvider[] = [
   "zhipu",
   "openai",
   "openrouter",
+  "nvidia",
   "ollama",
 ];
 const TIMEOUT_PROFILE_FIELDS: Array<{
@@ -315,6 +330,11 @@ const EMPTY_DRAFT: RuntimeDraft = {
   openrouter_base_url: OPENROUTER_BASE_URL,
   openrouter_model: OPENROUTER_DEFAULT_MODEL,
   openrouter_model_advanced: OPENROUTER_DEFAULT_MODEL_ADVANCED,
+  nvidia_api_key: "",
+  clear_nvidia_api_key: false,
+  nvidia_base_url: NVIDIA_BASE_URL,
+  nvidia_model: NVIDIA_DEFAULT_MODEL,
+  nvidia_model_advanced: NVIDIA_DEFAULT_MODEL_ADVANCED,
   zhipu_api_key: "",
   clear_zhipu_api_key: false,
   zhipu_base_url: ZHIPU_DEFAULT_BASE_URL,
@@ -604,6 +624,9 @@ function toDraft(runtime: LlmRuntimeConfig): RuntimeDraft {
     openrouter_base_url: runtime.openrouter_base_url ?? OPENROUTER_BASE_URL,
     openrouter_model: runtime.openrouter_model,
     openrouter_model_advanced: runtime.openrouter_model_advanced,
+    nvidia_base_url: runtime.nvidia_base_url ?? NVIDIA_BASE_URL,
+    nvidia_model: runtime.nvidia_model,
+    nvidia_model_advanced: runtime.nvidia_model_advanced,
     zhipu_base_url: runtime.zhipu_base_url ?? ZHIPU_DEFAULT_BASE_URL,
     zhipu_model: runtime.zhipu_model,
     zhipu_model_advanced: runtime.zhipu_model_advanced,
@@ -668,6 +691,7 @@ function mergeRuntimeIntoDraft(
     google_api_key: current.google_api_key,
     openai_api_key: current.openai_api_key,
     openrouter_api_key: current.openrouter_api_key,
+    nvidia_api_key: current.nvidia_api_key,
     zhipu_api_key: current.zhipu_api_key,
     ollama_api_key: current.ollama_api_key,
   };
@@ -687,6 +711,9 @@ function applyProviderDefaults(
       openrouter_base_url: current.openrouter_base_url,
       openrouter_model: current.openrouter_model,
       openrouter_model_advanced: current.openrouter_model_advanced,
+      nvidia_base_url: current.nvidia_base_url,
+      nvidia_model: current.nvidia_model,
+      nvidia_model_advanced: current.nvidia_model_advanced,
       zhipu_base_url: current.zhipu_base_url,
       zhipu_model: current.zhipu_model,
       zhipu_model_advanced: current.zhipu_model_advanced,
@@ -710,6 +737,10 @@ function applyProviderDefaults(
     openrouter_model: preset.openrouter_model ?? current.openrouter_model,
     openrouter_model_advanced:
       preset.openrouter_model_advanced ?? current.openrouter_model_advanced,
+    nvidia_base_url: preset.nvidia_base_url ?? current.nvidia_base_url,
+    nvidia_model: preset.nvidia_model ?? current.nvidia_model,
+    nvidia_model_advanced:
+      preset.nvidia_model_advanced ?? current.nvidia_model_advanced,
     zhipu_base_url: preset.zhipu_base_url ?? current.zhipu_base_url,
     zhipu_model: preset.zhipu_model ?? current.zhipu_model,
     zhipu_model_advanced:
@@ -766,6 +797,10 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
   );
   const openrouterModels = useMemo(
     () => modelNames(catalog?.providers.openrouter),
+    [catalog],
+  );
+  const nvidiaModels = useMemo(
+    () => modelNames(catalog?.providers.nvidia),
     [catalog],
   );
   const zhipuModels = useMemo(
@@ -853,6 +888,7 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
   const requestSelectable = runtime?.request_selectable_providers ?? [];
   const openaiCapability = providerCapabilities.openai;
   const openrouterCapability = providerCapabilities.openrouter;
+  const nvidiaCapability = providerCapabilities.nvidia;
   const runtimePersistenceLabel = runtime?.runtime_policy_persisted
     ? runtime.runtime_policy_updated_at
       ? `Đã lưu vào system DB lúc ${new Date(runtime.runtime_policy_updated_at).toLocaleString("vi-VN")}.`
@@ -1001,6 +1037,7 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
       loadGeminiApiKey(),
       loadOpenAiApiKey(),
       loadOpenRouterApiKey(),
+      loadNvidiaApiKey(),
       loadZhipuApiKey(),
       loadOllamaApiKey(),
     ])
@@ -1009,6 +1046,7 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
           geminiApiKey,
           openAiApiKey,
           openRouterApiKey,
+          nvidiaApiKey,
           zhipuApiKey,
           ollamaApiKey,
         ]) => {
@@ -1018,6 +1056,7 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             google_api_key: geminiApiKey ?? current.google_api_key,
             openai_api_key: openAiApiKey ?? current.openai_api_key,
             openrouter_api_key: openRouterApiKey ?? current.openrouter_api_key,
+            nvidia_api_key: nvidiaApiKey ?? current.nvidia_api_key,
             zhipu_api_key: zhipuApiKey ?? current.zhipu_api_key,
             ollama_api_key: ollamaApiKey ?? current.ollama_api_key,
           }));
@@ -1049,6 +1088,11 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         openrouter_base_url: draft.openrouter_base_url,
         openrouter_model: draft.openrouter_model,
         openrouter_model_advanced: draft.openrouter_model_advanced,
+        nvidia_api_key: draft.nvidia_api_key.trim() || undefined,
+        clear_nvidia_api_key: draft.clear_nvidia_api_key,
+        nvidia_base_url: draft.nvidia_base_url,
+        nvidia_model: draft.nvidia_model,
+        nvidia_model_advanced: draft.nvidia_model_advanced,
         zhipu_api_key: draft.zhipu_api_key.trim() || undefined,
         clear_zhipu_api_key: draft.clear_zhipu_api_key,
         zhipu_base_url: draft.zhipu_base_url,
@@ -1105,9 +1149,15 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
       });
       let refreshedCatalog: ModelCatalogResponse | null = null;
       try {
-        refreshedCatalog = await getModelCatalog();
+        refreshedCatalog = await refreshLlmRuntimeAudit({
+          providers: [updated.provider],
+        });
       } catch {
-        refreshedCatalog = null;
+        try {
+          refreshedCatalog = await getModelCatalog();
+        } catch {
+          refreshedCatalog = null;
+        }
       }
 
       if (variant === "settings") {
@@ -1126,6 +1176,11 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             ? storeOpenRouterApiKey(draft.openrouter_api_key.trim())
             : draft.clear_openrouter_api_key
               ? clearOpenRouterApiKey()
+              : Promise.resolve(),
+          draft.nvidia_api_key.trim()
+            ? storeNvidiaApiKey(draft.nvidia_api_key.trim())
+            : draft.clear_nvidia_api_key
+              ? clearNvidiaApiKey()
               : Promise.resolve(),
           draft.zhipu_api_key.trim()
             ? storeZhipuApiKey(draft.zhipu_api_key.trim())
@@ -1149,6 +1204,9 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             updated.openrouter_base_url ?? OPENROUTER_BASE_URL,
           openrouter_model: updated.openrouter_model,
           openrouter_model_advanced: updated.openrouter_model_advanced,
+          nvidia_base_url: updated.nvidia_base_url ?? NVIDIA_BASE_URL,
+          nvidia_model: updated.nvidia_model,
+          nvidia_model_advanced: updated.nvidia_model_advanced,
           zhipu_base_url: updated.zhipu_base_url ?? ZHIPU_DEFAULT_BASE_URL,
           zhipu_model: updated.zhipu_model,
           zhipu_model_advanced: updated.zhipu_model_advanced,
@@ -1742,6 +1800,27 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               }
             />
             <SecretField
+              label="NVIDIA NIM API Key"
+              placeholder="nvapi-..."
+              value={draft.nvidia_api_key}
+              configured={runtime?.nvidia_api_key_configured ?? false}
+              clearRequested={draft.clear_nvidia_api_key}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  nvidia_api_key: value,
+                  clear_nvidia_api_key: false,
+                }))
+              }
+              onToggleClear={() =>
+                setDraft((current) => ({
+                  ...current,
+                  nvidia_api_key: "",
+                  clear_nvidia_api_key: !current.clear_nvidia_api_key,
+                }))
+              }
+            />
+            <SecretField
               label="Zhipu API Key"
               placeholder="zhipu-key"
               value={draft.zhipu_api_key}
@@ -1940,6 +2019,72 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                   }))
                 }
                 list="runtime-openrouter-models"
+                className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+              />
+            </FieldGroup>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <FieldGroup label="NVIDIA NIM base URL">
+              <input
+                value={draft.nvidia_base_url}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    nvidia_base_url: event.target.value,
+                  }))
+                }
+                placeholder={NVIDIA_BASE_URL}
+                className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+              />
+            </FieldGroup>
+            <FieldGroup
+              label="NVIDIA NIM model"
+              hint={
+                nvidiaCapability
+                  ? `${nvidiaCapability.model_count} gợi ý`
+                  : "NVIDIA NIM"
+              }
+            >
+              <>
+                <input
+                  list="runtime-nvidia-models"
+                  value={draft.nvidia_model}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      nvidia_model: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                />
+                <datalist id="runtime-nvidia-models">
+                  {nvidiaModels.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
+              </>
+            </FieldGroup>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <FieldGroup
+              label="NVIDIA NIM advanced model"
+              hint={
+                nvidiaCapability?.selected_model_advanced_in_catalog === false
+                  ? "đang dùng custom id"
+                  : undefined
+              }
+            >
+              <input
+                value={draft.nvidia_model_advanced}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    nvidia_model_advanced: event.target.value,
+                  }))
+                }
+                list="runtime-nvidia-models"
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
             </FieldGroup>

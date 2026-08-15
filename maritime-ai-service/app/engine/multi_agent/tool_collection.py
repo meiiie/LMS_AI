@@ -29,6 +29,9 @@ from app.engine.multi_agent.tool_policy_session import (
     finalize_tool_policy_visible_tools,
     record_tool_policy_session,
 )
+from app.engine.multi_agent.direct_web_search_policy import (
+    _looks_explicit_web_fetch_query,
+)
 from app.engine.multi_agent.external_app_action_runtime import (
     record_external_app_action_plan,
     resolve_external_app_action_plan,
@@ -760,12 +763,18 @@ def _resolve_direct_turn_path_decision(
     )
     needs_weather_lookup = _safe_intent_flag(_needs_weather_lookup, query)
     weather_uses_web_fallback = needs_weather_lookup and not _weather_provider_configured()
+    needs_web_fetch = _safe_intent_flag(_looks_explicit_web_fetch_query, query)
     signals = TurnPathSignals(
         normalized_query=normalized_query,
         routing_intent=_routing_intent(state),
         thinking_mode=thinking_mode,
         force_skills=frozenset(force_skills),
-        web_search_forced="web-search" in force_skills,
+        web_search_forced=(
+            "web-search" in force_skills
+            or "web-fetch" in force_skills
+            or "web_fetch" in force_skills
+            or needs_web_fetch
+        ),
         pointy_forced=pointy_forced,
         host_ui_navigation=host_ui_navigation,
         looks_document_preview=_looks_like_document_preview_request(query, state),
@@ -779,8 +788,11 @@ def _resolve_direct_turn_path_decision(
             state,
         ),
         needs_weather_lookup=needs_weather_lookup,
+        needs_web_fetch=needs_web_fetch,
         needs_web_search=(
-            _safe_intent_flag(_needs_web_search, query) or weather_uses_web_fallback
+            _safe_intent_flag(_needs_web_search, query)
+            or weather_uses_web_fallback
+            or needs_web_fetch
         ),
         needs_datetime=_safe_intent_flag(_needs_datetime, query),
         needs_news_search=_safe_intent_flag(_needs_news_search, query),
@@ -1337,7 +1349,12 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         )
         return [], False
 
-    web_search_forced = "web-search" in force_skills
+    web_search_forced = (
+        "web-search" in force_skills
+        or "web-fetch" in force_skills
+        or "web_fetch" in force_skills
+        or _looks_explicit_web_fetch_query(query)
+    )
 
     # Structured visuals re-enable lightweight inline diagram/chart tools for direct,
     # but keep heavy artifact/file generation inside code_studio_agent.
@@ -1632,7 +1649,9 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
         required.append("tool_search_news")
     if _needs_legal_search(query):
         required.append("tool_search_legal")
-    if _needs_web_search(query) and not _needs_weather_lookup(query):
+    if _looks_explicit_web_fetch_query(query):
+        required.append("tool_fetch_url")
+    elif _needs_web_search(query) and not _needs_weather_lookup(query):
         if any(
             signal in normalized
             for signal in ("imo", "shipping", "maritime", "hang hai", "vinamarine", "cuc hang hai")

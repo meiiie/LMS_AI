@@ -467,9 +467,23 @@ def _with_runtime_flow_metadata(
 
     payload = dict(content)
     payload.setdefault("stream_latency", tracker.to_payload())
+    ledger_payload = flow_ledger.to_payload()
+    if event_type == "metadata":
+        runtime_payload = ledger_payload.get("runtime")
+        if isinstance(runtime_payload, Mapping):
+            runtime_provider = str(runtime_payload.get("provider") or "").strip()
+            runtime_model = str(runtime_payload.get("model") or "").strip()
+            if runtime_provider and runtime_model:
+                payload["provider"] = runtime_provider
+                payload["model"] = runtime_model
+                payload["runtime_provider"] = runtime_provider
+                payload["runtime_model"] = runtime_model
+                payload["runtime_authoritative"] = True
+                ledger_payload = flow_ledger.to_payload()
     if event_type == "metadata":
         flow_ledger.observe_metadata(payload)
-    payload.setdefault("runtime_flow_ledger", flow_ledger.to_payload())
+        ledger_payload = flow_ledger.to_payload()
+    payload.setdefault("runtime_flow_ledger", ledger_payload)
     return StreamEvent(
         type=event_type,
         content=payload,

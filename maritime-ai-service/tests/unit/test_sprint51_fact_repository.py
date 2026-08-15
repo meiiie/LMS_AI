@@ -319,6 +319,34 @@ class TestUpdateFact:
         assert "embedding = CAST(:embedding AS vector)" not in query.text
         assert params["content"] == "New content"
 
+    def test_shadow_only_embedding_update_does_not_touch_inline_vector(self):
+        repo, session = _make_repo()
+        write_spaces = (MagicMock(storage_kind="shadow"),)
+        repo._resolve_inline_embedding = MagicMock(
+            return_value=(None, json.dumps({"fact_type": "name"}), write_spaces)
+        )
+        repo._store_shadow_vectors = MagicMock()
+        row = MagicMock()
+        row.id = uuid4()
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = row
+        session.execute.return_value = mock_result
+
+        result = repo.update_fact(
+            uuid4(),
+            "New content",
+            [0.1] * 4096,
+            {"fact_type": "name", "confidence": 0.9},
+            user_id="user1",
+        )
+
+        assert result is True
+        query = session.execute.call_args[0][0]
+        params = session.execute.call_args[0][1]
+        assert "embedding = CAST(:embedding AS vector)" not in query.text
+        assert "embedding" not in params
+        repo._store_shadow_vectors.assert_called_once()
+
 
 # ============================================================================
 # update_metadata_only (testing the mixin's actual method, not mock)

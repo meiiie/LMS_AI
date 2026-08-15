@@ -270,6 +270,177 @@ describe("streaming blocks", () => {
     expect(toolAt(blocks, 0).tool.result).toBe("Found sources");
   });
 
+  it("attaches source events to the latest source-backed tool block", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendToolCall({
+      id: "tc-search-sources",
+      name: "tool_web_search",
+      args: { query: "weather" },
+    });
+    store.updateToolCallResult("tc-search-sources", "Tìm được 2 nguồn", {
+      displayRole: "tool",
+    }, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 2,
+    });
+    store.setStreamingSources([
+      {
+        title: "Forecast",
+        content: "Cloudy.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+
+    const blocks = getBlocks();
+    expect(toolAt(blocks, 0).tool.sources).toEqual([
+      {
+        title: "Forecast",
+        content: "Cloudy.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+    expect(stateToolCalls()[0].sources).toEqual([
+      {
+        title: "Forecast",
+        content: "Cloudy.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+  });
+
+  it("attaches source events by tool call id when provided", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendToolCall({
+      id: "tc-search-first",
+      name: "tool_web_search",
+      args: { query: "first" },
+    });
+    store.updateToolCallResult("tc-search-first", "Tìm được nguồn", undefined, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 1,
+    });
+    store.appendToolCall({
+      id: "tc-search-second",
+      name: "tool_web_search",
+      args: { query: "second" },
+    });
+    store.updateToolCallResult("tc-search-second", "Tìm được nguồn", undefined, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 1,
+    });
+
+    store.setStreamingSources(
+      [
+        {
+          title: "First source",
+          content: "First.",
+          url: "https://first.example/source",
+          source_type: "web",
+        },
+      ],
+      { toolCallId: "tc-search-first", toolName: "tool_web_search" },
+    );
+
+    const blocks = getBlocks();
+    expect(toolAt(blocks, 0).tool.sources?.[0].title).toBe("First source");
+    expect(toolAt(blocks, 1).tool.sources).toBeUndefined();
+    expect(stateToolCalls()[0].sources?.[0].title).toBe("First source");
+    expect(stateToolCalls()[1].sources).toBeUndefined();
+  });
+
+  it("does not fall back to another tool block when source tool call id is unknown", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendToolCall({
+      id: "tc-search-first",
+      name: "tool_web_search",
+      args: { query: "first" },
+    });
+    store.updateToolCallResult("tc-search-first", "Tìm được nguồn", undefined, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 1,
+    });
+    store.appendToolCall({
+      id: "tc-search-second",
+      name: "tool_web_search",
+      args: { query: "second" },
+    });
+    store.updateToolCallResult("tc-search-second", "Tìm được nguồn", undefined, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 1,
+    });
+
+    store.setStreamingSources(
+      [
+        {
+          title: "Detached source",
+          content: "Detached.",
+          url: "https://detached.example/source",
+          source_type: "web",
+        },
+      ],
+      { toolCallId: "tc-missing", toolName: "tool_web_search" },
+    );
+
+    const blocks = getBlocks();
+    expect(toolAt(blocks, 0).tool.sources).toBeUndefined();
+    expect(toolAt(blocks, 1).tool.sources).toBeUndefined();
+    expect(stateToolCalls()[0].sources).toBeUndefined();
+    expect(stateToolCalls()[1].sources).toBeUndefined();
+    expect(useChatStore.getState().streamingSources[0].title).toBe(
+      "Detached source",
+    );
+  });
+
+  it("keeps accumulated streaming sources when an empty source event arrives", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendToolCall({
+      id: "tc-search-empty-event",
+      name: "tool_web_search",
+      args: { query: "weather" },
+    });
+    store.updateToolCallResult("tc-search-empty-event", "Tìm được nguồn", undefined, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 1,
+    });
+    const source = {
+      title: "Weather source",
+      content: "Cloudy.",
+      url: "https://weather.example/source",
+      source_type: "web" as const,
+    };
+
+    store.setStreamingSources([source], {
+      toolCallId: "tc-search-empty-event",
+      toolName: "tool_web_search",
+    });
+    store.setStreamingSources([], {
+      toolCallId: "tc-search-empty-event",
+      toolName: "tool_web_search",
+    });
+
+    expect(useChatStore.getState().streamingSources).toEqual([source]);
+    expect(toolAt(getBlocks(), 0).tool.sources).toEqual([source]);
+  });
+
   it("places a late tool_execution block after an answer when no new thinking step exists", () => {
     const store = useChatStore.getState();
     store.startStreaming();

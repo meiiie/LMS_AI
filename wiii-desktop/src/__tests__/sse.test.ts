@@ -113,6 +113,34 @@ describe("SSE Parser", () => {
     });
   });
 
+  it("should parse sources event with tool identity", async () => {
+    const sources = [
+      {
+        title: "Weather",
+        content: "Cloudy.",
+        url: "https://weather.example",
+      },
+    ];
+
+    const stream = createStream([
+      `event: sources\ndata: ${JSON.stringify({
+        sources,
+        tool_call_id: "tc-search",
+        tool_name: "tool_web_search",
+      })}\n\n`,
+    ]);
+
+    const handlers = createHandlers();
+    await parseSSEStream(stream, handlers);
+
+    expect(handlers.calls.sources).toHaveLength(1);
+    expect(handlers.calls.sources[0]).toMatchObject({
+      sources,
+      tool_call_id: "tc-search",
+      tool_name: "tool_web_search",
+    });
+  });
+
   it("should parse metadata event", async () => {
     const stream = createStream([
       'event: metadata\ndata: {"processing_time":1.5,"streaming_version":"v3"}\n\n',
@@ -447,7 +475,7 @@ describe("SSE Parser", () => {
 
   it("should parse tool_result event", async () => {
     const stream = createStream([
-      'event: tool_result\ndata: {"content":{"name":"knowledge_search","result":"Found 8 documents","id":"tc-1"},"node":"rag_agent"}\n\n',
+      'event: tool_result\ndata: {"content":{"name":"knowledge_search","result":"Found 8 documents","id":"tc-1","metadata":{"schema_version":"tool_result_metadata.v1","status":"completed","result_kind":"web_sources","source_count":2}},"node":"rag_agent"}\n\n',
     ]);
 
     const handlers = createHandlers();
@@ -455,7 +483,17 @@ describe("SSE Parser", () => {
 
     expect(handlers.calls.tool_result).toHaveLength(1);
     expect(handlers.calls.tool_result[0]).toMatchObject({
-      content: { name: "knowledge_search", result: "Found 8 documents", id: "tc-1" },
+      content: {
+        name: "knowledge_search",
+        result: "Found 8 documents",
+        id: "tc-1",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "completed",
+          result_kind: "web_sources",
+          source_count: 2,
+        },
+      },
     });
   });
 

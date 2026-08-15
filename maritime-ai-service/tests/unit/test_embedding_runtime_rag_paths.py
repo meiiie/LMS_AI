@@ -78,3 +78,100 @@ async def test_store_cache_response_impl_skips_when_embedding_unavailable():
         )
 
     cache_manager.set.assert_not_called()
+
+
+def test_cache_hit_scope_rejects_unscoped_entry_when_request_model_is_pinned():
+    """Pinned runtime model must not replay an old unscoped semantic answer."""
+    from app.cache.models import CacheEntry, CacheLookupResult, CacheTier
+    from app.engine.agentic_rag.corrective_rag_runtime_support import (
+        cache_hit_matches_runtime_scope_impl,
+    )
+
+    entry = CacheEntry(
+        key="rule 15",
+        embedding=[0.1, 0.2],
+        value={"answer": "cached"},
+        tier=CacheTier.RESPONSE,
+        metadata={},
+    )
+    result = CacheLookupResult(hit=True, entry=entry, similarity=0.99)
+
+    matches, details = cache_hit_matches_runtime_scope_impl(
+        cache_result=result,
+        context={
+            "provider": "nvidia",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        },
+    )
+
+    assert matches is False
+    assert details["requested_provider"] == "nvidia"
+    assert details["requested_model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert details["cached_provider"] == ""
+    assert details["cached_model"] == ""
+
+
+def test_cache_hit_scope_accepts_matching_generation_model():
+    """Scoped semantic cache entries may be reused for the same concrete model."""
+    from app.cache.models import CacheEntry, CacheLookupResult, CacheTier
+    from app.engine.agentic_rag.corrective_rag_runtime_support import (
+        cache_hit_matches_runtime_scope_impl,
+    )
+
+    entry = CacheEntry(
+        key="rule 15",
+        embedding=[0.1, 0.2],
+        value={"answer": "cached"},
+        tier=CacheTier.RESPONSE,
+        metadata={
+            "generation_provider": "nvidia",
+            "generation_model": "nvidia/nemotron-3-ultra-550b-a55b",
+        },
+    )
+    result = CacheLookupResult(hit=True, entry=entry, similarity=0.99)
+
+    matches, details = cache_hit_matches_runtime_scope_impl(
+        cache_result=result,
+        context={
+            "provider": "nvidia",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        },
+    )
+
+    assert matches is True
+    assert details["cached_provider"] == "nvidia"
+    assert details["cached_model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+
+
+@pytest.mark.asyncio
+async def test_store_cache_response_impl_records_generation_model_scope():
+    """New CRAG cache entries carry the provider/model that authored the answer."""
+    from app.engine.agentic_rag.corrective_rag_runtime_support import (
+        store_cache_response_impl,
+    )
+
+    cache_manager = MagicMock()
+    cache_manager.set = AsyncMock()
+
+    await store_cache_response_impl(
+        cache_enabled=True,
+        cache_manager=cache_manager,
+        confidence=95,
+        query_embedding=[0.1, 0.2],
+        query="Rule 15 la gi?",
+        answer="Rule 15 noi ve tinh huong cat huong.",
+        sources=[{"document_id": "doc-1"}],
+        thinking="dang truy xuat tri nho",
+        iterations=1,
+        was_rewritten=False,
+        context={
+            "user_id": "u1",
+            "organization_id": "org-1",
+            "provider": "nvidia",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        },
+    )
+
+    metadata = cache_manager.set.await_args.kwargs["metadata"]
+    assert metadata["generation_provider"] == "nvidia"
+    assert metadata["generation_model"] == "nvidia/nemotron-3-ultra-550b-a55b"

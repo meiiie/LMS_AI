@@ -1,6 +1,6 @@
 import type { AppSettings } from "@/api/types";
 
-export type LlmProvider = "google" | "zhipu" | "openai" | "openrouter" | "ollama";
+export type LlmProvider = "google" | "zhipu" | "openai" | "openrouter" | "nvidia" | "ollama";
 
 export const GOOGLE_DEFAULT_MODEL = "gemini-3.1-flash-lite-preview";
 export const OPENAI_DEFAULT_MODEL = "gpt-5.4-mini";
@@ -15,6 +15,9 @@ export const GOOGLE_LEGACY_MODELS = [
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const OPENROUTER_DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 export const OPENROUTER_DEFAULT_MODEL_ADVANCED = "openai/gpt-oss-120b:free";
+export const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+export const NVIDIA_DEFAULT_MODEL = "qwen/qwen3-next-80b-a3b-instruct";
+export const NVIDIA_DEFAULT_MODEL_ADVANCED = "qwen/qwen3-next-80b-a3b-thinking";
 export const ZHIPU_DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 export const ZHIPU_DEFAULT_MODEL = "glm-4.5-air";
 export const ZHIPU_DEFAULT_MODEL_ADVANCED = "glm-5";
@@ -34,6 +37,9 @@ type LlmProviderPreset = {
   openrouter_base_url?: string;
   openrouter_model?: string;
   openrouter_model_advanced?: string;
+  nvidia_base_url?: string;
+  nvidia_model?: string;
+  nvidia_model_advanced?: string;
   zhipu_base_url?: string;
   zhipu_model?: string;
   zhipu_model_advanced?: string;
@@ -67,6 +73,13 @@ const PRESETS: Record<LlmProvider, LlmProviderPreset> = {
     openrouter_base_url: OPENROUTER_BASE_URL,
     openrouter_model: OPENROUTER_DEFAULT_MODEL,
     openrouter_model_advanced: OPENROUTER_DEFAULT_MODEL_ADVANCED,
+  },
+  nvidia: {
+    provider: "nvidia",
+    llm_failover_chain: ["nvidia", "google", "zhipu", "openrouter", "ollama"],
+    nvidia_base_url: NVIDIA_BASE_URL,
+    nvidia_model: NVIDIA_DEFAULT_MODEL,
+    nvidia_model_advanced: NVIDIA_DEFAULT_MODEL_ADVANCED,
   },
   ollama: {
     provider: "ollama",
@@ -105,6 +118,14 @@ export function applyLlmProviderPreset(
       preset.openrouter_model_advanced
       ?? current.openrouter_model_advanced
       ?? OPENROUTER_DEFAULT_MODEL_ADVANCED,
+    nvidia_base_url:
+      preset.nvidia_base_url ?? current.nvidia_base_url ?? NVIDIA_BASE_URL,
+    nvidia_model:
+      preset.nvidia_model ?? current.nvidia_model ?? NVIDIA_DEFAULT_MODEL,
+    nvidia_model_advanced:
+      preset.nvidia_model_advanced
+      ?? current.nvidia_model_advanced
+      ?? NVIDIA_DEFAULT_MODEL_ADVANCED,
     zhipu_base_url:
       preset.zhipu_base_url ?? current.zhipu_base_url ?? ZHIPU_DEFAULT_BASE_URL,
     zhipu_model:

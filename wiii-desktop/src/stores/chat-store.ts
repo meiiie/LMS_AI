@@ -20,6 +20,7 @@ import type {
   SourceInfo,
   ChatResponseMetadata,
   ToolCallInfo,
+  ToolResultMetadata,
   ContentBlock,
   DisplayPresentationMeta,
   StreamingStep,
@@ -54,6 +55,71 @@ const MAX_CHAT_LIFECYCLE_EVENTS = 48;
 const MAX_CHAT_LIFECYCLE_RECORD_KEYS = 16;
 const MAX_CHAT_LIFECYCLE_ARRAY_ITEMS = 16;
 const MAX_CHAT_LIFECYCLE_STRING_CHARS = 240;
+
+interface SourceAttachmentHint {
+  toolCallId?: string;
+  toolName?: string;
+}
+
+type ConversationModelProvider = NonNullable<Conversation["model_provider"]>;
+
+const CONVERSATION_MODEL_PROVIDERS = new Set<ConversationModelProvider>([
+  "auto",
+  "google",
+  "zhipu",
+  "openai",
+  "openrouter",
+  "nvidia",
+  "ollama",
+]);
+
+function normalizeConversationModelProvider(
+  value: unknown,
+): ConversationModelProvider | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase() as ConversationModelProvider;
+  return CONVERSATION_MODEL_PROVIDERS.has(normalized) ? normalized : undefined;
+}
+
+function assignConversationModel(
+  conversation: Conversation,
+  provider: unknown,
+  model?: unknown,
+) {
+  const normalizedProvider = normalizeConversationModelProvider(provider);
+  if (!normalizedProvider) return;
+
+  conversation.model_provider = normalizedProvider;
+  const normalizedModel = typeof model === "string" ? model.trim() : "";
+  if (normalizedProvider === "auto" || !normalizedModel) {
+    delete conversation.model;
+    return;
+  }
+  conversation.model = normalizedModel;
+}
+
+function assignConversationModelFromMetadata(
+  conversation: Conversation,
+  metadata?: Partial<ChatResponseMetadata> | Record<string, unknown>,
+) {
+  if (conversation.model_provider) return;
+  if (!metadata) return;
+  const provider = normalizeConversationModelProvider(metadata.provider);
+  if (!provider) return;
+  assignConversationModel(conversation, provider, metadata.model);
+}
+
+function assignConversationModelFromThreadExtra(
+  conversation: Conversation,
+  extraData?: Record<string, unknown> | null,
+) {
+  if (!extraData || typeof extraData !== "object") return;
+  const provider =
+    normalizeConversationModelProvider(extraData.model_provider)
+    || normalizeConversationModelProvider(extraData.provider);
+  if (!provider) return;
+  assignConversationModel(conversation, provider, extraData.model);
+}
 
 /**
  * Sprint 218: Per-user conversation storage.
@@ -109,6 +175,7 @@ function attachSourcesToLastAssistantDraft(
   state: ChatState,
   sources: SourceInfo[],
   conversationId: string | null,
+  hint?: SourceAttachmentHint,
 ): boolean {
   if (sources.length === 0 || !conversationId) return false;
   const recentlyCompleted =
@@ -125,6 +192,9 @@ function attachSourcesToLastAssistantDraft(
     const message = conversation.messages[i];
     if (message.role !== "assistant") continue;
     message.sources = mergeSourceInfos(message.sources || [], sources);
+    if (message.blocks) {
+      attachSourcesToSearchToolBlockDraft(message.blocks, sources, hint);
+    }
     return true;
   }
   return false;
@@ -261,6 +331,11 @@ interface ChatState {
   ) => string;
   deleteConversation: (id: string) => void;
   setActiveConversation: (id: string | null) => void;
+  setConversationModel: (
+    id: string,
+    provider: Conversation["model_provider"],
+    model?: string | null,
+  ) => void;
   renameConversation: (id: string, title: string) => void;
   addUserMessage: (
     content: string,
@@ -272,7 +347,10 @@ interface ChatState {
   setStreamingThinking: (thinking: string) => void;
   setStreamingThinkingLabel: (label: string) => void;
   setStreamingStep: (step: string) => void;
-  setStreamingSources: (sources: SourceInfo[]) => void;
+  setStreamingSources: (
+    sources: SourceInfo[],
+    hint?: SourceAttachmentHint,
+  ) => void;
   addStreamingStep: (label: string, node?: string) => void;
   addChatLifecycleEvent: (event: SSEChatLifecycleEvent) => void;
   appendThinkingDelta: (
@@ -294,6 +372,7 @@ interface ChatState {
     id: string,
     result: string,
     meta?: DisplayPresentationMeta,
+    metadata?: ToolResultMetadata,
   ) => void;
   setStreamingDomainNotice: (notice: string) => void;
   /** Sprint 147: Append bold action text between thinking blocks */
@@ -383,7 +462,11 @@ interface ChatState {
   closeActivePhase: (durationMs?: number) => void;
   appendPhaseStatus: (message: string, node?: string, stepId?: string) => void;
   appendPhaseToolCall: (tc: ToolCallInfo, stepId?: string) => void;
-  updatePhaseToolCallResult: (id: string, result: string) => void;
+  updatePhaseToolCallResult: (
+    id: string,
+    result: string,
+    metadata?: ToolResultMetadata,
+  ) => void;
   setPendingStreamMetadata: (metadata: ChatResponseMetadata) => void;
   finalizeStream: (metadata?: ChatResponseMetadata) => void;
   setStreamError: (error: string, metadata?: Record<string, unknown>) => void;
@@ -631,6 +714,15 @@ function mergeToolCallInfoDraft(
   if (incoming.node) {
     target.node = incoming.node;
   }
+  if (incoming.metadata) {
+    target.metadata = {
+      ...(target.metadata || {}),
+      ...incoming.metadata,
+    };
+  }
+  if (incoming.sources?.length) {
+    target.sources = mergeSourceInfos(target.sources || [], incoming.sources);
+  }
   return target;
 }
 
@@ -643,6 +735,8 @@ function upsertToolCallInfoDraft(
   const next = {
     ...incoming,
     args: incoming.args ? { ...incoming.args } : undefined,
+    metadata: incoming.metadata ? { ...incoming.metadata } : undefined,
+    sources: incoming.sources ? [...incoming.sources] : undefined,
   };
   toolCalls.push(next);
   return next;
@@ -656,6 +750,60 @@ function findToolExecutionBlockDraft(
     (block): block is ToolExecutionBlockData =>
       block.type === "tool_execution" && block.tool.id === toolCallId,
   );
+}
+
+function normalizeToolNameForSources(name: string): string {
+  return String(name || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isSourceBackedToolCall(tool: ToolCallInfo): boolean {
+  const name = normalizeToolNameForSources(tool.name);
+  const resultKind = String(tool.metadata?.result_kind || "").trim().toLowerCase();
+  return (
+    resultKind === "web_sources" ||
+    name.includes("web_search") ||
+    name.includes("search_news") ||
+    name.includes("search_legal") ||
+    name.includes("search_maritime") ||
+    name.includes("search_products") ||
+    name.includes("search_shopping")
+  );
+}
+
+function attachSourcesToSearchToolBlockDraft(
+  blocks: ContentBlock[],
+  sources: SourceInfo[],
+  hint?: SourceAttachmentHint,
+): boolean {
+  if (sources.length === 0) return false;
+  const targetToolCallId = String(hint?.toolCallId || "").trim();
+  if (targetToolCallId) {
+    const targetBlock = findToolExecutionBlockDraft(blocks, targetToolCallId);
+    if (targetBlock && isSourceBackedToolCall(targetBlock.tool)) {
+      targetBlock.tool.sources = mergeSourceInfos(
+        targetBlock.tool.sources || [],
+        sources,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  const targetToolName = normalizeToolNameForSources(hint?.toolName || "");
+  for (let i = blocks.length - 1; i >= 0; i -= 1) {
+    const block = blocks[i];
+    if (block.type !== "tool_execution") continue;
+    if (!isSourceBackedToolCall(block.tool)) continue;
+    if (
+      targetToolName &&
+      normalizeToolNameForSources(block.tool.name) !== targetToolName
+    ) {
+      continue;
+    }
+    block.tool.sources = mergeSourceInfos(block.tool.sources || [], sources);
+    return true;
+  }
+  return false;
 }
 
 function findActiveThinkingPhaseIndex(
@@ -1443,6 +1591,16 @@ export const useChatStore = create<ChatState>()(
       }
     },
 
+    setConversationModel: (id, provider, model) => {
+      set((state) => {
+        const found = state.conversations.find((c) => c.id === id);
+        if (!found) return;
+        assignConversationModel(found, provider, model);
+        found.updated_at = new Date().toISOString();
+      });
+      persistConversationsImmediate(get().conversations);
+    },
+
     renameConversation: (id, title) => {
       // Sprint 225: Capture thread_id for server propagation
       const conv = get().conversations.find((c) => c.id === id);
@@ -1663,14 +1821,54 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    setStreamingSources: (sources) => {
+    setStreamingSources: (sources, hint) => {
       let attachedToFinalMessage = false;
       set((state) => {
         if (state.isStreaming) {
-          state.streamingSources =
-            sources.length === 0
-              ? []
-              : mergeSourceInfos(state.streamingSources, sources);
+          if (sources.length > 0) {
+            state.streamingSources = mergeSourceInfos(
+              state.streamingSources,
+              sources,
+            );
+            const attachedToBlock = attachSourcesToSearchToolBlockDraft(
+              state.streamingBlocks,
+              sources,
+              hint,
+            );
+            if (attachedToBlock) {
+              const targetToolCallId = String(hint?.toolCallId || "").trim();
+              if (targetToolCallId) {
+                const toolCall = state.streamingToolCalls.find(
+                  (item) => item.id === targetToolCallId,
+                );
+                if (toolCall && isSourceBackedToolCall(toolCall)) {
+                  toolCall.sources = mergeSourceInfos(
+                    toolCall.sources || [],
+                    sources,
+                  );
+                }
+              } else {
+                const targetToolName = normalizeToolNameForSources(
+                  hint?.toolName || "",
+                );
+                for (let i = state.streamingToolCalls.length - 1; i >= 0; i -= 1) {
+                  const toolCall = state.streamingToolCalls[i];
+                  if (!isSourceBackedToolCall(toolCall)) continue;
+                  if (
+                    targetToolName &&
+                    normalizeToolNameForSources(toolCall.name) !== targetToolName
+                  ) {
+                    continue;
+                  }
+                  toolCall.sources = mergeSourceInfos(
+                    toolCall.sources || [],
+                    sources,
+                  );
+                  break;
+                }
+              }
+            }
+          }
           return;
         }
         if (sources.length > 0) {
@@ -1678,6 +1876,7 @@ export const useChatStore = create<ChatState>()(
             state,
             sources,
             state.lastCompletedConversationId,
+            hint,
           );
         }
       });
@@ -2407,12 +2606,18 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    updatePhaseToolCallResult: (id, result) => {
+    updatePhaseToolCallResult: (id, result, metadata) => {
       set((state) => {
         for (const phase of state.streamingPhases) {
           const tc = phase.toolCalls.find((t) => t.id === id);
           if (tc) {
             tc.result = result;
+            if (metadata) {
+              tc.metadata = {
+                ...(tc.metadata || {}),
+                ...metadata,
+              };
+            }
             break;
           }
         }
@@ -2488,6 +2693,9 @@ export const useChatStore = create<ChatState>()(
                 args: normalizedToolCall.args
                   ? { ...normalizedToolCall.args }
                   : undefined,
+                metadata: normalizedToolCall.metadata
+                  ? { ...normalizedToolCall.metadata }
+                  : undefined,
               },
               node: normalizedToolCall.node,
               status: normalizedToolCall.result ? "completed" : "pending",
@@ -2502,11 +2710,19 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    updateToolCallResult: (id, result, meta) => {
+    updateToolCallResult: (id, result, meta, metadata) => {
       set((state) => {
         // Flat field - backward compat
         const flatTc = state.streamingToolCalls.find((tc) => tc.id === id);
-        if (flatTc) flatTc.result = result;
+        if (flatTc) {
+          flatTc.result = result;
+          if (metadata) {
+            flatTc.metadata = {
+              ...(flatTc.metadata || {}),
+              ...metadata,
+            };
+          }
+        }
 
         // Backward compat: find tool call in thinking blocks and update
         for (const block of state.streamingBlocks) {
@@ -2514,10 +2730,22 @@ export const useChatStore = create<ChatState>()(
             const tc = block.toolCalls.find((t) => t.id === id);
             if (tc) {
               tc.result = result;
+              if (metadata) {
+                tc.metadata = {
+                  ...(tc.metadata || {}),
+                  ...metadata,
+                };
+              }
             }
           }
           if (block.type === "tool_execution" && block.tool.id === id) {
             block.tool.result = result;
+            if (metadata) {
+              block.tool.metadata = {
+                ...(block.tool.metadata || {}),
+                ...metadata,
+              };
+            }
             block.status = "completed";
             applyDisplayMeta(block, meta);
           }
@@ -2561,6 +2789,7 @@ export const useChatStore = create<ChatState>()(
         if (metadata.session_id && !conv.session_id) {
           conv.session_id = metadata.session_id;
         }
+        assignConversationModelFromMetadata(conv, metadata);
 
         const backendThreadId =
           typeof metadata?.thread_id === "string"
@@ -2694,6 +2923,7 @@ export const useChatStore = create<ChatState>()(
           if (backendSessionId && !conv.session_id) {
             conv.session_id = backendSessionId;
           }
+          assignConversationModelFromMetadata(conv, effectiveMetadata);
           // Sprint 225: Store thread_id for server sync
           if (backendThreadId && !conv.thread_id) {
             conv.thread_id = backendThreadId;
@@ -2796,6 +3026,7 @@ export const useChatStore = create<ChatState>()(
                 existing.title = t.title;
               }
               existing.message_count = t.message_count;
+              assignConversationModelFromThreadExtra(existing, t.extra_data);
             } else {
               // New conversation from another platform — add stub
               // Extract session_id from thread_id format:
@@ -2815,6 +3046,7 @@ export const useChatStore = create<ChatState>()(
                 thread_id: t.thread_id,
                 message_count: t.message_count,
               };
+              assignConversationModelFromThreadExtra(stub, t.extra_data);
               state.conversations.push(stub);
             }
           }

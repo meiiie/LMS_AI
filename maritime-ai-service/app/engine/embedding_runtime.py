@@ -16,6 +16,7 @@ import numpy as np
 
 from app.core.config import settings
 from app.engine.model_catalog import (
+    NVIDIA_DEFAULT_BASE_URL,
     OPENAI_DEFAULT_BASE_URL,
     OPENROUTER_DEFAULT_BASE_URL,
     embedding_model_supports_dimension_override,
@@ -25,6 +26,8 @@ from app.engine.model_catalog import (
     provider_can_serve_embedding_model,
 )
 from app.engine.openai_compatible_credentials import (
+    resolve_nvidia_api_key,
+    resolve_nvidia_base_url,
     openrouter_credentials_available,
     resolve_openai_api_key,
     resolve_openai_base_url,
@@ -35,7 +38,9 @@ from app.engine.openai_compatible_credentials import (
 logger = logging.getLogger(__name__)
 OLLAMA_EMBEDDING_PROBE_CACHE_TTL_SECONDS = 15.0
 OLLAMA_EMBEDDING_PROBE_TIMEOUT_SECONDS = 0.5
+EMBEDDING_PROVIDER_QUARANTINE_SECONDS = 300.0
 _SECRET_REDACTION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"nvapi-[A-Za-z0-9_-]+"), "nvapi-REDACTED"),
     (re.compile(r"sk-[A-Za-z0-9_-]+"), "sk-REDACTED"),
     (re.compile(r"(?i)(api key provided:\s*)([^\s,'\"}]+)"), r"\1[REDACTED]"),
     (re.compile(r"(?i)(api[_ -]?key\s*[=:]\s*)([^\s,'\"}]+)"), r"\1[REDACTED]"),
@@ -49,6 +54,12 @@ class _OllamaEmbeddingProbeCacheEntry:
     result: "OllamaEmbeddingProbeResult"
 
 
+@dataclass
+class _EmbeddingProviderCooldown:
+    retry_after: float
+    reason: str
+
+
 _ollama_embedding_probe_cache: dict[tuple[str, str], _OllamaEmbeddingProbeCacheEntry] = {}
 
 
@@ -57,6 +68,25 @@ def _sanitize_error_for_log(value: object) -> str:
     for pattern, replacement in _SECRET_REDACTION_PATTERNS:
         text = pattern.sub(replacement, text)
     return text
+
+
+def _embedding_error_requires_cooldown(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 429:
+        return True
+
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "429",
+            "insufficient_quota",
+            "quota exceeded",
+            "rate limit",
+            "rate_limit",
+            "too many requests",
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -522,6 +552,19 @@ def build_embedding_backend_for_provider_model(
             dimensions=resolved_dimensions,
         )
 
+    if normalized_provider == "nvidia":
+        api_key = resolve_nvidia_api_key(settings)
+        if not api_key:
+            return None
+        base_url = resolve_nvidia_base_url(settings) or NVIDIA_DEFAULT_BASE_URL
+        return OpenAICompatibleEmbeddings(
+            provider="nvidia",
+            api_key=api_key,
+            base_url=base_url,
+            model_name=normalized_model,
+            dimensions=resolved_dimensions,
+        )
+
     if normalized_provider == "ollama":
         base_url = getattr(settings, "ollama_base_url", None)
         if not base_url:
@@ -559,6 +602,7 @@ class SemanticEmbeddingBackend:
         self._provider_order = _resolve_provider_order()
         self._backends: dict[str, EmbeddingBackendProtocol] = {}
         self._active_provider: str | None = None
+        self._provider_cooldowns: dict[str, _EmbeddingProviderCooldown] = {}
         self._initialize_backends()
 
     def _initialize_backends(self) -> None:
@@ -603,6 +647,7 @@ class SemanticEmbeddingBackend:
     def _ordered_backends(self) -> list[EmbeddingBackendProtocol]:
         if not self._backends:
             return []
+        now = time.monotonic()
         providers = []
         if self._active_provider and self._active_provider in self._backends:
             providers.append(self._active_provider)
@@ -611,12 +656,47 @@ class SemanticEmbeddingBackend:
             for provider in self._provider_order
             if provider in self._backends and provider not in providers
         )
-        return [self._backends[provider] for provider in providers]
+        available: list[EmbeddingBackendProtocol] = []
+        for provider in providers:
+            cooldown = self._provider_cooldowns.get(provider)
+            if cooldown is not None:
+                if cooldown.retry_after > now:
+                    continue
+                self._provider_cooldowns.pop(provider, None)
+            available.append(self._backends[provider])
+        return available
 
     def _promote_backend(self, provider: str) -> None:
         if provider != self._active_provider:
             logger.info("Semantic embedding failover promoted provider=%s", provider)
             self._active_provider = provider
+
+    def _record_provider_failure(
+        self,
+        backend: EmbeddingBackendProtocol,
+        exc: Exception,
+    ) -> None:
+        sanitized_error = _sanitize_error_for_log(exc)
+        if _embedding_error_requires_cooldown(exc):
+            self._provider_cooldowns[backend.provider] = _EmbeddingProviderCooldown(
+                retry_after=time.monotonic() + EMBEDDING_PROVIDER_QUARANTINE_SECONDS,
+                reason=sanitized_error,
+            )
+            logger.warning(
+                "Semantic embedding provider quarantined: provider=%s model=%s cooldown_seconds=%s error=%s",
+                backend.provider,
+                backend.model_name,
+                int(EMBEDDING_PROVIDER_QUARANTINE_SECONDS),
+                sanitized_error,
+            )
+            return
+
+        logger.warning(
+            "Semantic embedding provider failed: provider=%s model=%s error=%s",
+            backend.provider,
+            backend.model_name,
+            sanitized_error,
+        )
 
     def is_available(self) -> bool:
         return bool(self._backends)
@@ -628,12 +708,7 @@ class SemanticEmbeddingBackend:
                 self._promote_backend(backend.provider)
                 return result
             except Exception as exc:
-                logger.warning(
-                    "Semantic embedding provider failed: provider=%s model=%s error=%s",
-                    backend.provider,
-                    backend.model_name,
-                    _sanitize_error_for_log(exc),
-                )
+                self._record_provider_failure(backend, exc)
         return [[] for _ in texts]
 
     def embed_query(self, text: str) -> List[float]:
@@ -643,12 +718,7 @@ class SemanticEmbeddingBackend:
                 self._promote_backend(backend.provider)
                 return result
             except Exception as exc:
-                logger.warning(
-                    "Semantic embedding provider failed: provider=%s model=%s error=%s",
-                    backend.provider,
-                    backend.model_name,
-                    _sanitize_error_for_log(exc),
-                )
+                self._record_provider_failure(backend, exc)
         return []
 
     async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
@@ -658,12 +728,7 @@ class SemanticEmbeddingBackend:
                 self._promote_backend(backend.provider)
                 return result
             except Exception as exc:
-                logger.warning(
-                    "Semantic embedding provider failed: provider=%s model=%s error=%s",
-                    backend.provider,
-                    backend.model_name,
-                    _sanitize_error_for_log(exc),
-                )
+                self._record_provider_failure(backend, exc)
         return [[] for _ in texts]
 
     async def aembed_query(self, text: str) -> List[float]:
@@ -673,12 +738,7 @@ class SemanticEmbeddingBackend:
                 self._promote_backend(backend.provider)
                 return result
             except Exception as exc:
-                logger.warning(
-                    "Semantic embedding provider failed: provider=%s model=%s error=%s",
-                    backend.provider,
-                    backend.model_name,
-                    _sanitize_error_for_log(exc),
-                )
+                self._record_provider_failure(backend, exc)
         return []
 
     @property

@@ -51,6 +51,7 @@ const API_KEY_KEY = "api_key";
 const GEMINI_API_KEY_KEY = "gemini_api_key";
 const OPENAI_API_KEY_KEY = "openai_api_key";
 const OPENROUTER_API_KEY_KEY = "openrouter_api_key";
+const NVIDIA_API_KEY_KEY = "nvidia_api_key";
 const ZHIPU_API_KEY_KEY = "zhipu_api_key";
 const OLLAMA_API_KEY_KEY = "ollama_api_key";
 
@@ -101,6 +102,18 @@ export async function loadOpenRouterApiKey(): Promise<string | null> {
 
 export async function clearOpenRouterApiKey(): Promise<void> {
   await deleteStore(TOKEN_STORE_NAME, OPENROUTER_API_KEY_KEY);
+}
+
+export async function storeNvidiaApiKey(apiKey: string): Promise<void> {
+  await saveStore(TOKEN_STORE_NAME, NVIDIA_API_KEY_KEY, apiKey);
+}
+
+export async function loadNvidiaApiKey(): Promise<string | null> {
+  return loadStore<string | null>(TOKEN_STORE_NAME, NVIDIA_API_KEY_KEY, null);
+}
+
+export async function clearNvidiaApiKey(): Promise<void> {
+  await deleteStore(TOKEN_STORE_NAME, NVIDIA_API_KEY_KEY);
 }
 
 export async function storeZhipuApiKey(apiKey: string): Promise<void> {

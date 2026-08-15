@@ -267,6 +267,74 @@ async def test_llm_status_smoke_returns_selectability_contract(smoke_app):
 
 
 @pytest.mark.asyncio
+async def test_llm_status_can_include_model_options(smoke_app):
+    snapshot = [
+        ProviderSelectability(
+            provider="nvidia",
+            display_name="NVIDIA NIM",
+            state="selectable",
+            reason_code=None,
+            reason_label=None,
+            selected_model="qwen/qwen3-next-80b-a3b-instruct",
+            strict_pin=True,
+            verified_at="2026-03-23T12:00:00+00:00",
+            available=True,
+            configured=True,
+            request_selectable=True,
+            is_primary=True,
+            is_fallback=False,
+        ),
+    ]
+
+    with patch(
+        "app.api.v1.llm_status.get_llm_selectability_snapshot",
+        return_value=snapshot,
+    ), patch(
+        "app.api.v1.llm_status.ModelCatalogService.get_full_catalog",
+        new=AsyncMock(
+            return_value={
+                "providers": {
+                    "nvidia": {
+                        "qwen/qwen3-next-80b-a3b-instruct": SimpleNamespace(
+                            provider="nvidia",
+                            model_name="qwen/qwen3-next-80b-a3b-instruct",
+                            display_name="Qwen3 Next 80B",
+                            status="available",
+                            released_on=None,
+                        ),
+                        "nvidia/nemotron-3-ultra": SimpleNamespace(
+                            provider="nvidia",
+                            model_name="nvidia/nemotron-3-ultra",
+                            display_name="Nemotron 3 Ultra",
+                            status="available",
+                            released_on=None,
+                        ),
+                    }
+                },
+                "embedding_models": {},
+                "provider_metadata": {},
+                "ollama_discovered": False,
+                "timestamp": "2026-03-23T12:00:00+00:00",
+            }
+        ),
+    ):
+        async with httpx.AsyncClient(
+            transport=_transport(smoke_app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get("/api/v1/llm/status?include_models=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    options = payload["providers"][0]["model_options"]
+    assert [item["model_name"] for item in options] == [
+        "qwen/qwen3-next-80b-a3b-instruct",
+        "nvidia/nemotron-3-ultra",
+    ]
+    assert options[0]["is_default"] is True
+
+
+@pytest.mark.asyncio
 async def test_chat_sync_smoke_success_response(smoke_app):
     smoke_app.dependency_overrides[require_auth] = _student_auth
     internal_response = InternalChatResponse(

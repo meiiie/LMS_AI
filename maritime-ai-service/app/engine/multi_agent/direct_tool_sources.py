@@ -21,6 +21,7 @@ _URL_PATTERN = re.compile(r"https?://[^\s)>\]}\"']+")
 
 _SOURCE_BACKED_TOOL_MARKERS = (
     "web_search",
+    "fetch_url",
     "search_news",
     "search_legal",
     "search_maritime",
@@ -160,7 +161,10 @@ def _extract_block_title(block: str) -> str:
         return _clean_title(title_match.group(1))
     for line in block.splitlines():
         cleaned = _clean_title(line)
-        if cleaned and not _URL_PATTERN.search(cleaned) and not cleaned.lower().startswith("url:"):
+        lowered = cleaned.lower()
+        if lowered.startswith("_(via ") or lowered.startswith("(via "):
+            continue
+        if cleaned and not _URL_PATTERN.search(cleaned) and not lowered.startswith("url:"):
             return cleaned
     return ""
 
@@ -172,10 +176,13 @@ def _extract_block_snippet(block: str, title: str) -> str:
         line = raw_line.strip()
         if not line:
             continue
+        lowered = line.lower()
+        if lowered.startswith("_(via ") or lowered.startswith("(via "):
+            continue
         if not title_seen and title and title in line:
             title_seen = True
             continue
-        if _URL_PATTERN.search(line) or line.lower().startswith("url:"):
+        if _URL_PATTERN.search(line) or lowered.startswith("url:"):
             continue
         snippets.append(line)
         if len(" ".join(snippets)) >= 700:
@@ -184,6 +191,7 @@ def _extract_block_snippet(block: str, title: str) -> str:
 
 
 def _clean_title(value: str) -> str:
+    value = str(value or "").strip().lstrip("#").strip()
     return (
         str(value or "")
         .strip()

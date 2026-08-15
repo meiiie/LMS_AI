@@ -316,6 +316,41 @@ class TestGetFullCatalog:
         assert catalog["provider_metadata"]["openrouter"]["catalog_source"] == "mixed"
 
     @pytest.mark.asyncio
+    async def test_nvidia_runtime_discovery_metadata_is_exposed(self):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "qwen/qwen3-next-80b-a3b-instruct"},
+                {"id": "nvidia/nemotron-3-ultra"},
+                {"id": "nvidia/embedding-model"},
+                {"id": "baai/bge-m3"},
+                {"id": "nvidia/nv-embed-v1"},
+                {"id": "nvidia/nemoretriever-parse"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            catalog = await ModelCatalogService.get_full_catalog(
+                nvidia_api_key="nvapi-test-key",
+                nvidia_base_url="https://integrate.api.nvidia.com/v1",
+            )
+
+        assert "nvidia/nemotron-3-ultra" in catalog["providers"]["nvidia"]
+        assert "nvidia/embedding-model" not in catalog["providers"]["nvidia"]
+        assert "baai/bge-m3" not in catalog["providers"]["nvidia"]
+        assert "nvidia/nv-embed-v1" not in catalog["providers"]["nvidia"]
+        assert "nvidia/nemoretriever-parse" not in catalog["providers"]["nvidia"]
+        assert catalog["provider_metadata"]["nvidia"]["runtime_discovery_enabled"] is True
+        assert catalog["provider_metadata"]["nvidia"]["runtime_discovery_succeeded"] is True
+        assert catalog["provider_metadata"]["nvidia"]["catalog_source"] == "mixed"
+
+    @pytest.mark.asyncio
     async def test_embedding_models_included(self):
         catalog = await ModelCatalogService.get_full_catalog()
         assert "embedding_models" in catalog

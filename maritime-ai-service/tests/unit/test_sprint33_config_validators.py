@@ -83,6 +83,27 @@ class TestVisionProvider:
         assert getattr(s, field) == "nvidia"
 
 
+class TestEmbeddingProvider:
+    @pytest.mark.parametrize(
+        "val",
+        ["google", "openai", "openrouter", "nvidia", "ollama", "zhipu", "auto"],
+    )
+    def test_valid_embedding_providers(self, val):
+        s = _make_settings(embedding_provider=val)
+        assert s.embedding_provider == val
+
+
+class TestVectorIndexBackend:
+    @pytest.mark.parametrize("val", ["postgres", "qdrant"])
+    def test_valid_vector_index_backends(self, val):
+        s = _make_settings(vector_index_backend=val)
+        assert s.vector_index_backend == val
+
+    def test_invalid_vector_index_backend_rejected(self):
+        with pytest.raises(ValidationError, match="vector_index_backend"):
+            _make_settings(vector_index_backend="chromadb")
+
+
 # =============================================================================
 # rag_quality_mode
 # =============================================================================

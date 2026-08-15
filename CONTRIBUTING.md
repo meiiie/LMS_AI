@@ -5,6 +5,11 @@ application, local ACP agents, memory, tools, artifacts, and governed external
 adapters. Contributions should preserve those boundaries and keep failures
 inspectable.
 
+Wiii uses a dual-licensing model. Before a contribution to the core can be
+merged, its licensing authority must satisfy
+[CONTRIBUTOR-LICENSE-POLICY.md](CONTRIBUTOR-LICENSE-POLICY.md). Apache SDK
+contributions are accepted only inside the explicit `sdk/` boundary.
+
 ## Before coding
 
 1. Read [AGENTS.md](AGENTS.md), the

@@ -60,6 +60,7 @@ def tag_runtime_metadata_impl(
     provider_name: str,
     tier_key: str,
     requested_provider: Optional[str] = None,
+    model_name: Optional[str] = None,
     logger_obj=None,
 ):
     """Attach lightweight runtime metadata for downstream failover helpers."""
@@ -68,6 +69,8 @@ def tag_runtime_metadata_impl(
         setattr(llm, "_wiii_provider_name", provider_name)
         setattr(llm, "_wiii_tier_key", tier_key)
         setattr(llm, "_wiii_requested_provider", requested_provider)
+        if model_name:
+            setattr(llm, "_wiii_model_name", model_name)
     except Exception:
         logger_ref.debug("[LLM_POOL] Could not tag runtime metadata for provider=%s", provider_name)
     return llm

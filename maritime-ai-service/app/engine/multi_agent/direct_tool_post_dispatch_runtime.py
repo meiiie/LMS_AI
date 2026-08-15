@@ -9,6 +9,12 @@ from typing import Any, Awaitable, Callable
 
 from app.engine.multi_agent.direct_handoff_runtime import record_direct_handoff_request
 from app.engine.multi_agent.direct_pointy_runtime import handle_direct_pointy_post_dispatch
+from app.engine.multi_agent.direct_tool_event_metadata import (
+    build_tool_result_event_metadata,
+)
+from app.engine.multi_agent.direct_tool_sources import (
+    extract_source_infos_from_tool_result,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_result_for_event
 from app.engine.context.host_action_result_bridge import (
@@ -137,12 +143,19 @@ async def process_direct_tool_post_dispatch(
             subtype="tool_reflection",
         )
 
+    sources = extract_source_infos_from_tool_result(tool_name, updated_result)
+    metadata = build_tool_result_event_metadata(
+        tool_name,
+        updated_result,
+        sources=sources,
+    )
     tool_call_events.append(
         {
             "type": "result",
             "name": tool_name,
             "result": sanitize_tool_result_for_event(updated_result),
             "id": tool_call_id,
+            "metadata": metadata,
         }
     )
     messages.append(

@@ -2,9 +2,9 @@
 name = "wiii-desktop"
 version = "1.2.0"
 description = "Wiii — durable AI workbench by The Wiii Lab"
-authors = ["The Wiii Lab"]
+authors = ["Meiiie (The Wiii Lab)"]
 edition = "2021"
-license = "MIT"
+license = "AGPL-3.0-only"
 homepage = "https://wiii.holilihu.online"
 repository = "https://github.com/meiiie/wiii"
 

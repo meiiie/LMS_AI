@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any, Optional
 
+from app.core.exceptions import ProviderUnavailableError
 from app.engine.multi_agent.direct_intent import (
     _looks_emotional_support_turn,
     _looks_identity_selfhood_turn,
@@ -450,6 +451,16 @@ async def _stream_answer_with_fallback(
         )
         if native_response is not None:
             return native_response, native_streamed
+        if effective_failover_mode == FAILOVER_MODE_PINNED:
+            logger.warning(
+                "[%s] Native handle produced no response for pinned provider/model; "
+                "not falling back to pooled default model",
+                node.upper(),
+            )
+            raise ProviderUnavailableError(
+                provider=route.provider or normalized_provider or "unknown",
+                reason_code="pinned_model_unavailable",
+            )
         logger.warning(
             "[%s] Native handle produced no response; falling back to legacy pool route",
             node.upper(),

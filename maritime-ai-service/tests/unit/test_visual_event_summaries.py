@@ -50,3 +50,35 @@ def test_extract_source_infos_from_web_search_markdown():
             "source_type": "web",
         }
     ]
+
+
+def test_extract_source_infos_from_fetch_url_result():
+    sources = extract_source_infos_from_tool_result(
+        "tool_fetch_url",
+        "# About us\n\nSource: https://www.iana.org/about\n\nIANA coordinates identifiers.",
+    )
+
+    assert sources == [
+        {
+            "title": "About us",
+            "content": "IANA coordinates identifiers.",
+            "url": "https://www.iana.org/about",
+            "source_type": "web",
+        }
+    ]
+
+
+def test_extract_source_infos_from_fetch_url_result_skips_url_and_via_lines():
+    sources = extract_source_infos_from_tool_result(
+        "tool_fetch_url",
+        "# https://www.iana.org/about\n_(via httpx)_\n\n# About us\n\nIANA coordinates identifiers.",
+    )
+
+    assert sources == [
+        {
+            "title": "About us",
+            "content": "IANA coordinates identifiers.",
+            "url": "https://www.iana.org/about",
+            "source_type": "web",
+        }
+    ]

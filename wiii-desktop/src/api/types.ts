@@ -358,6 +358,9 @@ export interface SSEAnswerEvent {
 export interface SSESourcesEvent {
   sources?: SourceInfo[];
   content?: SourceInfo[];
+  tool_call_id?: string;
+  tool_name?: string;
+  node?: string;
   display_role?: DisplayRole;
   sequence_id?: number;
   step_id?: string;
@@ -413,6 +416,8 @@ export interface SSEToolCallEvent {
     name: string;
     args: Record<string, unknown>;
     id: string;
+    metadata?: ToolResultMetadata;
+    policy?: Record<string, unknown>;
   };
   node?: string;
   step?: string;
@@ -428,6 +433,7 @@ export interface SSEToolResultEvent {
     name: string;
     result: string;
     id: string;
+    metadata?: ToolResultMetadata;
   };
   node?: string;
   step?: string;
@@ -436,6 +442,34 @@ export interface SSEToolResultEvent {
   step_id?: string;
   step_state?: StepState;
   presentation?: PresentationMode;
+}
+
+export interface ToolResultMetadata {
+  schema_version?: string;
+  status?:
+    | "completed"
+    | "skipped"
+    | "failed"
+    | "validation_failed"
+    | "blocked"
+    | "needs_input"
+    | "unavailable"
+    | string;
+  result_kind?:
+    | "text"
+    | "weather"
+    | "web_sources"
+    | "sources"
+    | "policy"
+    | "validation"
+    | string;
+  reason_code?: string;
+  source_count?: number;
+  domains?: string[];
+  skipped?: boolean;
+  policy?: Record<string, unknown>;
+  missing_fields?: string[];
+  [key: string]: unknown;
 }
 
 export interface SSEStatusEvent {
@@ -1314,6 +1348,8 @@ export interface ToolCallInfo {
   args?: Record<string, unknown>;
   result?: string;
   node?: string;
+  metadata?: ToolResultMetadata;
+  sources?: SourceInfo[];
 }
 
 export type DisplayRole = "thinking" | "tool" | "action" | "answer" | "artifact";
@@ -2096,6 +2132,8 @@ export interface Conversation {
   title: string;
   domain_id?: string;
   organization_id?: string;
+  model_provider?: "auto" | "google" | "zhipu" | "openai" | "openrouter" | "nvidia" | "ollama";
+  model?: string;
   created_at: string;
   updated_at: string;
   messages: Message[];
@@ -2151,6 +2189,9 @@ export interface AppSettings {
   openrouter_base_url?: string;
   openrouter_model?: string;
   openrouter_model_advanced?: string;
+  nvidia_base_url?: string;
+  nvidia_model?: string;
+  nvidia_model_advanced?: string;
   zhipu_base_url?: string;
   zhipu_model?: string;
   zhipu_model_advanced?: string;
@@ -2208,6 +2249,9 @@ export interface LlmRuntimeConfig {
   openrouter_base_url?: string | null;
   openrouter_model: string;
   openrouter_model_advanced: string;
+  nvidia_base_url?: string | null;
+  nvidia_model: string;
+  nvidia_model_advanced: string;
   zhipu_base_url?: string | null;
   zhipu_model: string;
   zhipu_model_advanced: string;
@@ -2226,6 +2270,7 @@ export interface LlmRuntimeConfig {
   google_api_key_configured: boolean;
   openai_api_key_configured: boolean;
   openrouter_api_key_configured: boolean;
+  nvidia_api_key_configured: boolean;
   zhipu_api_key_configured: boolean;
   ollama_api_key_configured: boolean;
   enable_llm_failover: boolean;
@@ -2559,6 +2604,8 @@ export interface LlmRuntimeUpdateBody {
   clear_openai_api_key?: boolean;
   openrouter_api_key?: string;
   clear_openrouter_api_key?: boolean;
+  nvidia_api_key?: string;
+  clear_nvidia_api_key?: boolean;
   zhipu_api_key?: string;
   clear_zhipu_api_key?: boolean;
   ollama_api_key?: string;
@@ -2569,6 +2616,9 @@ export interface LlmRuntimeUpdateBody {
   openrouter_base_url?: string;
   openrouter_model?: string;
   openrouter_model_advanced?: string;
+  nvidia_base_url?: string;
+  nvidia_model?: string;
+  nvidia_model_advanced?: string;
   zhipu_base_url?: string;
   zhipu_model?: string;
   zhipu_model_advanced?: string;
@@ -2626,6 +2676,7 @@ export interface LlmStatusProvider {
   reason_code?: ProviderDisabledReasonCode | null;
   reason_label?: string | null;
   selected_model?: string | null;
+  model_options?: ModelCatalogEntry[];
   strict_pin: boolean;
   verified_at?: string | null;
 }

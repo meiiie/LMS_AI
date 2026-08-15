@@ -1,0 +1,284 @@
+"""Structured metadata for direct tool result stream events."""
+
+from __future__ import annotations
+
+import json
+import unicodedata
+from typing import Any
+from urllib.parse import urlparse
+
+
+TOOL_RESULT_METADATA_VERSION = "tool_result_metadata.v1"
+
+
+def _normalize_tool_name(value: str) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _fold_text(value: str) -> str:
+    normalized = str(value or "").replace("đ", "d").replace("Đ", "D")
+    return (
+        unicodedata.normalize("NFD", normalized)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
+
+
+def _is_weather_tool(tool_name: str) -> bool:
+    normalized = _normalize_tool_name(tool_name)
+    return (
+        normalized in {"tool_current_weather", "current_weather"}
+        or "current_weather" in normalized
+        or normalized.endswith("_weather")
+    )
+
+
+def _is_search_tool(tool_name: str) -> bool:
+    normalized = _normalize_tool_name(tool_name)
+    return any(
+        token in normalized
+        for token in (
+            "web_search",
+            "search_news",
+            "search_legal",
+            "search_maritime",
+            "search_products",
+            "search_shopping",
+        )
+    )
+
+
+_SEARCH_NO_SOURCE_PHRASES = (
+    "no results",
+    "no search results",
+    "no web results",
+    "no sources",
+    "zero results",
+    "0 results",
+    "khong co ket qua",
+    "khong co nguon",
+    "khong tim thay ket qua",
+    "khong tim thay nguon",
+    "khong tim duoc ket qua",
+    "khong tim duoc nguon",
+    "chua tim duoc ket qua",
+    "chua tim duoc nguon",
+    "chua lay duoc nguon",
+)
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if not isinstance(value, str):
+        return {}
+    text = value.strip()
+    if not text.startswith("{"):
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:  # noqa: BLE001
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _is_search_no_source_result(result: Any) -> bool:
+    if result is None:
+        return True
+
+    if isinstance(result, (list, tuple, set)):
+        return len(result) == 0
+
+    if isinstance(result, dict):
+        for key in ("results", "items", "sources", "data"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return len(value) == 0
+        if any(key in result for key in ("url", "href", "link")):
+            return False
+        folded_payload = _fold_text(
+            " ".join(
+                str(result.get(key) or "")
+                for key in (
+                    "status",
+                    "reason_code",
+                    "reason",
+                    "error",
+                    "message",
+                    "summary",
+                    "answer",
+                )
+            )
+        )
+        return any(phrase in folded_payload for phrase in _SEARCH_NO_SOURCE_PHRASES)
+
+    text = " ".join(str(result or "").split())
+    if not text:
+        return True
+
+    if text[0] in "[{":
+        try:
+            parsed = json.loads(text)
+        except Exception:  # noqa: BLE001
+            parsed = None
+        if isinstance(parsed, (dict, list)):
+            return _is_search_no_source_result(parsed)
+
+    folded = _fold_text(text)
+    return any(phrase in folded for phrase in _SEARCH_NO_SOURCE_PHRASES)
+
+
+def _source_domains(sources: list[dict[str, Any]]) -> list[str]:
+    domains: list[str] = []
+    for source in sources:
+        url = str(source.get("url") or "")
+        if not url:
+            continue
+        domain = urlparse(url).netloc.replace("www.", "")
+        if domain and domain not in domains:
+            domains.append(domain)
+    return domains
+
+
+def _weather_status_metadata(result: Any) -> dict[str, str]:
+    payload = _parse_json_object(result)
+    status = _fold_text(str(payload.get("status") or ""))
+    reason = _fold_text(
+        str(
+            payload.get("reason_code")
+            or payload.get("reason")
+            or payload.get("error_code")
+            or ""
+        )
+    )
+    code = f"{status} {reason}"
+    folded = _fold_text(" ".join(str(result or "").split()))
+
+    if (
+        "provider_unconfigured" in code
+        or "not_configured" in code
+        or "missing_api_key" in code
+        or "chua co ket noi thoi tiet truc tiep" in folded
+    ):
+        return {"status": "unavailable", "reason_code": "provider_unconfigured"}
+    if (
+        "missing_location" in code
+        or "needs_location" in code
+        or "location_required" in code
+        or "ban muon xem nhiet do" in folded
+        or "thanh pho nao" in folded
+        or "can them dia diem" in folded
+    ):
+        return {"status": "needs_input", "reason_code": "missing_location"}
+    if (
+        "no_data" in code
+        or "unavailable" in code
+        or "error" in code
+        or "chua lay duoc thoi tiet" in folded
+        or "khong co du lieu thoi tiet" in folded
+    ):
+        return {"status": "unavailable", "reason_code": "no_data"}
+    if str(result or "").strip():
+        return {"status": "completed", "reason_code": "current_weather"}
+    return {"status": "unavailable", "reason_code": "empty_result"}
+
+
+def build_tool_result_event_metadata(
+    tool_name: str,
+    result: Any,
+    *,
+    sources: list[dict[str, Any]] | None = None,
+    matched: bool = True,
+    skipped_reason: str | None = None,
+    policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return optional machine-readable metadata for the UI tool timeline."""
+
+    metadata: dict[str, Any] = {
+        "schema_version": TOOL_RESULT_METADATA_VERSION,
+        "status": "completed",
+        "result_kind": "text",
+    }
+    if skipped_reason:
+        metadata.update(
+            {
+                "status": "skipped",
+                "reason_code": skipped_reason,
+                "skipped": True,
+            }
+        )
+    if policy:
+        metadata["policy"] = dict(policy)
+        if policy.get("allowed") is False:
+            metadata.update(
+                {
+                    "status": "blocked",
+                    "reason_code": str(policy.get("reason") or "policy_denied"),
+                    "result_kind": "policy",
+                }
+            )
+    if not matched:
+        metadata.update({"status": "failed", "reason_code": "unknown_tool"})
+
+    payload = _parse_json_object(result)
+    if payload.get("status") == "validation_failed":
+        metadata.update(
+            {
+                "status": "validation_failed",
+                "reason_code": "schema_validation",
+                "result_kind": "validation",
+            }
+        )
+        missing_fields = _string_list(payload.get("missing_fields"))
+        if missing_fields:
+            metadata["missing_fields"] = missing_fields
+    elif str(result or "").strip() == "Tool unavailable":
+        metadata.update({"status": "failed", "reason_code": "tool_unavailable"})
+
+    if _is_weather_tool(tool_name):
+        if metadata.get("status") in {
+            "blocked",
+            "failed",
+            "skipped",
+            "validation_failed",
+        }:
+            if metadata.get("result_kind") == "text":
+                metadata["result_kind"] = "weather"
+        else:
+            metadata.update({"result_kind": "weather"})
+            metadata.update(_weather_status_metadata(result))
+
+    source_list = sources or []
+    if source_list:
+        metadata.update(
+            {
+                "result_kind": "web_sources" if _is_search_tool(tool_name) else "sources",
+                "source_count": len(source_list),
+                "domains": _source_domains(source_list)[:5],
+            }
+        )
+    elif (
+        _is_search_tool(tool_name)
+        and metadata.get("status") == "completed"
+        and _is_search_no_source_result(result)
+    ):
+        metadata.update(
+            {
+                "status": "unavailable",
+                "reason_code": "no_sources",
+                "result_kind": "web_sources",
+                "source_count": 0,
+                "domains": [],
+            }
+        )
+    return metadata

@@ -519,6 +519,46 @@ class TestModelHealthRuntime:
             "deepseek-ai/deepseek-v4-flash"
         )
 
+    def test_custom_model_tags_runtime_model_for_metadata_contract(self):
+        provider = _make_mock_provider("nvidia")
+        requested_model = "nvidia/nemotron-3-ultra-550b-a55b"
+        provider.create_instance.return_value.model_name = "qwen/qwen3-next-80b-a3b-instruct"
+        LLMPool._providers = {"nvidia": provider}
+
+        result = LLMPool.create_llm_with_model_for_provider(
+            "nvidia",
+            requested_model,
+            ThinkingTier.LIGHT,
+        )
+
+        assert result is provider.create_instance.return_value
+        assert provider.create_instance.call_args.kwargs["model_name"] == requested_model
+        assert getattr(result, "_wiii_provider_name") == "nvidia"
+        assert getattr(result, "_wiii_requested_provider") == "nvidia"
+        assert getattr(result, "_wiii_model_name") == requested_model
+
+    def test_cached_custom_model_is_retagged_with_requested_runtime_model(self):
+        provider = _make_mock_provider("nvidia")
+        requested_model = "nvidia/nemotron-3-ultra-550b-a55b"
+        LLMPool._providers = {"nvidia": provider}
+
+        first = LLMPool.create_llm_with_model_for_provider(
+            "nvidia",
+            requested_model,
+            ThinkingTier.LIGHT,
+        )
+        first._wiii_model_name = "qwen/qwen3-next-80b-a3b-instruct"
+
+        second = LLMPool.create_llm_with_model_for_provider(
+            "nvidia",
+            requested_model,
+            ThinkingTier.LIGHT,
+        )
+
+        assert second is first
+        assert provider.create_instance.call_count == 1
+        assert getattr(second, "_wiii_model_name") == requested_model
+
 
 class TestRequestScopedRouting:
     @pytest.mark.asyncio
