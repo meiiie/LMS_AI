@@ -1,0 +1,78 @@
+name: Wiii Repository Harness
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'VERSION'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'docs/**'
+      - 'tools/release/**'
+      - 'tools/wiii_self_harness/**'
+      - '.github/workflows/**'
+      - 'wiii-desktop/package.json'
+      - 'wiii-desktop/package-lock.json'
+      - 'wiii-desktop/src-tauri/Cargo.toml'
+      - 'wiii-desktop/src-tauri/Cargo.lock'
+      - 'wiii-desktop/src-tauri/tauri.conf.json'
+      - 'wiii-desktop/src/lib/constants.ts'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'VERSION'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'docs/**'
+      - 'tools/release/**'
+      - 'tools/wiii_self_harness/**'
+      - '.github/workflows/**'
+      - 'wiii-desktop/package.json'
+      - 'wiii-desktop/package-lock.json'
+      - 'wiii-desktop/src-tauri/Cargo.toml'
+      - 'wiii-desktop/src-tauri/Cargo.lock'
+      - 'wiii-desktop/src-tauri/tauri.conf.json'
+      - 'wiii-desktop/src/lib/constants.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  repository-harness:
+    name: Repository contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+
+      - name: Test release and harness tooling
+        run: |
+          python -m unittest tools.release.test_wiii_release -v
+          python -m unittest discover -s tools/wiii_self_harness -p 'test_*.py' -v
+
+      - name: Run repository harness
+        run: python tools/wiii_self_harness/run_wiii_repository_harness.py --profile pr --json --out artifacts/wiii-repository-harness.json
+
+      - name: Render runtime evidence coverage
+        run: python tools/wiii_self_harness/report_runtime_evidence_coverage.py --format json --out artifacts/wiii-runtime-evidence-coverage.json
+
+      - name: Upload harness reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wiii-repository-harness-${{ github.run_id }}
+          path: artifacts/*.json
+          if-no-files-found: warn
+          retention-days: 14
