@@ -73,7 +73,8 @@ decoded certificate.
 
 Before a stable tag is created:
 
-1. The release PR is merged with required review and checks.
+1. The release PR is merged through the required PR/check gates; independent
+   release or security review is requested when an eligible reviewer is available.
 2. `python tools/release/wiii_release.py check` passes.
 3. `CHANGELOG.md` contains a dated, non-empty section for the version.
 4. The repository harness and desktop test/build gates pass.

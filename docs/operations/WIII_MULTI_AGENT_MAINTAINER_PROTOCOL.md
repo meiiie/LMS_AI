@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-04-24
+Last updated: 2026-08-16
 
 Applies to: Codex agents, human maintainers, CodeRabbit, PR ownership, file ownership, review gates, conflict control
 
@@ -99,16 +99,14 @@ Do not hand off vague state such as "mostly done" or "needs cleanup" without fil
 Minimum gates for `main`:
 
 - Pull request required.
-- At least one approving review required.
-- CODEOWNERS review required where ownership applies.
-- Stale approvals dismissed on new commits.
-- Last push approval required when available.
+- Zero approving reviews required; request review according to risk and expertise.
+- CODEOWNERS routes expertise but is not a merge gate.
 - All review conversations resolved.
-- CodeRabbit check required.
+- Strict `Gate Summary` required.
 - Force pushes blocked.
 - Branch deletion blocked.
 
-CI checks should become required after the current failing workflows are stabilized. Until then, CI failures must be visible in the PR and explicitly addressed in the merge decision.
+All relevant CI failures must be visible and addressed in the merge decision even when only the aggregate `Gate Summary` is configured as a required context.
 
 ## CodeRabbit Operating Rules
 

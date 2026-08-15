@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-04-24
+Last updated: 2026-08-16
 
 Applies to: `main`, release branches, hotfix branches, merge-queue config, required checks, review requirements, agent PR hygiene
 
@@ -12,7 +12,7 @@ Applies to: `main`, release branches, hotfix branches, merge-queue config, requi
 
 Branch protection is configured in GitHub's UI, not in a file. If the UI config drifts from policy, the repo quietly loses its guarantees. This document is the single source of truth: maintainers reconcile GitHub settings against this file, and any change to policy must land here first.
 
-This matters more for Wiii than for a typical repo because multiple AI agents (Codex, Claude, CodeRabbit, and more in future) file pull requests in parallel. Without branch protection that is explicit and strict, agent-volume alone can merge unreviewed behavioral changes.
+This matters more for Wiii than for a typical repo because multiple AI agents (Codex, Claude, CodeRabbit, and more in future) file pull requests in parallel. Branch protection must guarantee traceability and machine-verifiable evidence without manufacturing approval through a second account controlled by the same maintainer.
 
 ## `main` — Required Settings
 
@@ -21,42 +21,40 @@ Configure under **Settings → Branches → Branch protection rules → `main`**
 ### Review requirements
 
 - **Require a pull request before merging**: ✅
-- **Required approving reviews**: **1 minimum** (2 for any PR that touches `app/auth/**`, `app/core/**`, `alembic/**`, or `.github/workflows/**`)
-- **Dismiss stale reviews when new commits are pushed**: ✅
-- **Require review from Code Owners**: ✅
-- **Restrict who can dismiss reviews**: maintainers only
-- **Allow specified actors to bypass required pull requests**: ❌ (even hotfixes go through a PR — use a fast path with reduced review count, never a bypass)
+- **Required approving reviews**: **0**
+- **Dismiss stale reviews when new commits are pushed**: ❌
+- **Require review from Code Owners**: ❌
+- **Require approval of the most recent push**: ❌
+- **Allow specified actors to bypass required pull requests**: ❌
+
+Reviews remain encouraged and risk-based. `CODEOWNERS` routes expertise and review requests, but neither a human approval nor a second maintainer account is a merge token. Actionable review findings and every review conversation still must be resolved.
 
 ### Status check requirements
 
 - **Require status checks to pass before merging**: ✅
 - **Require branches to be up to date before merging**: ✅
-- **Required status checks** (exact names must match the workflow jobs):
-  - `Lint` (from `ci.yml`)
-  - `Unit Tests` (from `ci.yml`)
-  - `Docker Build` (from `ci.yml`)
-  - `test-backend` (from `test-backend.yml`)
-  - `test-desktop` (from `test-desktop.yml`)
-  - `CodeRabbit` commit status (set by `.coderabbit.yaml`'s `fail_commit_status: true`)
+- **Required status check**: `Gate Summary` from `merge-gate.yml`
+
+`Gate Summary` is the stable aggregate contract. It fails closed when the change-specific backend, desktop, governance, hygiene, or reviewability gates it owns do not pass. Other CI, CodeQL, image, security, and release checks remain visible evidence and should be allowed to finish before high-risk merges even when GitHub does not list them as separate required contexts.
 
 ### Merge rules
 
 - **Require conversation resolution before merging**: ✅ (CodeRabbit-suggested conversations count)
-- **Require signed commits**: ✅ (humans use GPG/SSH signing; agents sign with an attributable identity — see _Agent identity_ below)
+- **Require signed commits**: ❌ (recommended, but not enforced until every supported automation identity can sign reliably)
 - **Require linear history**: ✅ (squash or rebase — no merge commits)
 - **Require deployments to succeed before merging**: ❌ (deployments are manual for now)
 - **Lock branch**: ❌
-- **Do not allow bypassing the above settings**: ⚠️ **Admins may bypass** (`enforce_admins: false`). See "Admin override policy" below for rationale. Non-admin collaborators remain bound.
+- **Do not allow bypassing the above settings**: ⚠️ `enforce_admins: false`; normal owner workflow still uses a PR and waits for `Gate Summary`. Admin bypass is reserved for documented recovery.
 
 ### Push rules
 
-- **Restrict who can push to matching branches**: ✅ (only merge-queue automation or maintainer-triggered merge)
+- **Restrict who can push to matching branches**: ❌ (the required-PR rule is the write boundary)
 - **Allow force pushes**: ❌
 - **Allow deletions**: ❌
 
-### Merge queue (recommended once agent PR volume > ~20/week)
+### Merge queue (optional once agent PR volume > ~20/week)
 
-- **Require merge queue**: ✅
+- **Require merge queue**: ❌ today
 - **Merge method**: Squash
 - **Build concurrency**: 5
 - **Minimum group size**: 1 (one PR per queue entry — merging groups risks coupling unrelated changes)
@@ -90,51 +88,22 @@ Automated agents that push commits or open PRs must:
 
 Why: agent-produced commits under a human's account distort attribution and make post-incident review harder. A bot account with a verified key is explicit and revocable.
 
-## Admin override policy (`enforce_admins: false`)
+## Owner-directed risk-based review policy
 
-Adopted: 2026-04-25.
+Adopted: 2026-08-16, tracked by issue #925.
 
-The main branch keeps every review and status-check rule active, but **admins are exempt from them** (`enforce_admins: false` in the GitHub UI). Practical effect:
+Wiii requires PR traceability, a current `Gate Summary`, linear history, and resolution of review conversations. It does not require an approval, CODEOWNERS approval, stale-review dismissal, or last-push approval at the branch level. This removes the incentive to switch to `@wiiiii123` merely to manufacture an approval from another account controlled by the same maintainer.
 
-- `@meiiie` (admin) can merge own PRs with `gh pr merge --admin --squash`. No secondary approval required.
-- `@wiiiii123` (write) is still bound: needs an approving review from a code owner who is not the PR author.
-- CodeRabbit, status checks, conversation resolution, and signed-commit requirements continue to apply to non-admins.
+`CODEOWNERS` remains useful ownership and routing metadata. Review should be requested when an independent reviewer with relevant expertise is available, especially for security, identity, migrations, release signing, tool execution, and workflow changes. If no independent reviewer is available, the PR owner records risk, rollback, and verification evidence and waits for all relevant automated checks.
 
-Why this is a considered policy, not a bypass:
+`enforce_admins: false` remains a recovery valve, not the normal merge path. A use of `--admin` that skips a required setting is a bypass event and must be logged. Reconsider mandatory approvals when the project has at least two genuinely independent active maintainers or if incident evidence shows the risk-based policy is insufficient.
 
-- The alternative — routing every @meiiie-authored PR through @wiiiii123 — adds a manual account-switch step per PR. Over the multi-agent workflow (Dependabot queue, Codex / Claude PRs, governance fixes), that friction produces more risk-of-error from fatigue than it removes from missed review.
-- `@meiiie` is the sole architectural owner of the repo. A one-person review lane is honest about the situation rather than theatrical.
-- CodeRabbit's automated review still runs on every PR, producing a diff analysis that @meiiie reads before merging. That is the actual safety net, not the GitHub approve button.
+## CODEOWNERS routing
 
-When to reconsider:
+- **@meiiie** — primary maintainer and repository admin.
+- **@wiiiii123** — secondary ownership contact retained for routing and continuity.
 
-- If a third maintainer joins who can routinely review @meiiie's PRs, re-enable `enforce_admins: true` and remove admin override.
-- If a production incident is traced to an unreviewed @meiiie merge, re-enable `enforce_admins: true` and accept the friction.
-- If the Dependabot queue causes noise but no real review, tighten auto-merge instead of lowering review bars further.
-
-Accountability:
-
-- Every admin merge is still recorded in `git log` with the PR link and the merger's identity. `git log --grep "(#[0-9]*)"` on main yields the audit trail.
-- CodeRabbit's commit status on the PR is the best available pre-merge signal when @meiiie self-reviews.
-
-## Second code owner — avoiding the self-approval deadlock
-
-GitHub forbids self-approval of a PR. If `CODEOWNERS` has only one owner and that owner authors a PR, branch protection cannot be satisfied without a bypass (see `BYPASS_LOG.md`).
-
-Wiii's current second-owner setup:
-
-- **@meiiie** — primary maintainer, repository admin.
-- **@wiiiii123** — secondary code owner, added 2026-04-24 as `write` collaborator.
-
-Both appear on every `CODEOWNERS` line joined with a space, which GitHub treats as an OR — any one of the listed owners can satisfy the required-review gate. This means:
-
-- PRs authored by @meiiie can be approved by @wiiiii123.
-- PRs authored by @wiiiii123 can be approved by @meiiie.
-- Neither can approve their own PRs, which is the correct safety boundary.
-
-If a third owner is added later (e.g., a dedicated maintainer bot), append `@<login>` to the same lines; do **not** duplicate path entries with different owners on separate lines, because GitHub then requires approval from each of the duplicate lines.
-
-Reconciliation: if either code owner becomes inactive for >30 days, open an Ops issue to add a replacement. Do not leave the project with only one effective reviewer — that is how bypass events happen.
+Both may review, but neither identity is required to unlock a merge. Add future owners to represent real responsibility, not to satisfy a mechanical approval count.
 
 ## Bypass and emergency repair
 
@@ -146,7 +115,7 @@ Reconciliation: if either code owner becomes inactive for >30 days, open an Ops 
 
 ## Dependabot and automated PRs
 
-- Dependabot PRs inherit the same review gate (1 reviewer, CodeRabbit) but may use a reduced check set (lint + unit tests only) to let security patches merge quickly.
+- Dependabot PRs require a PR, the current required checks, and resolved conversations; approval remains risk-based.
 - Auto-merge is permitted **only** for:
   - Patch updates
   - Security-only updates
@@ -155,7 +124,7 @@ Reconciliation: if either code owner becomes inactive for >30 days, open an Ops 
 
 ## Review escalation for sensitive paths
 
-For PRs touching any of these paths, require 2 approvals and explicit CodeRabbit sign-off:
+For PRs touching any of these paths, request independent domain review when available and wait for all relevant automated checks:
 
 - `maritime-ai-service/app/auth/**` — identity, tokens, OAuth flows
 - `maritime-ai-service/app/core/security*.py` — authorization, role resolution
@@ -169,13 +138,13 @@ These paths are also flagged in `.coderabbit.yaml` `path_instructions` for deepe
 
 Maintainer re-walks this list each quarter and opens an `Operations` issue for any drift:
 
-1. GitHub UI `main` rule matches the _Required Settings_ section above (including `enforce_admins: false` — see "Admin override policy").
-2. `CODEOWNERS` file is current (both @meiiie and @wiiiii123 on every path).
+1. GitHub UI `main` rule matches the _Required Settings_ section above: PR required, zero required approvals, strict `Gate Summary`, conversation resolution, linear history, and no force-push/deletion.
+2. `CODEOWNERS` reflects real routing responsibility; it is not treated as a required-review gate.
 3. `.github/workflows/*.yml` job names still match the _Required status checks_ list.
 4. `.coderabbit.yaml` is present and has not been disabled.
 5. Dependabot auto-merge allowlist has not silently expanded.
 6. No bypass events were unlogged.
-7. Admin-override policy is still appropriate — see the "When to reconsider" list in "Admin override policy".
+7. The risk-based review policy still matches maintainer capacity and incident evidence.
 
 ## Related Documents
 

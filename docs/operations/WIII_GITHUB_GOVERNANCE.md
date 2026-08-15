@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-05-19
+Last updated: 2026-08-16
 
 Applies to: issues, pull requests, branch protection, reviews, CodeRabbit, labels, merge readiness, release hygiene
 
@@ -12,7 +12,7 @@ Applies to: issues, pull requests, branch protection, reviews, CodeRabbit, label
 
 GitHub is the operational control plane for Wiii engineering work.
 
-Every non-trivial change must be traceable from issue to branch to pull request to verification evidence. The default standard is not "code exists"; the standard is "reviewers can understand scope, risk, validation, and rollback without reconstructing the investigation from chat history."
+Every non-trivial change must be traceable from issue to branch to pull request to verification evidence. The default standard is not "code exists"; the standard is "a maintainer or reviewer can understand scope, risk, validation, and rollback without reconstructing the investigation from chat history."
 
 For multi-agent work, also follow `WIII_MULTI_AGENT_MAINTAINER_PROTOCOL.md`.
 
@@ -23,7 +23,7 @@ For multi-agent work, also follow `WIII_MULTI_AGENT_MAINTAINER_PROTOCOL.md`.
 3. Keep commits scoped and reviewable.
 4. Open a draft PR early for visibility.
 5. Move to ready-for-review only after verification evidence is present.
-6. Merge only when branch protection, review, and risk gates pass.
+6. Merge only when branch protection and risk gates pass and every actionable review finding is resolved.
 
 ## Naming Standard
 
@@ -222,8 +222,8 @@ Every PR must avoid:
 
 Minimum review expectations:
 
-- One approving review for normal changes.
-- Owner review for auth, identity, memory, migration, tenant isolation, provider runtime, deployment, or GitHub governance changes.
+- Request review when an independent reviewer with relevant expertise is available; no approval is a branch-level merge token.
+- Request owner or domain review for auth, identity, memory, migration, tenant isolation, provider runtime, deployment, release, or GitHub governance changes. If unavailable, record that fact plus risk, rollback, and stronger verification evidence.
 - Reviewability gate passing for normal PRs. The default limit is 150 changed files and 20,000 total changed lines.
 - CodeRabbit review/check resolved or explicitly documented as not applicable.
 - Codex Review requested for high-risk changes once enabled, or explicitly documented as not required.
@@ -262,22 +262,19 @@ Do not treat a green CodeRabbit status as sufficient when CodeRabbit states that
 
 ## Current Branch Protection Baseline
 
-As of 2026-04-26, `main` is configured with:
+As of 2026-08-16, `main` is configured with:
 
 - Pull request required before merge.
-- One approving review required.
-- CODEOWNERS review required.
-- Stale approvals dismissed when new commits are pushed.
-- Last push approval required.
+- Zero approving reviews required.
+- CODEOWNERS review not required; CODEOWNERS remains routing metadata.
+- Stale-review dismissal and last-push approval not required.
 - Conversation resolution required.
 - Branches must be up to date before merge.
-- `CodeRabbit` required as a status check.
-- Admin enforcement enabled.
+- Strict `Gate Summary` required as the stable aggregate status check.
+- Admin enforcement disabled; admin bypass is recovery-only and must be logged.
 - Linear history required.
 - Force pushes disabled.
 - Branch deletion disabled.
-
-After `.github/workflows/merge-gate.yml` is merged into `main`, add `Gate Summary` as a required status check. Do not add the check before the workflow exists on `main`, or open PRs can become stuck on a missing required context.
 
 Verify the live baseline with:
 
@@ -291,25 +288,17 @@ gh api repos/meiiie/wiii/branches/main/protection \
 Configure `main` with:
 
 - Require pull request before merge.
-- Require at least one approval.
-- Dismiss stale approvals when new commits are pushed.
-- Require CODEOWNERS review.
-- Require last push approval when available.
+- Require zero approvals; use review based on risk and reviewer availability.
+- Do not require CODEOWNERS or last-push approval.
 - Require conversation resolution before merge.
-- Require the `CodeRabbit` status check.
-- Require the `Gate Summary` status check after the merge-gate workflow is stable on `main`.
-- Require branches to be up to date before merge when practical.
+- Require strict `Gate Summary`.
+- Keep CodeRabbit, Codex Review, CodeQL, full CI, images, security, and release validation as visible evidence; wait for relevant checks on high-risk changes.
+- Require branches to be up to date before merge.
 - Block force pushes.
 - Block branch deletion.
 - Restrict who can bypass protections.
 
-Recommended required checks:
-
-- CodeRabbit.
-- Gate Summary.
-- CodeQL checks after they are consistently green across representative PRs.
-
-Do not require currently failing CI checks until they are made consistently green on `main`; otherwise branch protection becomes noise instead of a control.
+Do not add unstable job names directly to branch protection. Evolve `Gate Summary` as the versioned aggregate contract so renames and conditional jobs cannot strand open PRs on missing contexts.
 
 ## CodeRabbit Policy
 
@@ -338,7 +327,7 @@ Repository policy:
 - Keep a top-level `AGENTS.md` with a `## Review guidelines` section for Codex.
 - Use manual `@codex review` comments for high-risk PRs until the team confirms the noise level is acceptable.
 - Consider enabling Automatic reviews only after several useful manual reviews.
-- Treat Codex Review as an additional P0/P1-focused review signal, not as a replacement for CodeRabbit, CODEOWNERS, or maintainer accountability.
+- Treat Codex Review as an additional P0/P1-focused review signal, not as a replacement for required CI or maintainer accountability.
 - Resolve, defer with rationale, or explicitly reject actionable Codex findings before merge.
 - If Codex Review is not run on a high-risk PR, document why in the PR body.
 
@@ -357,7 +346,7 @@ As the team grows, split ownership by area:
 - AI runtime/provider layer.
 - Documentation/governance.
 
-Do not add fictional teams or inactive owners. CODEOWNERS must route reviews to people who can actually approve.
+Do not add fictional teams or inactive owners. CODEOWNERS must route review requests to people who actually own or understand the affected surface; ownership does not create a mandatory approval gate.
 
 ## Label Taxonomy
 
