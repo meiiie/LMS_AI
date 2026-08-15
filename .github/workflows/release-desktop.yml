@@ -1,6 +1,15 @@
 name: Desktop Release
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-desktop.yml'
+      - 'tools/release/**'
+      - 'docs/releases/**'
+      - 'wiii-desktop/src-tauri/tauri.conf.json'
+      - 'VERSION'
+      - 'CHANGELOG.md'
   workflow_dispatch:
   push:
     tags:
@@ -14,10 +23,79 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-windows:
-    name: Build Windows release
-    runs-on: windows-latest
-    timeout-minutes: 45
+  validate:
+    name: Validate release commit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: wiii-desktop/package-lock.json
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          arguments=(tools/release/wiii_release.py check --out artifacts/release-check.json)
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            arguments+=(--tag "${{ github.ref_name }}")
+          fi
+          python "${arguments[@]}"
+
+      - name: Run release tool tests
+        run: python -m unittest discover -s tools/release -p 'test_*.py' -v
+
+      - name: Install desktop dependencies
+        working-directory: wiii-desktop
+        run: npm ci
+
+      - name: Test desktop
+        working-directory: wiii-desktop
+        run: npm test -- --run
+
+      - name: Build web surfaces
+        working-directory: wiii-desktop
+        run: |
+          npm run build
+          npm run build:embed
+
+  build-desktop:
+    name: Build ${{ matrix.release_target }}
+    needs: validate
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - release_target: windows-x64
+            runner: windows-latest
+            rust_target: ''
+          - release_target: linux-x64
+            runner: ubuntu-22.04
+            rust_target: ''
+          - release_target: macos-arm64
+            runner: macos-latest
+            rust_target: aarch64-apple-darwin
+          - release_target: macos-x64
+            runner: macos-latest
+            rust_target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     environment: ${{ startsWith(github.ref, 'refs/tags/') && 'release' || 'candidate' }}
     permissions:
       contents: read
@@ -41,38 +119,31 @@ jobs:
           cache-dependency-path: wiii-desktop/package-lock.json
 
       - name: Select stable Rust
-        shell: pwsh
         run: rustup default stable
 
-      - name: Validate release metadata
-        shell: pwsh
-        run: |
-          $arguments = @('tools/release/wiii_release.py', 'check', '--out', 'artifacts/release-check.json')
-          if ('${{ github.ref_type }}' -eq 'tag') {
-            $arguments += @('--tag', '${{ github.ref_name }}')
-          }
-          python @arguments
+      - name: Add macOS Rust target
+        if: startsWith(matrix.release_target, 'macos-')
+        run: rustup target add '${{ matrix.rust_target }}'
 
-      - name: Run release tool tests
-        run: python -m unittest tools.release.test_wiii_release -v
+      - name: Install Linux system dependencies
+        if: matrix.release_target == 'linux-x64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils
 
       - name: Install desktop dependencies
         working-directory: wiii-desktop
         run: npm ci
 
-      - name: Test desktop
-        working-directory: wiii-desktop
-        run: npm test -- --run
-
-      - name: Build web surfaces
-        working-directory: wiii-desktop
-        run: |
-          npm run build
-          npm run build:embed
-
-      - name: Import stable code-signing certificate
-        if: startsWith(github.ref, 'refs/tags/')
-        id: signing
+      - name: Import stable Windows code-signing certificate
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        id: windows-signing
         env:
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WIII_WINDOWS_CERTIFICATE_PFX_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WIII_WINDOWS_CERTIFICATE_PASSWORD }}
@@ -90,15 +161,15 @@ jobs:
           "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
           Remove-Item -LiteralPath $certificatePath -Force
 
-      - name: Create stable signing configuration
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create stable Windows signing configuration
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
         working-directory: wiii-desktop
         shell: pwsh
         run: |
           $configuration = @{
             bundle = @{
               windows = @{
-                certificateThumbprint = '${{ steps.signing.outputs.thumbprint }}'
+                certificateThumbprint = '${{ steps.windows-signing.outputs.thumbprint }}'
                 digestAlgorithm = 'sha256'
                 timestampUrl = 'http://timestamp.digicert.com'
               }
@@ -106,39 +177,66 @@ jobs:
           }
           $configuration | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 release-signing.json
 
-      - name: Build candidate installer
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Build Windows candidate installer
+        if: matrix.release_target == 'windows-x64' && !startsWith(github.ref, 'refs/tags/')
         working-directory: wiii-desktop
         run: npm run tauri -- build --bundles nsis
 
-      - name: Build signed stable installer
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Build signed Windows stable installer
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
         working-directory: wiii-desktop
         run: npm run tauri -- build --bundles nsis --config release-signing.json
 
-      - name: Normalize and verify release assets
+      - name: Build Linux packages
+        if: matrix.release_target == 'linux-x64'
+        working-directory: wiii-desktop
+        run: npm run tauri -- build --bundles deb,appimage
+
+      - name: Create unnotarized macOS configuration
+        if: startsWith(matrix.release_target, 'macos-')
+        working-directory: wiii-desktop
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          Path('release-macos-unnotarized.json').write_text(
+              json.dumps({'bundle': {'macOS': {'signingIdentity': '-'}}}),
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Build unnotarized macOS disk image
+        if: startsWith(matrix.release_target, 'macos-')
+        working-directory: wiii-desktop
+        run: npm run tauri -- build --target '${{ matrix.rust_target }}' --bundles dmg --config release-macos-unnotarized.json
+
+      - name: Normalize release assets
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          python tools/release/normalize_desktop_bundle.py \
+            --source-root wiii-desktop/src-tauri/target \
+            --output-dir artifacts/release \
+            --release-target '${{ matrix.release_target }}' \
+            --version "$version" \
+            --git-sha '${{ github.sha }}'
+          python tools/release/wiii_release.py notes "$version" --out artifacts/release/release-notes.md
+
+      - name: Verify stable Windows signature
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
-          $version = (Get-Content VERSION -Raw).Trim()
-          $source = Get-ChildItem 'wiii-desktop/src-tauri/target/release/bundle/nsis' -Filter '*-setup.exe'
-          if ($source.Count -ne 1) { throw "Expected one NSIS installer, found $($source.Count)." }
-          $releaseDirectory = New-Item -ItemType Directory -Force -Path artifacts/release
-          $publicName = "Wiii-Workbench_${version}_windows-x64-setup.exe"
-          $installer = Join-Path $releaseDirectory.FullName $publicName
-          Copy-Item -LiteralPath $source.FullName -Destination $installer
-          if ('${{ github.ref_type }}' -eq 'tag') {
-            $signature = Get-AuthenticodeSignature -LiteralPath $installer
-            if ($signature.Status -ne 'Valid') { throw "Stable installer signature is $($signature.Status)." }
-          }
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
-          "$hash  $publicName" | Set-Content -Encoding ascii "$installer.sha256"
-          python tools/release/wiii_release.py notes $version --out artifacts/release/release-notes.md
-          python tools/release/wiii_release.py manifest --artifact $installer --version $version --git-sha '${{ github.sha }}' --out "artifacts/release/Wiii-Workbench_${version}_release-manifest.json"
+          $installer = Get-ChildItem 'artifacts/release' -Filter '*.exe'
+          if ($installer.Count -ne 1) { throw "Expected one normalized Windows installer, found $($installer.Count)." }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($signature.Status -ne 'Valid') { throw "Stable installer signature is $($signature.Status)." }
 
       - name: Upload candidate or stable bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: Wiii-Workbench-${{ github.sha }}-windows-x64
+          name: Wiii-Workbench-${{ github.sha }}-${{ matrix.release_target }}
           path: artifacts/release/*
           if-no-files-found: error
           retention-days: 30
@@ -146,32 +244,59 @@ jobs:
   publish-stable:
     name: Attest and publish stable release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build-windows
-    runs-on: ubuntu-latest
+    needs: build-desktop
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - name: Download verified release bundle
+      - name: Download verified platform bundles
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: Wiii-Workbench-${{ github.sha }}-windows-x64
-          path: artifacts/release
+          pattern: Wiii-Workbench-${{ github.sha }}-*
+          path: artifacts/platforms
+          merge-multiple: false
+
+      - name: Verify complete release matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary_count="$(find artifacts/platforms -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) | wc -l | tr -d ' ')"
+          checksum_count="$(find artifacts/platforms -type f -name '*.sha256' | wc -l | tr -d ' ')"
+          manifest_count="$(find artifacts/platforms -type f -name '*_release-manifest.json' | wc -l | tr -d ' ')"
+          [[ "$binary_count" == '5' ]] || { echo "Expected 5 binaries, found $binary_count" >&2; exit 1; }
+          [[ "$checksum_count" == '5' ]] || { echo "Expected 5 checksums, found $checksum_count" >&2; exit 1; }
+          [[ "$manifest_count" == '4' ]] || { echo "Expected 4 manifests, found $manifest_count" >&2; exit 1; }
+          find artifacts/platforms -type f -print | sort
 
       - name: Attest stable release provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-path: |
-            artifacts/release/*.exe
-            artifacts/release/*.sha256
-            artifacts/release/*-manifest.json
+            artifacts/platforms/**/*.exe
+            artifacts/platforms/**/*.deb
+            artifacts/platforms/**/*.AppImage
+            artifacts/platforms/**/*.dmg
+            artifacts/platforms/**/*.sha256
+            artifacts/platforms/**/*_release-manifest.json
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
           version="${GITHUB_REF_NAME#wiii-v}"
-          gh release create "$GITHUB_REF_NAME" artifacts/release/*.exe artifacts/release/*.sha256 artifacts/release/*-manifest.json --verify-tag --title "Wiii $version" --notes-file artifacts/release/release-notes.md
+          notes_file="$(find artifacts/platforms -type f -name release-notes.md -print -quit)"
+          [[ -n "$notes_file" ]] || { echo 'Release notes are missing.' >&2; exit 1; }
+          mapfile -d '' assets < <(
+            find artifacts/platforms -type f \
+              \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.sha256' -o -name '*_release-manifest.json' \) \
+              -print0 | sort -z
+          )
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --verify-tag \
+            --title "Wiii $version" \
+            --notes-file "$notes_file"

@@ -60,6 +60,25 @@ Shared architecture, governance, research, and brand sources live in
 
 ## Quick start
 
+### Install a desktop release
+
+Governed desktop packages are published on the
+[Wiii Releases page](https://github.com/meiiie/wiii/releases):
+
+| Platform | Package |
+| --- | --- |
+| Windows x64 | NSIS setup `.exe` |
+| Debian/Ubuntu x64 | `.deb` |
+| Other supported Linux x64 | portable `.AppImage` |
+| macOS Apple Silicon | ARM64 `.dmg` |
+| macOS Intel | x64 `.dmg` |
+
+Verify the adjacent `.sha256` file before installation. Windows stable builds
+must be Authenticode-signed. macOS packages are currently ad-hoc signed but not
+Apple-notarized, so their filenames explicitly include `unnotarized`; see the
+[release standard](docs/releases/WIII_RELEASE_STANDARD.md) for Gatekeeper and
+trust guidance.
+
 ### Desktop workbench
 
 Prerequisites: Node.js 18+, Rust, and the
@@ -103,7 +122,10 @@ cd wiii-desktop
 npx vitest run
 npx tsc --noEmit
 npm run build:embed
+# Package for the host operating system:
 npm run tauri -- build --bundles nsis
+# Linux: npm run tauri -- build --bundles deb,appimage
+# macOS: npm run tauri -- build --bundles dmg
 
 # Backend
 cd ../maritime-ai-service
@@ -111,9 +133,9 @@ pytest tests/unit/ -p no:capture --tb=short -q
 ruff check app/ --select=E9,F63,F7
 ```
 
-Windows installers are generated under
-`wiii-desktop/src-tauri/target/release/bundle/nsis/`. Generated `dist*`, target,
-coverage, and local screenshot output must stay out of source control.
+Tauri packages are generated under
+`wiii-desktop/src-tauri/target/<target?>/release/bundle/`. Generated `dist*`,
+target, coverage, and local screenshot output must stay out of source control.
 
 ## Documentation
 

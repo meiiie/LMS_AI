@@ -23,18 +23,38 @@ art. A release is invalid when any surface diverges.
 
 ### Candidate
 
-A maintainer starts `Desktop Release` manually. The workflow builds and tests
-the exact commit, emits a professionally named installer, checksum, release
-notes, and manifest, then uploads them as a GitHub Actions artifact. Candidate
-artifacts are internal evaluation builds and may be unsigned. They must never be
-presented as a public stable release.
+A maintainer starts `Desktop Release` manually. The workflow validates and
+tests the exact commit once, then builds this release matrix:
+
+| Target | Runner | Public packages | Trust state |
+| --- | --- | --- | --- |
+| Windows x64 | `windows-latest` | NSIS `.exe` | Unsigned candidate |
+| Linux x64 | Ubuntu 22.04 | Debian `.deb`, portable `.AppImage` | Checksummed, no platform signing |
+| macOS Apple Silicon | `macos-latest`, explicit `aarch64-apple-darwin` target | `.dmg` | Ad-hoc signed, not Apple-notarized |
+| macOS Intel | `macos-latest`, explicit `x86_64-apple-darwin` target | `.dmg` | Ad-hoc signed, not Apple-notarized |
+
+Each matrix member emits professionally named packages, SHA-256 sidecars,
+release notes, and a platform manifest. Candidate artifacts are internal
+evaluation builds and must never be presented as a public stable release.
+
+Ubuntu 22.04 is intentional. Tauri v2 requires WebKitGTK 4.1 and recommends
+building on the oldest supported Linux baseline to avoid raising the required
+glibc version. Linux ARM is outside the current release contract.
 
 ### Stable
 
 A stable run is triggered only by a pushed `wiii-v<version>` tag. The tag must
 match `VERSION` and point to the reviewed release commit. Stable Windows builds
-require an Authenticode certificate, pass signature verification, receive a
-GitHub artifact provenance attestation, and are published as a GitHub Release.
+require an Authenticode certificate and pass signature verification. Linux and
+macOS packages are built from that same commit. All packages, checksums, and
+manifests receive GitHub artifact provenance attestations before publication.
+
+The current macOS packages are deliberately named `unnotarized`. Tauri applies
+an ad-hoc signature so Apple Silicon can execute the application, but the files
+do not carry an Apple Developer identity or notarization ticket. This is a
+transparent transitional channel, not a claim of Apple trust. Users must verify
+the checksum and use macOS Privacy & Security to approve the application. Do
+not suggest disabling Gatekeeper globally.
 
 The workflow expects these protected repository or environment secrets:
 
@@ -59,8 +79,9 @@ Before a stable tag is created:
 5. Upgrade, persistence, and rollback risks are recorded in the PR.
 6. The tagged commit is the exact commit approved for release.
 
-The stable workflow additionally verifies the tag, installer Authenticode
-status, SHA-256 checksum, JSON manifest, and GitHub provenance attestation.
+The stable workflow additionally verifies the tag, Windows installer
+Authenticode status, the complete five-binary/four-manifest matrix, SHA-256
+sidecars, JSON manifests, and GitHub provenance attestation.
 
 ## 4. Operator commands
 
@@ -87,22 +108,57 @@ mandatory.
 
 ## 5. Artifact contract
 
-The public Windows installer name is:
+Public desktop package names are stable and architecture-explicit:
 
-`Wiii-Workbench_<version>_windows-x64-setup.exe`
+- `Wiii-Workbench_<version>_windows-x64-setup.exe`
+- `Wiii-Workbench_<version>_linux-x64.deb`
+- `Wiii-Workbench_<version>_linux-x64.AppImage`
+- `Wiii-Workbench_<version>_macos-arm64-unnotarized.dmg`
+- `Wiii-Workbench_<version>_macos-x64-unnotarized.dmg`
 
-It is published with:
+Every binary is published with `<binary>.sha256`. Each build target also emits
+`Wiii-Workbench_<version>_<target>_release-manifest.json`; the Linux manifest
+contains both Linux packages. A manifest binds file name, byte length, SHA-256
+digest, git commit, tag, and version. Stable publication also attaches
+GitHub-generated provenance attestations and release notes extracted from
+`CHANGELOG.md`.
 
-- `<installer>.sha256`
-- `Wiii-Workbench_<version>_release-manifest.json`
-- GitHub-generated provenance attestation
-- release notes extracted from `CHANGELOG.md`
+Internal executable and Tauri bundle identifiers remain stable to protect
+upgrades and installed application state.
 
-The manifest binds file name, byte length, SHA-256 digest, git commit, tag, and
-version. Internal executable and Tauri bundle identifiers remain stable to
-protect upgrades and installed application state.
+## 6. Installation and verification
 
-## 6. Rollback and incident response
+Verify the sidecar before opening a downloaded package. On PowerShell:
+
+```powershell
+$expected = (Get-Content .\Wiii-Workbench_1.2.0_windows-x64-setup.exe.sha256).Split()[0]
+$actual = (Get-FileHash .\Wiii-Workbench_1.2.0_windows-x64-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw 'Wiii checksum mismatch' }
+```
+
+On Linux:
+
+```bash
+sha256sum -c Wiii-Workbench_<version>_<package>.sha256
+```
+
+On macOS:
+
+```bash
+shasum -a 256 -c Wiii-Workbench_<version>_<package>.sha256
+```
+
+- Windows: run the NSIS installer normally. Managed automation may use the
+  standard NSIS `/S` silent switch.
+- Debian/Ubuntu: install the `.deb` with the system package manager.
+- Other supported x64 Linux distributions: mark the AppImage executable and
+  run it without installation. The AppImage includes Tauri's media framework
+  bundle so Wiii voice playback does not depend on host GStreamer packages.
+- macOS: open the DMG and drag Wiii to Applications. Until notarization is
+  enabled, verify the checksum first, then approve Wiii through System Settings
+  > Privacy & Security if Gatekeeper blocks the first launch.
+
+## 7. Rollback and incident response
 
 Do not move or reuse a published tag. If a release is defective:
 
