@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Wiii documentation
+    url: https://github.com/meiiie/wiii/tree/main/docs
+    about: Start with the architecture, product, integration, and release documentation.
   - name: Wiii operations documentation
     url: https://github.com/meiiie/wiii/tree/main/docs/operations
     about: Read governance, cleanup, and repository hygiene standards before opening maintenance work.

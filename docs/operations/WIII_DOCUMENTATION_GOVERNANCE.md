@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-05-10
+Last updated: 2026-08-15
 
 Applies to: repository documentation, operational reports, architecture notes, cleanup artifacts, release checkpoints
 
@@ -20,6 +20,7 @@ The repository may contain exploratory reports, but only reviewed documents in c
 |---|---|---|
 | `docs/README.md` | Repository documentation index | Canonical |
 | `docs/operations/` | Operational checkpoints, governance, cleanup plans, release controls | Canonical |
+| `docs/releases/` | Versioning, signing, artifact, and publication standards | Canonical |
 | `docs/plans/` | Approved design and implementation plans | Canonical after review |
 | `docs/assets/` | Documentation assets referenced by canonical docs | Canonical only when referenced or explicitly retained as source material |
 | `maritime-ai-service/docs/` | Backend architecture, integration, and deployment docs | Canonical for backend scope |
@@ -32,7 +33,7 @@ The repository may contain exploratory reports, but only reviewed documents in c
 | Class | Examples | Required handling |
 |---|---|---|
 | Source-of-truth docs | Architecture, integration contracts, governance | Reviewed PR, stable path, explicit status |
-| Operational checkpoint | Cleanup checkpoint, release readiness, runtime truth sheet | Date-stamped, evidence-backed, owner assigned |
+| Operational checkpoint | Time-bounded release readiness or incident record | Evidence-backed, owner assigned, removed after promotion |
 | Decision record | Architecture or policy decision | Include context, decision, consequences, rollback path |
 | Working report | Deep audit, debug trace, temporary inventory | Time-boxed, non-canonical, promote or archive |
 | Generated artifact | Logs, screenshots, json dumps, html reports | Keep out of canonical docs unless referenced |
@@ -44,7 +45,7 @@ The repository may contain exploratory reports, but only reviewed documents in c
 3. Link the canonical doc from `docs/README.md` or the nearest area README.
 4. Open an issue for non-trivial cleanup, governance, or architecture work.
 5. Open a PR with explicit scope, risk, verification, and rollback notes.
-6. Archive or delete superseded working reports after promotion.
+6. Delete superseded working reports after promotion; Git history is the archive.
 
 ## Retention Policy
 
@@ -53,7 +54,7 @@ Working reports should not grow without bounds.
 - Keep active reports while they are attached to an open issue or PR.
 - Promote any report that becomes operational guidance.
 - Delete untracked scratch reports after their content is consolidated.
-- Delete or archive tracked historical reports only through a separate retention PR with an explicit inventory.
+- Delete tracked historical reports only through a reviewed retention change with an explicit inventory.
 - Do not bulk-delete tracked reports, migrations, tests, data, or docs without a written inventory and review.
 - As of 2026-04-24, legacy tracked report trees were removed from source control. Do not re-add them; promote durable content into `docs/operations/` instead.
 - As of 2026-05-10, superseded checkpoint, audit, sprint-plan, and unreferenced screenshot artifacts were removed after current runbooks and issues became the source of truth.

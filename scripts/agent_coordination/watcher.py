@@ -357,9 +357,9 @@ def create_thread(config: dict[str, Any], *, title: str, body: str, apply: bool)
     repos = repo_configs(config)
     created: list[tuple[str, str]] = []
     base_body = body.strip() or (
-        "Cross-repository coordination issue for Wiii x Maritime LMS integration.\n\n"
-        "Agents should use the structured sync comment contract from "
-        "`docs/operations/WIII_LMS_AGENT_COORDINATION.md`."
+        "Cross-repository coordination issue for a Wiii Connect adapter.\n\n"
+        "Agents should use the ownership, review, and handoff rules in "
+        "`docs/operations/WIII_MULTI_AGENT_MAINTAINER_PROTOCOL.md`."
     )
     for repo in repos:
         labels = "coord:watch,integration:wiii-lms,agent:observer"
