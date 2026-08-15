@@ -1,0 +1,73 @@
+name: Integration Request
+description: Propose or coordinate a Wiii Connect adapter, host, protocol, or external application.
+title: "[Integration]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for ACP/MCP providers, desktop or web hosts, OAuth applications, document sources, LMS adapters, and other Wiii Connect work.
+  - type: textarea
+    id: objective
+    attributes:
+      label: User outcome
+      description: What should a user be able to accomplish when the integration is complete?
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Integration type
+      options:
+        - Local ACP agent
+        - MCP service
+        - Desktop or browser host
+        - External app or OAuth provider
+        - Document or data source
+        - LMS or embedded product
+        - Other Wiii Connect adapter
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Ownership and system boundary
+      description: Identify each system, repository, owner, protocol, and source of truth.
+      placeholder: |
+        Wiii owns:
+        External system owns:
+        Shared/versioned contract:
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Capabilities and data flow
+      description: List reads, writes, events, credentials, retained state, and failure behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permission, privacy, and audit model
+      description: Explain consent, least privilege, tenant boundaries, secret handling, audit evidence, and revocation.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Connection can be discovered and diagnosed
+        - [ ] Read and write capabilities are explicit
+        - [ ] Mutations require preview and approval where applicable
+        - [ ] Disconnect/revoke and recovery paths are verified
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk and rollback
+      description: Cover partial failure, unknown outcomes, incompatible versions, and how to disable or roll back safely.
+    validations:
+      required: true

@@ -2061,7 +2061,7 @@
       "id": "lms-test-course-replay",
       "title": "LMS test-course preview/apply replay evidence",
       "layer": "Wiii Host",
-      "workflow": ".github/workflows/lms-test-course-evidence.yml",
+      "workflow": ".github/workflows/wiii-connect-lms-adapter-evidence.yml",
       "artifact": "lms-test-course-evidence.json",
       "schema_version": "wiii.live_lms_test_course_replay.v1",
       "freshness": {

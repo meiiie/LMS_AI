@@ -29,7 +29,8 @@ body:
         - RAG/retrieval
         - LLM/provider runtime
         - Tools/MCP
-        - LMS/embed/host context
+        - Integrations/ACP/MCP/host context
+        - LMS/embed adapter
         - Desktop frontend
         - Database/migrations
         - Documentation/governance

@@ -1,139 +1,61 @@
-# Wiii Backend Service
+# Wiii Core service
 
-This service is the FastAPI backend for Wiii. It handles chat orchestration, multi-agent routing, retrieval, memory, LMS integration, organization-aware access control, streaming, and production deployment packaging.
+This directory contains Wiii's FastAPI runtime. It serves chat and streaming,
+model/tool orchestration, retrieval, memory, organizations, host actions, Wiii
+Connect, and production health controls. LMS functionality is implemented as a
+Wiii Connect adapter; it does not define the service architecture.
 
-Use this README as the backend entry point. For full architecture detail, defer to the architecture and integration documents linked below.
+## Read first
 
-## What This Service Owns
+- [System architecture](docs/architecture/SYSTEM_ARCHITECTURE.md)
+- [Request and streaming flow](docs/architecture/SYSTEM_FLOW.md)
+- [API guide](docs/api/README.md)
+- [Wiii Connect LMS adapter](docs/integration/WIII_CONNECT_LMS_ADAPTER.md)
+- [Local development](docs/LOCAL_DEV.md)
+- [Deployment](scripts/deploy/README.md)
 
-- FastAPI API surface for chat, streaming, threads, auth, organizations, admin, LMS, and health endpoints
-- request middleware for request IDs, organization context, auth, and rate limiting
-- `ChatOrchestrator` pipeline, session handling, domain routing, and output shaping
-- WiiiRunner multi-agent execution across RAG, tutor, memory, direct-response, Code Studio, product search, and tool-assisted flows
-- retrieval and memory subsystems backed by PostgreSQL, pgvector, sparse search, and optional Neo4j context
-- LMS token exchange, webhook ingestion, dashboard/data pull endpoints, and tool exposure
-- production packaging, runtime config validation, and Docker Compose deployment assets
+## Local start
 
-## Authoritative Docs
-
-- `docs/architecture/SYSTEM_ARCHITECTURE.md`: primary architecture reference
-- `docs/architecture/SYSTEM_FLOW.md`: request and streaming flow reference
-- `docs/integration/WIII_LMS_INTEGRATION.md`: LMS contract and security model
-- `scripts/deploy/README.md`: deployment runbook
-
-## Runtime Flow
-
-The main request path is:
-
-1. HTTP or SSE request enters the API router.
-2. Middleware applies request correlation, organization context, rate limiting, and auth.
-3. `ChatOrchestrator` resolves session state and domain/plugin context.
-4. `WiiiRunner` routes work into retrieval, tutoring, memory, direct response, Code Studio, product search, or external tools.
-5. The output layer formats the final response as JSON or SSE V3 events.
-6. Background tasks update facts, insights, or other post-response state.
-
-Key supporting flows:
-
-- LMS integration adds token exchange, webhook ingestion, data pull, and insight push paths.
-- Semantic memory and learning profile paths adapt retrieval and follow-up behavior.
-- Production deploy serves `/embed/` from image-contained assets rather than from a checked-out frontend bundle.
-
-## Project Layout
-
-```text
-maritime-ai-service/
-├── app/
-│   ├── api/v1/          # HTTP, SSE, WebSocket, admin, org, LMS, and management routers
-│   ├── auth/            # Google OAuth, JWT, LMS token exchange, user/identity services
-│   ├── core/            # config, middleware, security, org context/filtering, logging
-│   ├── domains/         # domain plugins and routing
-│   ├── engine/          # RAG, multi-agent, memory, skills, tools, living-agent, MCP, context
-│   ├── integrations/    # LMS integration and external adapters
-│   ├── repositories/    # data-access layer
-│   ├── services/        # orchestrator and business workflows
-│   └── models/          # request/response and domain schemas
-├── alembic/             # database migrations
-├── docs/                # backend architecture and integration docs
-├── scripts/             # deployment and operational scripts
-└── tests/               # unit, integration, and property tests
-```
-
-## Quick Start
-
-```bash
+```powershell
 cd maritime-ai-service
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env
-```
-
-At minimum, set `GOOGLE_API_KEY` and `API_KEY` in `.env`.
-
-Start local dependencies:
-
-```bash
+Copy-Item .env.example .env
 docker compose up -d postgres neo4j minio valkey
-```
-
-Run migrations and start the app:
-
-```bash
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-API base URL:
+Configure your own development credentials in `.env`; never commit that file.
+The API normally listens at `http://127.0.0.1:8000`, with v1 routes under
+`/api/v1`.
 
-```text
-http://localhost:8000/api/v1
+## Ownership map
+
+| Path | Responsibility |
+| --- | --- |
+| `app/api/v1/` | HTTP, SSE, admin, organization, host, connector, and adapter routes |
+| `app/services/` | Request lifecycle, orchestration, model policy, output, and background work |
+| `app/engine/runtime/` | Wiii-owned execution contracts and lanes |
+| `app/engine/multi_agent/` | Planning, tool rounds, runtime ledgers, document and visual flows |
+| `app/engine/wiii_connect/` | External provider/action planning and execution policy |
+| `app/engine/semantic_memory/` | Memory lifecycle, retrieval, maintenance, and provenance |
+| `app/auth/`, `app/core/` | Identity, authorization, tenant context, settings, middleware |
+| `app/repositories/`, `alembic/` | Data access and schema migrations |
+| `tests/` | Unit, integration, property, security, and contract tests |
+
+## Verification
+
+During iteration, run the focused test module for the changed contract. Before
+merging a backend-wide change:
+
+```powershell
+pytest tests/unit/ -p no:capture --tb=short -q
+ruff check app/ --select=E9,F63,F7
+python -m compileall -q app
 ```
 
-## Testing
-
-### Unit tests
-
-```bash
-cd maritime-ai-service
-set PYTHONIOENCODING=utf-8 && pytest tests/unit/ -p no:capture --tb=short -q
-```
-
-### Integration tests
-
-```bash
-cd maritime-ai-service
-pytest -m integration
-```
-
-### Property tests
-
-```bash
-cd maritime-ai-service
-pytest tests/property/
-```
-
-## Deployment Notes
-
-Production deploys use image tags, not host-side frontend rebuilds.
-
-Current production packaging model:
-
-- `scripts/deploy/.env.production.template` provides the required env shape
-- `Dockerfile.prod` packages the backend app together with embed assets at `/app-embed`
-- `nginx/Dockerfile.prod` packages the nginx layer together with embed assets at `/usr/share/nginx/embed`
-- `.github/workflows/build-production-images.yml` builds and publishes immutable images to GHCR on push to `main`
-- `scripts/deploy/smoke-test.sh` verifies health, `/embed/`, and chat behavior after rollout
-
-Use the deployment runbook for operational steps:
-
-- `scripts/deploy/README.md`
-
-## Related Entry Points
-
-- `../README.md`: repository overview
-- `docs/architecture/README.md`: architecture docs index
-- `docs/integration/WIII_LMS_INTEGRATION.md`: LMS contract
-
-## License
-
-See `../LICENSE` for repository licensing terms.
+Changes to live-provider claims must also update or run the appropriate guarded
+runtime evidence probe. Test fixtures prove behavior and schema; they do not
+prove a real external service accepted a request.

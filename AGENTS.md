@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-04-27
+Last updated: 2026-08-15
 
 Applies to: Codex, Claude Code, CodeRabbit, and other AI-assisted engineering agents working in this repository.
 
@@ -12,14 +12,39 @@ This file is the repository-level instruction source for Wiii. Codex also reads 
 
 ## Repository Context
 
-Wiii is a production-oriented multi-domain agentic RAG platform with a FastAPI backend, WiiiRunner orchestration, PostgreSQL/pgvector, optional Neo4j graph context, LMS integration, and a Tauri v2 desktop client. LangGraph is no longer an active runtime dependency; remaining LangGraph references should be treated as historical, compatibility, or cleanup-tracking context unless a specific file proves otherwise.
+Wiii is an open-source durable AI workbench for conversations, local and cloud agents, project files, tools, memory, artifacts, and permission-aware integrations. It combines a FastAPI backend, WiiiRunner orchestration, PostgreSQL/pgvector, optional Neo4j graph context, ACP/MCP and host integrations, and a Tauri v2 desktop client. LMS is one Wiii Connect adapter, not the product boundary. LangGraph is no longer an active runtime dependency; remaining LangGraph references should be treated as historical, compatibility, or cleanup-tracking context unless a specific file proves otherwise.
 
 Primary areas:
 
-- `maritime-ai-service/`: FastAPI backend, auth, organization context, multi-agent orchestration, RAG, memory, LMS integration, deployment assets, tests.
-- `wiii-desktop/`: Tauri v2 desktop app, React 18, TypeScript, Zustand stores, SSE V3 streaming UI, embed app, frontend tests.
+- `maritime-ai-service/`: FastAPI backend, auth, organization context, multi-agent orchestration, RAG, memory, integrations, deployment assets, tests.
+- `wiii-desktop/`: Tauri v2 desktop app, React 18, TypeScript, Neko Chill ACP workspace, Zustand stores, SSE V3 streaming UI, embed app, frontend tests.
 - `docs/`: repository-level architecture, operations, governance, plans, and assets.
 - `.github/`: issue templates, PR template, CODEOWNERS, GitHub Actions, Dependabot, and review automation.
+
+## Wiii + Neko Brand Memory
+
+The approved identity is persistent repository truth, not a temporary chat
+decision. Before changing any product mark, mascot, app icon, companion motion,
+or Neko-facing voice, read:
+
+- `docs/assets/brand/neko-family-v1/README.md`
+- `docs/assets/brand/neko-family-v1/BRAND_SYSTEM.md`
+- `docs/research/neko-motion-lab/README.md` for motion work
+
+Wiii is the product and Neko is its companion. Neko Peek is the primary logo,
+app icon, avatar, and ready/listening pose. Mochi, Nap, and Tilt are supporting
+poses of the same Neko, never separate agents. Preserve the approved
+warm-ivory body, cocoa-graphite protective tail, capsule eyes, compact
+silhouette, and calm professional cuteness. Do not add a mouth, nose, whiskers,
+paws, fur, blush, pupils, eyebrows, costumes, or provider-specific recolors.
+Do not redesign or replace the approved family without explicit project-owner
+approval.
+
+Motion must be state-driven, brief, interruptible, and reduced-motion safe.
+Do not ship perpetual bobbing or decorative attention loops. Error states stay
+visually calm and communicate failure through adjacent UI text, never a sad or
+angry face. Grok or other companion products may inform interaction research,
+but their character designs and branded motion must not be copied.
 
 Legacy local agent folders such as `.claude/` and `.Codex/` are not canonical and must not be committed. Canonical governance, architecture, and cleanup truth lives in `AGENTS.md`, `docs/`, `.github/`, `.agents/skills/`, and active GitHub issues.
 

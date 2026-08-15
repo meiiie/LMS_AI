@@ -41,7 +41,7 @@ CANONICAL_DOCS = (
     "docs/WIII_PROJECT_MENTAL_MODEL.md",
     "docs/architecture/WIII_CODEBASE_MAP.md",
     "docs/architecture/WIII_WORKBENCH_IDENTITY_AND_ACP.md",
-    "docs/operations/WIII_SELF_HARNESS.md",
+    "docs/operations/WIII_REPOSITORY_HARNESS.md",
     "docs/releases/README.md",
     "docs/releases/WIII_RELEASE_STANDARD.md",
 )

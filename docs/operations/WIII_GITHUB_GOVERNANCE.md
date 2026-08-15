@@ -406,7 +406,7 @@ Examples:
 
 - `WIII_GITHUB_GOVERNANCE.md`
 - `WIII_AGENTIC_CODEBASE_HARNESS.md`
-- `WIII_REPO_RECOVERY_AUDIT_2026-05-19.md`
+- `WIII_RELEASE_STANDARD.md`
 
 Local scratch artifacts must stay ignored unless explicitly promoted:
 
@@ -417,8 +417,8 @@ Local scratch artifacts must stay ignored unless explicitly promoted:
 
 Release and deploy identifiers must be traceable to git:
 
-- Human release notes: `YYYY-MM-DD <scope> release`.
-- Git tags, when used: `wiii-vYYYY.MM.DD.N`.
+- Human release notes: Keep a Changelog sections keyed by SemVer.
+- Stable Git tags: `wiii-v<SemVer>`, for example `wiii-v1.2.0`.
 - Container/deploy references must include an immutable commit SHA or digest.
 - Smoke sessions should include issue or PR context when practical, for example
   `smoke-pr400-raw-tool-call-json`.
