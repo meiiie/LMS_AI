@@ -110,12 +110,14 @@ queried independently.
 2. Every spec references an existing task.
 3. Every run references an existing task and environment.
 4. A run's environment belongs to the same project as its task.
-5. Every agent session, artifact, evidence and approval references an existing
+5. An environment's workspace, when present, belongs to the same project.
+6. Every agent session, artifact, evidence and approval references an existing
    run.
-6. Evidence artifact IDs belong to the same run.
-7. Attention references, when present, must form one consistent
+7. Evidence artifact IDs belong to the same run; an approval's optional agent
+   session belongs to the approval's run.
+8. Attention references, when present, must form one consistent
    project/task/run/session chain.
-8. Provider session IDs never determine task or run identity.
+9. Provider session IDs never determine task or run identity.
 
 ## Persistence direction
 

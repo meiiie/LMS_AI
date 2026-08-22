@@ -13,45 +13,47 @@
 
 ## Phase 2: Wiii ADE ontology (US1)
 
-- [ ] T101 [US1] Add failing graph-validation tests in
+- [x] T101 [US1] Add failing graph-validation tests in
   `wiii-desktop/src/__tests__/ade/domain.test.ts`.
-- [ ] T102 [US1] Implement JSON-compatible entity contracts and graph
+- [x] T102 [US1] Implement JSON-compatible entity contracts and graph
   validation in `wiii-desktop/src/ade/domain.ts`.
-- [ ] T103 [US1] Prove one task can own multiple runs/sessions without identity
+- [x] T103 [US1] Prove one task can own multiple runs/sessions without identity
   conflation.
 
 ## Phase 3: Neko control and provider truth (US2)
 
-- [ ] T201 [US2] Add failing control envelope/version tests in
+- [x] T201 [US2] Add failing control envelope/version tests in
   `wiii-desktop/src/__tests__/neko/control-protocol.test.ts`.
-- [ ] T202 [US2] Implement `src/neko/control-protocol.ts` with stable error
+- [x] T202 [US2] Implement `src/neko/control-protocol.ts` with stable error
   codes and fail-closed parsing.
-- [ ] T203 [US2] Add failing provider registry/launch tests in
+- [x] T203 [US2] Add failing provider registry/launch tests in
   `wiii-desktop/src/__tests__/neko/provider-registry.test.ts`.
-- [ ] T204 [US2] Implement `src/neko/contracts.ts` and
+- [x] T204 [US2] Implement `src/neko/contracts.ts` and
   `src/neko/provider-registry.ts` for Neko Core, Gemini CLI and Codex.
-- [ ] T205 [US2] Implement the replaceable Tauri control client in
+- [x] T205 [US2] Implement the replaceable Tauri control client in
   `src/neko/control-client.ts` and route agent discovery/profile/spawn through
   it.
-- [ ] T206 [US2] Derive local Workbench runtime capability entries from the
+- [x] T206 [US2] Derive local Workbench runtime capability entries from the
   production provider registry.
 
 ## Phase 4: Historical capability snapshots (US3)
 
-- [ ] T301 [US3] Add failing runtime/session-event tests for snapshot creation,
+- [x] T301 [US3] Add failing runtime/session-event tests for snapshot creation,
   round-trip validation and legacy compatibility.
-- [ ] T302 [US3] Let drivers publish established provider capabilities without
+- [x] T302 [US3] Let drivers publish established provider capabilities without
   exposing protocol-specific payloads.
-- [ ] T303 [US3] Persist the versioned capability snapshot in
+- [x] T303 [US3] Persist the versioned capability snapshot in
   `runtime-attached` events and accept legacy events without it.
-- [ ] T304 [US3] Verify unknown provider IDs and unbounded extensions fail
+- [x] T304 [US3] Verify unknown provider IDs and unbounded extensions fail
   closed.
 
 ## Phase 5: Verification and review
 
-- [ ] T401 Run focused Vitest and TypeScript checks.
-- [ ] T402 Run affected web/embed builds and repository hygiene checks.
-- [ ] T403 Update task status and architecture documentation to match the
+- [x] T401 Run focused Vitest and TypeScript checks (223 affected tests and
+  TypeScript pass).
+- [x] T402 Run full desktop tests (2,860), web/embed builds, TypeScript and
+  repository hygiene checks.
+- [x] T403 Update task status and architecture documentation to match the
   implementation exactly.
 - [ ] T404 Commit, push, open the issue-linked PR with risk/rollback evidence,
   and resolve relevant review/CI findings.
