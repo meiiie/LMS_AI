@@ -1,6 +1,7 @@
 # Research and Architecture Decisions
 
-**Issue**: #939  
+**Issue**: #939
+
 **Date**: 2026-08-23
 
 ## Decision 1: Wiii owns work; Neko owns execution

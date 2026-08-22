@@ -1,8 +1,11 @@
 # Wiii ADE and Neko Agent Fabric
 
-**Status:** Foundation implemented; product-shell and daemon migration planned  
-**Updated:** 2026-08-23  
-**Issue:** [#939](https://github.com/meiiie/wiii/issues/939)  
+**Status:** Foundation implemented; product-shell and daemon migration planned
+
+**Updated:** 2026-08-23
+
+**Issue:** [#939](https://github.com/meiiie/wiii/issues/939)
+
 **Specification:** [`specs/939-wiii-ade-neko-control/`](../../specs/939-wiii-ade-neko-control/)
 
 ## Product boundary

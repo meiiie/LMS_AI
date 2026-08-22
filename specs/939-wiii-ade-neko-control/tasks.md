@@ -1,6 +1,7 @@
 # Tasks: Wiii ADE and Neko Control Foundation
 
-**Input**: `specs/939-wiii-ade-neko-control/`  
+**Input**: `specs/939-wiii-ade-neko-control/`
+
 **Issue**: #939
 
 ## Phase 1: Specification and baseline

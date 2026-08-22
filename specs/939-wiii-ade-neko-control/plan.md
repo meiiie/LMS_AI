@@ -14,17 +14,25 @@ Do not build a daemon, database, worktree manager or ADE shell in this slice.
 ## Technical Context
 
 **Language/Version**: TypeScript 5, React 18; existing Rust/Tauri host unchanged
-except through existing commands  
+except through existing commands
+
 **Primary Dependencies**: existing Zustand, Tauri IPC/events, ACP driver,
-Codex App Server driver; no new dependency  
-**Storage**: existing versioned Neko session snapshots and append-only events  
-**Testing**: Vitest, TypeScript, existing desktop build checks  
-**Target Platform**: Windows/macOS/Linux Tauri desktop; browser fails closed  
-**Project Type**: existing desktop/web monorepo  
+Codex App Server driver; no new dependency
+
+**Storage**: existing versioned Neko session snapshots and append-only events
+
+**Testing**: Vitest, TypeScript, existing desktop build checks
+
+**Target Platform**: Windows/macOS/Linux Tauri desktop; browser fails closed
+
+**Project Type**: existing desktop/web monorepo
+
 **Performance Goals**: pure graph validation linear in entity/reference count;
-registry lookup constant time  
+registry lookup constant time
+
 **Constraints**: Vietnamese-first UI unchanged, no destructive migration, no
-provider credentials, additive persisted fields only  
+provider credentials, additive persisted fields only
+
 **Scale/Scope**: three implemented local providers and foundation contracts
 for future ADE work
 
