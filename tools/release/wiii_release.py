@@ -218,19 +218,37 @@ def find_license_mismatches(surfaces: dict[str, str]) -> dict[str, dict[str, str
     }
 
 
-def changelog_section(version: str, root: Path = ROOT) -> str:
-    version = validate_semver(version)
+def _changelog_body(label: str, heading_suffix: str, root: Path) -> str:
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     match = re.search(
-        rf"(?ms)^## \[{re.escape(version)}\](?:\s+-\s+\d{{4}}-\d{{2}}-\d{{2}})?\s*$\n(.*?)(?=^## \[|\Z)",
+        rf"(?ms)^## \[{re.escape(label)}\]{heading_suffix}\s*$\n"
+        r"(.*?)(?=^## \[|^\[[^\]]+\]:\s+https?://|\Z)",
         text,
     )
     if not match:
-        raise ValueError(f"CHANGELOG.md has no [{version}] section")
+        raise ValueError(f"CHANGELOG.md has no valid [{label}] section")
     body = match.group(1).strip()
     if not body:
-        raise ValueError(f"CHANGELOG.md [{version}] section is empty")
+        raise ValueError(f"CHANGELOG.md [{label}] section is empty")
+    return body
+
+
+def candidate_changelog_section(version: str, root: Path = ROOT) -> str:
+    version = validate_semver(version)
+    body = _changelog_body("Unreleased", "", root)
+    return f"## Wiii {version} candidate\n\n{body}\n"
+
+
+def stable_changelog_section(version: str, root: Path = ROOT) -> str:
+    version = validate_semver(version)
+    body = _changelog_body(version, r"\s+-\s+\d{4}-\d{2}-\d{2}", root)
     return f"## Wiii {version}\n\n{body}\n"
+
+
+def changelog_section(version: str, stable: bool = False, root: Path = ROOT) -> str:
+    if stable:
+        return stable_changelog_section(version, root)
+    return candidate_changelog_section(version, root)
 
 
 def verify_brand_manifest(root: Path = ROOT) -> int:
@@ -278,8 +296,9 @@ def check_repository(version: str | None = None, tag: str | None = None, root: P
             errors.append(f"license metadata is not synchronized: {affected}")
     except (KeyError, OSError, TypeError, ValueError) as exc:
         errors.append(f"license metadata could not be read: {exc}")
+    release_state = "stable" if tag else "candidate"
     try:
-        changelog_section(expected, root)
+        changelog_section(expected, stable=bool(tag), root=root)
     except ValueError as exc:
         errors.append(str(exc))
     brand_asset_count = 0
@@ -295,6 +314,7 @@ def check_repository(version: str | None = None, tag: str | None = None, root: P
         "ok": not errors,
         "version": expected,
         "tag": expected_tag,
+        "release_state": release_state,
         "brand_asset_count": brand_asset_count,
         "surfaces": surfaces,
         "mismatches": mismatches,
@@ -398,6 +418,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     notes_parser = subparsers.add_parser("notes", help="extract release notes")
     notes_parser.add_argument("version", nargs="?")
+    notes_parser.add_argument("--tag")
     notes_parser.add_argument("--out", type=Path)
 
     manifest_parser = subparsers.add_parser("manifest", help="create an artifact manifest")
@@ -421,7 +442,12 @@ def main(argv: list[str] | None = None) -> int:
             _write_json(result, None)
             return 0 if result["ok"] else 1
         if args.command == "notes":
-            notes = changelog_section(args.version or read_version())
+            version = args.version or read_version()
+            if args.tag and args.tag != canonical_tag(version):
+                raise ValueError(
+                    f"tag {args.tag!r} does not match {canonical_tag(version)!r}"
+                )
+            notes = changelog_section(version, stable=bool(args.tag))
             if args.out:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
                 args.out.write_text(notes, encoding="utf-8")

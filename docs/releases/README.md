@@ -2,13 +2,14 @@
 
 This directory defines how Wiii becomes a verifiable product release. Start
 with the [release standard](WIII_RELEASE_STANDARD.md); use `CHANGELOG.md` for
-human-facing release notes and `VERSION` for the current version.
+human-facing release state and `VERSION` for the coordinated release target.
+The version file is not evidence that a tag, artifact, or GitHub Release exists.
 
 ## Release surfaces
 
 | Surface | Source | Purpose |
 | --- | --- | --- |
-| Version | `VERSION` | Single source of truth |
+| Version target | `VERSION` | Source and package metadata alignment |
 | History | `CHANGELOG.md` | User-visible changes and migration notes |
 | Automation | `tools/release/wiii_release.py` | Synchronization, notes, hashes, manifest |
 | CI/CD | `.github/workflows/release-desktop.yml` | Windows, Linux, and macOS candidate builds plus stable publication |
@@ -21,6 +22,10 @@ and macOS Intel. macOS files remain visibly marked `unnotarized` until The Wiii
 Lab provisions Apple signing and notarization credentials. Backend and web
 deployments retain their own operational promotion gates, but use the same Wiii
 version whenever they are included in a coordinated public release.
+
+No public stable desktop release exists at present. A candidate reads notes
+from `Unreleased`; a tag-triggered stable run requires a dated section matching
+`VERSION` before any package can be published.
 
 Normal stable publication requires the complete matrix. The release standard
 defines a protected, disclosed Windows-only break-glass path for a confirmed

@@ -28,7 +28,41 @@ class ReleaseToolTests(unittest.TestCase):
         result = wiii_release.check_repository()
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["version"], "1.2.0")
+        self.assertEqual(result["release_state"], "candidate")
         self.assertFalse(result["license_mismatches"])
+
+    def test_candidate_notes_come_from_unreleased(self) -> None:
+        notes = wiii_release.candidate_changelog_section("1.2.0")
+        self.assertTrue(notes.startswith("## Wiii 1.2.0 candidate\n"))
+        self.assertIn("host-aware Workbench bootstrap", notes)
+
+    def test_stable_validation_rejects_candidate_only_metadata(self) -> None:
+        result = wiii_release.check_repository(tag="wiii-v1.2.0")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["release_state"], "stable")
+        self.assertIn(
+            "CHANGELOG.md has no valid [1.2.0] section",
+            result["errors"],
+        )
+
+    def test_stable_notes_require_and_accept_a_dated_version_section(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "CHANGELOG.md").write_text(
+                "# Changelog\n\n"
+                "## [Unreleased]\n\nCandidate work.\n\n"
+                "## [1.2.0] - 2026-08-23\n\nStable work.\n",
+                encoding="utf-8",
+            )
+            notes = wiii_release.stable_changelog_section("1.2.0", root)
+            self.assertEqual(notes, "## Wiii 1.2.0\n\nStable work.\n")
+
+            (root / "CHANGELOG.md").write_text(
+                "# Changelog\n\n## [1.2.0]\n\nUndated work.\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "no valid \\[1.2.0\\] section"):
+                wiii_release.stable_changelog_section("1.2.0", root)
 
     def test_license_surfaces_are_synchronized(self) -> None:
         surfaces = wiii_release.collect_license_metadata()
