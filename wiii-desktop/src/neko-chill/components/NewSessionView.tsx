@@ -55,16 +55,26 @@ export function NewSessionView() {
     if (!workspace || !neko) {
       setProfiles([]);
       setSelectedProfileId("");
+      setProfileLoading(false);
       return;
     }
     setProfileLoading(true);
-    void loadAgentProfiles(neko, workspace.path).then((items) => {
-      if (cancelled) return;
-      setProfiles(items);
-      const active = items.find((item) => item.active) ?? items[0];
-      setSelectedProfileId(active?.id ?? "");
-      setProfileLoading(false);
-    });
+    void loadAgentProfiles(neko, workspace.path)
+      .then((items) => {
+        if (cancelled) return;
+        setProfiles(items);
+        const active = items.find((item) => item.active) ?? items[0];
+        setSelectedProfileId(active?.id ?? "");
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setProfiles([]);
+        setSelectedProfileId("");
+        setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
     return () => {
       cancelled = true;
     };

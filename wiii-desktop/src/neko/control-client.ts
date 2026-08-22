@@ -173,6 +173,7 @@ class TauriNekoControlClient implements NekoControlClient {
     let killed = false;
     let killPromise: Promise<void> | null = null;
     const cancelRequestId = uuidv4();
+    const unresolvedWriteIds = new Map<string, string>();
     let unlistenLine: (() => void) | null = null;
     let unlistenExit: (() => void) | null = null;
 
@@ -215,13 +216,27 @@ class TauriNekoControlClient implements NekoControlClient {
 
     const transport: AcpTransport = {
       async send(line: string): Promise<void> {
-        await invokeIdempotently(invoke, "neko_control_session_write", {
-          request: {
-            requestId: uuidv4(),
-            agentSessionId: started.agentSessionId,
-            line,
-          },
-        });
+        // Keep the logical write identity after an unresolved native response.
+        // A caller retrying the same provider frame must reach Rust with the
+        // same request ID so it cannot repeat a committed side effect.
+        const requestId = unresolvedWriteIds.get(line) ?? uuidv4();
+        unresolvedWriteIds.set(line, requestId);
+        try {
+          await invokeIdempotently(invoke, "neko_control_session_write", {
+            request: {
+              requestId,
+              agentSessionId: started.agentSessionId,
+              line,
+            },
+          });
+          if (unresolvedWriteIds.get(line) === requestId) {
+            unresolvedWriteIds.delete(line);
+          }
+        } catch (error) {
+          // Deliberately retain requestId for a caller retry. Provider frames
+          // remain memory-only; neither the frame nor credentials are journaled.
+          throw error;
+        }
       },
       onLine(handler: (line: string) => void): void {
         lineHandlers.push(handler);
@@ -241,6 +256,7 @@ class TauriNekoControlClient implements NekoControlClient {
               },
             });
             killed = true;
+            unresolvedWriteIds.clear();
             unlistenLine?.();
             unlistenExit?.();
           })();

@@ -147,6 +147,45 @@ describe("Neko driver factory resource ownership", () => {
     expect(spawned.agentSessionId).toBe(startsCalls[0][1].request.agentSessionId);
   });
 
+  it("retains a write identity when the caller retries an unresolved frame", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    let writes = 0;
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command === "neko_control_session_start") {
+        return {
+          agentSessionId: payload?.request.agentSessionId,
+          runId: payload?.request.runId,
+          provider: PROVIDER,
+        };
+      }
+      if (command === "neko_control_session_write") {
+        writes += 1;
+        if (writes <= 2) throw new Error("response bridge interrupted");
+        return undefined;
+      }
+      return undefined;
+    });
+
+    const { transport } = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-write-retry",
+      workspacePath: "C:/tmp/project",
+    });
+    const frame = JSON.stringify({ jsonrpc: "2.0", id: 7, method: "session/prompt" });
+    await expect(transport.send(frame)).rejects.toThrow("response bridge interrupted");
+    await expect(transport.send(frame)).resolves.toBeUndefined();
+
+    const writeCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_write",
+    );
+    expect(writeCalls).toHaveLength(3);
+    expect(writeCalls.map(([, payload]) => payload.request.requestId)).toEqual([
+      writeCalls[0][1].request.requestId,
+      writeCalls[0][1].request.requestId,
+      writeCalls[0][1].request.requestId,
+    ]);
+  });
+
   it("exposes ownership before ACP initialization completes", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     let owned: Driver | null = null;

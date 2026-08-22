@@ -196,17 +196,7 @@ impl NekoRuntime {
         let resolved = match provider::resolve(&request.provider_id) {
             Ok(resolved) => resolved,
             Err(error) => {
-                self.inner
-                    .journal
-                    .fail_request(&request.request_id, "provider_unavailable")?;
-                self.inner.journal.update_session(
-                    &request.agent_session_id,
-                    RunState::Failed,
-                    OperationPhase::Failed,
-                    "continuity_lost",
-                    None,
-                    None,
-                )?;
+                self.reject_start(&app, &request, "provider_unavailable", None)?;
                 return Err(error);
             }
         };
@@ -216,16 +206,11 @@ impl NekoRuntime {
         {
             Ok(args) => args,
             Err(error) => {
-                self.inner
-                    .journal
-                    .fail_request(&request.request_id, "invalid_request")?;
-                self.inner.journal.update_session(
-                    &request.agent_session_id,
-                    RunState::Failed,
-                    OperationPhase::Failed,
-                    "continuity_lost",
-                    None,
-                    None,
+                self.reject_start(
+                    &app,
+                    &request,
+                    "invalid_request",
+                    resolved.version.as_deref(),
                 )?;
                 return Err(error);
             }
@@ -250,16 +235,11 @@ impl NekoRuntime {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
-                self.inner
-                    .journal
-                    .fail_request(&request.request_id, "provider_unavailable")?;
-                self.inner.journal.update_session(
-                    &request.agent_session_id,
-                    RunState::Failed,
-                    OperationPhase::Failed,
-                    "continuity_lost",
-                    None,
-                    None,
+                self.reject_start(
+                    &app,
+                    &request,
+                    "provider_unavailable",
+                    resolved.version.as_deref(),
                 )?;
                 return Err(format!("spawn approved provider failed: {error}"));
             }
@@ -570,6 +550,33 @@ impl NekoRuntime {
         // replay later, so renderer delivery must not roll back native truth.
         let _ = app.emit("neko-control://event", event);
         Ok(())
+    }
+
+    fn reject_start(
+        &self,
+        app: &AppHandle,
+        request: &SessionStartRequest,
+        reason: &str,
+        provider_version: Option<&str>,
+    ) -> Result<(), String> {
+        self.inner
+            .journal
+            .fail_request(&request.request_id, reason)?;
+        self.inner.journal.update_session(
+            &request.agent_session_id,
+            RunState::Failed,
+            OperationPhase::Failed,
+            "continuity_lost",
+            None,
+            provider_version,
+        )?;
+        self.emit_control_event(
+            app,
+            &request.run_id,
+            "run.state_changed",
+            &request.agent_session_id,
+            json!({ "state": "failed", "reason": reason }),
+        )
     }
 
     fn finish_process(&self, app: &AppHandle, agent_session_id: &str) -> Option<i32> {
