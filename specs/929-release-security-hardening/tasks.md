@@ -31,14 +31,14 @@
 - [x] T014 [US3] Add tests proving stable tag validation fails on candidate-only metadata.
 - [x] T015 [US3] Correct changelog links, README installation copy, SECURITY support state,
   and release documentation to match the absence of a stable release.
-- [ ] T016 [US3] Run release tests/checks and dispatch a complete candidate build after merge.
+- [x] T016 [US3] Run release tests/checks and dispatch a complete candidate build after merge.
 
 ## Phase 5 - Closure
 
-- [ ] T017 Review the public tag/release/license state after all PRs merge.
-- [ ] T018 Create ordered P1 follow-up issues for modularity, feature flags,
+- [x] T017 Review the public tag/release/license state after all PRs merge.
+- [x] T018 Create ordered P1 follow-up issues for modularity, feature flags,
   dependency locking, and development-environment hardening.
-- [ ] T019 Update #929 with final evidence and close only when every acceptance criterion passes.
+- [x] T019 Update #929 with final evidence and close only when every acceptance criterion passes.
 
 ## Dependencies
 
