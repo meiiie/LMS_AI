@@ -1,6 +1,7 @@
 # Implementation Plan: Release and Desktop Trust Hardening
 
-**Branch**: `929-release-security-hardening` | **Date**: 2026-08-23 | **Spec**: [spec.md](spec.md)  
+**Branch**: `929-release-security-hardening` | **Date**: 2026-08-23 | **Spec**: [spec.md](spec.md)
+
 **Issue**: [#929](https://github.com/meiiie/wiii/issues/929)
 
 ## Summary
@@ -11,15 +12,23 @@ release checker and Tauri ACL system; do not introduce a second policy engine.
 
 ## Technical Context
 
-**Language/Version**: Python 3.11, TypeScript 5.x, Rust 2021  
-**Primary Dependencies**: Tauri v2, React 18, Vite 8, existing Python release tooling  
-**Storage**: N/A; configuration and repository metadata only  
-**Testing**: Python unittest, Vitest, TypeScript, Cargo/Tauri build validation  
-**Target Platform**: Windows x64, Linux x64, macOS arm64/x64, hosted web/embed  
-**Project Type**: Monorepo with desktop app, web surfaces, and FastAPI service  
-**Performance Goals**: No startup or steady-state performance regression  
+**Language/Version**: Python 3.11, TypeScript 5.x, Rust 2021
+
+**Primary Dependencies**: Tauri v2, React 18, Vite 8, existing Python release tooling
+
+**Storage**: N/A; configuration and repository metadata only
+
+**Testing**: Python unittest, Vitest, TypeScript, Cargo/Tauri build validation
+
+**Target Platform**: Windows x64, Linux x64, macOS arm64/x64, hosted web/embed
+
+**Project Type**: Monorepo with desktop app, web surfaces, and FastAPI service
+
+**Performance Goals**: No startup or steady-state performance regression
+
 **Constraints**: Keep configurable service endpoints, local ACP, SSE/WebSocket,
-sandboxed artifacts, and current installer identity working  
+sandboxed artifacts, and current installer identity working
+
 **Scale/Scope**: Four P0 findings; no product feature expansion
 
 ## Constitution Check

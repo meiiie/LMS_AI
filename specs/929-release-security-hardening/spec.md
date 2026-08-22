@@ -1,8 +1,11 @@
 # Feature Specification: Release and Desktop Trust Hardening
 
-**Feature Branch**: `929-release-security-hardening`  
-**Created**: 2026-08-23  
-**Status**: Ready for implementation  
+**Feature Branch**: `929-release-security-hardening`
+
+**Created**: 2026-08-23
+
+**Status**: Ready for implementation
+
 **Issue**: [#929](https://github.com/meiiie/wiii/issues/929)
 
 ## User Scenarios & Testing

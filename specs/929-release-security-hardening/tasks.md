@@ -1,6 +1,7 @@
 # Tasks: Release and Desktop Trust Hardening
 
-**Input**: [spec.md](spec.md), [plan.md](plan.md), [research.md](research.md)  
+**Input**: [spec.md](spec.md), [plan.md](plan.md), [research.md](research.md)
+
 **Issue**: [#929](https://github.com/meiiie/wiii/issues/929)
 
 ## Phase 1 - Contract
