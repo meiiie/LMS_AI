@@ -56,10 +56,6 @@ export interface RuntimeProviderSnapshot extends DriverRuntimeDescriptor {
   providerCapabilities?: NekoProviderCapabilitySnapshot;
 }
 
-export interface RuntimeProviderMetadata {
-  providerVersion?: string | null;
-}
-
 interface RuntimeBinding {
   driver: Driver;
   provider: RuntimeProviderSnapshot;
@@ -210,7 +206,6 @@ export class RuntimeRegistry {
     sessionId: string,
     providerId: string,
     create: (instanceId: string, own: (driver: Driver) => void) => Promise<Driver>,
-    metadata: RuntimeProviderMetadata = {},
   ): Promise<RuntimeReplacement> {
     const priorCleanup = this.joinDisposal(sessionId);
     if (priorCleanup) await priorCleanup;
@@ -327,7 +322,7 @@ export class RuntimeRegistry {
       const providerCapabilities = providerDefinition
         ? createProviderCapabilitySnapshot({
             providerId,
-            providerVersion: metadata.providerVersion ?? null,
+            providerVersion: driver.runtime.providerVersion ?? null,
             established: driver.runtime.observedProviderCapabilities,
             extensions: driver.runtime.providerExtensions,
           })

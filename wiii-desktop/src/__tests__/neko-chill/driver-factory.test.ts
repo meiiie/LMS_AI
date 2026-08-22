@@ -16,9 +16,38 @@ describe("Neko driver factory resource ownership", () => {
   beforeEach(() => {
     tauri.invoke.mockReset();
     tauri.listen.mockReset();
-    tauri.invoke.mockImplementation(async (command: string) =>
-      command === "neko_spawn_agent" ? 42 : undefined,
-    );
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "neko_spawn_agent") return 42;
+      if (command === "neko_detect_agents") {
+        return [
+          {
+            id: "neko",
+            name: "stale probe label",
+            binary: "C:/tools/neko.exe",
+            version: "0.25.0",
+            found: true,
+          },
+          {
+            id: "unknown",
+            name: "Unknown executable",
+            binary: "unknown",
+            version: "1.0.0",
+            found: true,
+          },
+        ];
+      }
+      return undefined;
+    });
+  });
+
+  it("normalizes detected metadata and hides providers Neko cannot launch", async () => {
+    await expect(getNekoControlClient().listProviders()).resolves.toEqual([{
+      id: "neko",
+      name: "Neko Core",
+      binary: "C:/tools/neko.exe",
+      version: "0.25.0",
+      found: true,
+    }]);
   });
 
   it("kills the spawned process if listener setup fails", async () => {
@@ -29,7 +58,6 @@ describe("Neko driver factory resource ownership", () => {
 
     await expect(getNekoControlClient().spawnProvider({
       providerId: "neko",
-      program: "neko",
     })).rejects.toThrow(
       "event bridge unavailable",
     );
@@ -46,9 +74,8 @@ describe("Neko driver factory resource ownership", () => {
       .mockResolvedValueOnce(unlistenLine)
       .mockResolvedValueOnce(unlistenExit);
 
-    const transport = await getNekoControlClient().spawnProvider({
+    const { transport } = await getNekoControlClient().spawnProvider({
       providerId: "neko",
-      program: "neko",
     });
     await transport.kill();
     await transport.kill();
@@ -79,6 +106,12 @@ describe("Neko driver factory resource ownership", () => {
       },
     );
     await vi.waitFor(() => expect(owned).not.toBeNull());
+
+    expect(owned!.runtime.providerVersion).toBe("0.25.0");
+    expect(tauri.invoke).toHaveBeenCalledWith("neko_spawn_agent", {
+      program: "C:/tools/neko.exe",
+      args: ["acp"],
+    });
 
     await owned!.dispose();
     await expect(creating).rejects.toThrow("client disposed");

@@ -86,9 +86,8 @@ export function NewSessionView() {
     setCodexAccountState("checking");
     void getNekoControlClient().spawnProvider({
       providerId: "codex",
-      program: codex.binary,
     })
-      .then(async (transport) => {
+      .then(async ({ transport }) => {
         const session = new CodexAccountSession(transport);
         bootstrapSession = session;
         if (cancelled) {

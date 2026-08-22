@@ -20,7 +20,6 @@ export async function loadAgentProfiles(
   if (agent.id !== "neko" || !agent.binary || !workspacePath) return [];
   return getNekoControlClient().listProfiles({
     providerId: agent.id,
-    program: agent.binary,
     workspacePath,
   });
 }

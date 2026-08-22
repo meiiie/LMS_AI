@@ -59,6 +59,24 @@ describe("Neko Control Protocol", () => {
     }));
   });
 
+  it("rejects an unknown provider before session dispatch", () => {
+    expect(parseNekoControlRequest({
+      v: 1,
+      requestId: "request-unknown-provider",
+      method: "session/start",
+      params: {
+        taskId: "task-1",
+        runId: "run-1",
+        providerId: "unknown-provider",
+        environmentId: "environment-1",
+        workspacePath: "C:/project",
+      },
+    })).toEqual(expect.objectContaining({
+      ok: false,
+      error: expect.objectContaining({ code: "invalid_request" }),
+    }));
+  });
+
   it("requires responses to contain exactly one result or typed error", () => {
     expect(isNekoControlResponse({
       v: 1,

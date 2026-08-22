@@ -1,3 +1,5 @@
+import { findProviderDefinition } from "./provider-registry";
+
 export const NEKO_CONTROL_PROTOCOL_VERSION = 1 as const;
 
 export type NekoControlMethod =
@@ -158,6 +160,7 @@ function validParams(method: NekoControlMethod, params: Record<string, unknown>)
         string(params.taskId) &&
         string(params.runId) &&
         string(params.providerId) &&
+        findProviderDefinition(params.providerId) !== null &&
         string(params.environmentId) &&
         string(params.workspacePath) &&
         (params.profileId === undefined || string(params.profileId))

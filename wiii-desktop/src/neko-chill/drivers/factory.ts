@@ -25,16 +25,16 @@ export async function createDriverForAgent(
   ownDriver?: (driver: Driver) => void,
 ): Promise<Driver> {
   const provider = requireProviderDefinition(agent.id);
-  if (!agent.binary) throw new Error(`Agent "${agent.name}" chưa được cài trên máy này`);
   if (!isAbsoluteWorkspacePath(launch.workspace.path)) {
     throw new Error("Hãy chọn thư mục dự án trước khi bắt đầu.");
   }
 
-  const transport = await getNekoControlClient().spawnProvider({
+  const control = getNekoControlClient();
+  const spawned = await control.spawnProvider({
     providerId: agent.id,
-    program: agent.binary,
     ...(launch.profileId ? { profileId: launch.profileId } : {}),
   });
+  const { transport } = spawned;
   const driver: Driver = provider.protocol === "codex-app-server"
     ? new CodexAppServerDriver({
         sessionId,
@@ -50,6 +50,7 @@ export async function createDriverForAgent(
         transport,
         onEvent,
       });
+  driver.runtime.providerVersion = spawned.provider.version;
   try {
     // RuntimeRegistry owns the process before initialize/session-new can hang.
     ownDriver?.(driver);

@@ -4,27 +4,31 @@ import type {
   NekoLaunchProfile,
 } from "./contracts";
 import {
+  findProviderDefinition,
   providerLaunchArgs,
   requireProviderDefinition,
 } from "./provider-registry";
 
 export interface NekoProviderSpawnRequest {
   providerId: string;
-  program: string;
   profileId?: string;
 }
 
 export interface NekoProviderProfileRequest {
   providerId: string;
-  program: string;
   workspacePath: string;
+}
+
+export interface NekoSpawnedProvider {
+  provider: NekoDetectedProvider;
+  transport: AcpTransport;
 }
 
 /** Replaceable bridge from Wiii clients to Neko's native authority. */
 export interface NekoControlClient {
   listProviders(): Promise<NekoDetectedProvider[]>;
   listProfiles(request: NekoProviderProfileRequest): Promise<NekoLaunchProfile[]>;
-  spawnProvider(request: NekoProviderSpawnRequest): Promise<AcpTransport>;
+  spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider>;
 }
 
 class TauriNekoControlClient implements NekoControlClient {
@@ -32,7 +36,11 @@ class TauriNekoControlClient implements NekoControlClient {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const providers = await invoke<NekoDetectedProvider[]>("neko_detect_agents");
-      return Array.isArray(providers) ? providers : [];
+      if (!Array.isArray(providers)) return [];
+      return providers.flatMap((provider) => {
+        const definition = findProviderDefinition(provider.id);
+        return definition ? [{ ...provider, name: definition.name }] : [];
+      });
     } catch {
       // Browser/web hosts have no local process authority.
       return [];
@@ -41,11 +49,15 @@ class TauriNekoControlClient implements NekoControlClient {
 
   async listProfiles(request: NekoProviderProfileRequest): Promise<NekoLaunchProfile[]> {
     const provider = requireProviderDefinition(request.providerId);
-    if (!provider.profileArgument || !request.program || !request.workspacePath) return [];
+    if (!provider.profileArgument || !request.workspacePath) return [];
     try {
+      const detected = (await this.listProviders()).find(
+        (candidate) => candidate.id === provider.id,
+      );
+      if (!detected?.found || !detected.binary) return [];
       const { invoke } = await import("@tauri-apps/api/core");
       const profiles = await invoke<NekoLaunchProfile[]>("neko_agent_profiles", {
-        program: request.program,
+        program: detected.binary,
         cwd: request.workspacePath,
       });
       return Array.isArray(profiles) ? profiles : [];
@@ -54,12 +66,19 @@ class TauriNekoControlClient implements NekoControlClient {
     }
   }
 
-  async spawnProvider(request: NekoProviderSpawnRequest): Promise<AcpTransport> {
+  async spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider> {
+    const provider = requireProviderDefinition(request.providerId);
+    const detected = (await this.listProviders()).find(
+      (candidate) => candidate.id === provider.id,
+    );
+    if (!detected?.found || !detected.binary) {
+      throw new Error(`Provider "${provider.name}" is not available on this host.`);
+    }
     const args = providerLaunchArgs(request.providerId, request.profileId);
     const { invoke } = await import("@tauri-apps/api/core");
     const { listen } = await import("@tauri-apps/api/event");
     const procId = await invoke<number>("neko_spawn_agent", {
-      program: request.program,
+      program: detected.binary,
       args,
     });
 
@@ -83,7 +102,7 @@ class TauriNekoControlClient implements NekoControlClient {
       throw error;
     }
 
-    return {
+    const transport: AcpTransport = {
       async send(line: string): Promise<void> {
         await invoke("neko_write_stdin", { procId, line });
       },
@@ -103,6 +122,7 @@ class TauriNekoControlClient implements NekoControlClient {
         });
       },
     };
+    return { provider: detected, transport };
   }
 }
 

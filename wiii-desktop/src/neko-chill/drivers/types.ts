@@ -37,6 +37,8 @@ export interface DriverRuntimeDescriptor {
   observedProviderCapabilities?: Partial<NekoProviderCapabilityMap>;
   /** Bounded JSON scalar facts only; raw provider events and secrets are forbidden. */
   providerExtensions?: Record<string, NekoProviderExtensionValue>;
+  /** Version re-probed by Neko Control for the process being attached. */
+  providerVersion?: string | null;
 }
 
 /** Why a turn stopped — superset across backends (ACP stopReason ⊆ this). */

@@ -91,6 +91,7 @@ describe("RuntimeRegistry", () => {
     const registry = new RuntimeRegistry();
     const driver = new FakeDriver("s1");
     Object.assign(driver.runtime, {
+      providerVersion: "0.24.17",
       observedProviderCapabilities: {
         resume: true,
         modelSelection: true,
@@ -102,7 +103,6 @@ describe("RuntimeRegistry", () => {
       "s1",
       "neko",
       async () => driver,
-      { providerVersion: "0.24.17" },
     );
 
     expect(attached.current.providerCapabilities).toEqual(expect.objectContaining({

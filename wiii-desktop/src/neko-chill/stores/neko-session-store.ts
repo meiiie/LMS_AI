@@ -534,7 +534,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             },
             ownDriver,
           ),
-          { providerVersion: agent.version },
         );
         preparingRuntime = false;
         set((state) => {
@@ -720,7 +719,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 },
                 ownDriver,
               ),
-              { providerVersion: agent.version },
             );
             preparingRuntime = false;
             provider = replacement.current;
