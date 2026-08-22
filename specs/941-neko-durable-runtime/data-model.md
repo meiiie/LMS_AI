@@ -1,0 +1,132 @@
+# Data Model: Neko Durable Runtime Authority
+
+## Runtime entities
+
+### RuntimeSession
+
+- `agentSessionId`: stable native execution identity
+- `taskId`, `runId`, `environmentId`: opaque Wiii ADE references
+- `providerId`, `providerVersion`: provider facts at start
+- `workspacePath`: selected workspace boundary; never an executable
+- `state`: ADE-compatible run state
+- `operationPhase`: latest side-effect phase
+- `continuity`: `active`, `continuity_lost`, or `unknown_outcome`
+- optional OS PID for diagnosis only; UI cannot act by PID
+
+### IdempotencyRecord
+
+- `requestId`: global caller-generated key
+- `method`: native control method
+- `targetId`: stable logical target, never raw parameters
+- `phase`: operation phase
+- optional bounded result/error JSON owned by Neko
+- timestamps
+
+The tuple `(requestId, method, targetId)` identifies one operation. A request
+ID reused with any other method/target is a collision.
+
+### ControlEvent
+
+- `eventId`: UUID
+- `streamId`: exact run stream identity
+- `seq`: positive monotonic integer within `streamId`
+- `at`: UTC timestamp
+- `type`: normalized Neko event type
+- optional session identity
+- bounded Neko-generated payload
+
+No raw provider frame or terminal line is a `ControlEvent` in Phase 2A.
+
+## SQLite schema direction
+
+```text
+runtime_sessions
+  agent_session_id PK
+  task_id
+  run_id
+  environment_id
+  provider_id
+  provider_version
+  workspace_path
+  state
+  operation_phase
+  continuity
+  pid nullable
+  created_at
+  updated_at
+
+control_requests
+  request_id PK
+  method
+  target_id
+  phase
+  result_json nullable
+  error_code nullable
+  created_at
+  updated_at
+
+control_events
+  event_id PK
+  stream_id
+  seq
+  at
+  event_type
+  agent_session_id nullable FK
+  payload_json
+  UNIQUE(stream_id, seq)
+```
+
+The schema intentionally has no columns for token, secret, cookie,
+authorization, environment dump, prompt, provider frame, stdin line or
+terminal output.
+
+## Operation phase state machine
+
+```text
+accepted
+  -> dispatched
+  -> failed
+
+dispatched
+  -> side_effect_started
+  -> failed
+
+side_effect_started
+  -> committed
+  -> failed (only when failure is proven)
+  -> unknown_outcome
+
+committed
+  -> completed
+  -> failed
+  -> unknown_outcome
+```
+
+`completed`, `failed`, and `unknown_outcome` are terminal for one request ID.
+
+## Run transition contract
+
+Allowed transitions:
+
+```text
+queued -> starting | cancelled
+starting -> running | failed | cancelled | unknown_outcome
+running -> waiting | verifying | failed | cancelled | unknown_outcome
+waiting -> running | failed | cancelled | unknown_outcome
+verifying -> running | review | failed | cancelled | unknown_outcome
+review -> completed | failed | cancelled | unknown_outcome
+```
+
+Terminal states `completed`, `failed`, `cancelled`, and `unknown_outcome` have
+no outgoing transition. A retry is a new Run.
+
+## Recovery matrix
+
+| Persisted fact | Recovery | Automatic side effect |
+| --- | --- | --- |
+| Terminal request/session | preserve | none |
+| `accepted` / `dispatched` | `continuity_lost`, failed | none |
+| `side_effect_started` | `unknown_outcome` | none |
+| `committed` without terminal completion | `unknown_outcome` | none |
+| Active session with no live in-process owner | `continuity_lost` | none |
+
