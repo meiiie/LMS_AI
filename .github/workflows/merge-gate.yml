@@ -125,6 +125,9 @@ jobs:
             fi
           done < <(grep -E "$env_template" /tmp/changed-files.txt || true)
 
+      - name: Validate release and license metadata
+        run: python tools/release/wiii_release.py check
+
   reviewability-gate:
     name: Reviewability Gate
     runs-on: ubuntu-latest

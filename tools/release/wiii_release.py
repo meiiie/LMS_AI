@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,33 @@ from typing import Iterable
 
 
 ROOT = Path(__file__).resolve().parents[2]
+CORE_LICENSE = "AGPL-3.0-only"
+SDK_LICENSE = "Apache-2.0"
+LICENSE_SOURCE_PATHS = (
+    "LICENSE",
+    "LICENSING.md",
+    "COMMERCIAL-LICENSE.md",
+    "README.md",
+    "sdk/LICENSE",
+    "sdk/README.md",
+    "maritime-ai-service/pyproject.toml",
+    "wiii-desktop/package.json",
+    "wiii-desktop/src-tauri/Cargo.toml",
+    "wiii-desktop/src-tauri/tauri.conf.json",
+)
+LICENSE_EXPECTATIONS = {
+    "LICENSE": CORE_LICENSE,
+    "LICENSING.md#core": CORE_LICENSE,
+    "LICENSING.md#sdk": SDK_LICENSE,
+    "COMMERCIAL-LICENSE.md#core": CORE_LICENSE,
+    "README.md#badge": CORE_LICENSE,
+    "sdk/LICENSE": SDK_LICENSE,
+    "sdk/README.md#spdx": SDK_LICENSE,
+    "maritime-ai-service/pyproject.toml": CORE_LICENSE,
+    "wiii-desktop/package.json": CORE_LICENSE,
+    "wiii-desktop/src-tauri/Cargo.toml": CORE_LICENSE,
+    "wiii-desktop/src-tauri/tauri.conf.json": CORE_LICENSE,
+}
 SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
@@ -126,6 +154,70 @@ def collect_versions(root: Path = ROOT) -> dict[str, list[str]]:
     return versions
 
 
+def _detected_license(text: str, marker: str, expected: str) -> str:
+    return expected if marker in text else "missing"
+
+
+def collect_license_metadata(root: Path = ROOT) -> dict[str, str]:
+    root_license = (root / "LICENSE").read_text(encoding="utf-8")
+    licensing = (root / "LICENSING.md").read_text(encoding="utf-8")
+    commercial = (root / "COMMERCIAL-LICENSE.md").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    sdk_license = (root / "sdk/LICENSE").read_text(encoding="utf-8")
+    sdk_readme = (root / "sdk/README.md").read_text(encoding="utf-8")
+
+    with (root / "maritime-ai-service/pyproject.toml").open("rb") as handle:
+        service_metadata = tomllib.load(handle)
+    with (root / "wiii-desktop/src-tauri/Cargo.toml").open("rb") as handle:
+        cargo_metadata = tomllib.load(handle)
+    desktop_metadata = json.loads(
+        (root / "wiii-desktop/package.json").read_text(encoding="utf-8")
+    )
+    tauri_metadata = json.loads(
+        (root / "wiii-desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+    )
+
+    service_license = service_metadata["project"]["license"]
+    if isinstance(service_license, dict):
+        service_license = service_license.get("text", "missing")
+
+    return {
+        "LICENSE": _detected_license(
+            root_license, "GNU AFFERO GENERAL PUBLIC LICENSE", CORE_LICENSE
+        ),
+        "LICENSING.md#core": _detected_license(licensing, CORE_LICENSE, CORE_LICENSE),
+        "LICENSING.md#sdk": _detected_license(licensing, SDK_LICENSE, SDK_LICENSE),
+        "COMMERCIAL-LICENSE.md#core": _detected_license(
+            commercial, CORE_LICENSE, CORE_LICENSE
+        ),
+        "README.md#badge": _detected_license(
+            readme, 'alt="AGPL-3.0-only license"', CORE_LICENSE
+        ),
+        "sdk/LICENSE": _detected_license(
+            sdk_license, "Apache License", SDK_LICENSE
+        ),
+        "sdk/README.md#spdx": _detected_license(
+            sdk_readme, "SPDX-License-Identifier: Apache-2.0", SDK_LICENSE
+        ),
+        "maritime-ai-service/pyproject.toml": str(service_license),
+        "wiii-desktop/package.json": str(desktop_metadata.get("license", "missing")),
+        "wiii-desktop/src-tauri/Cargo.toml": str(
+            cargo_metadata.get("package", {}).get("license", "missing")
+        ),
+        "wiii-desktop/src-tauri/tauri.conf.json": str(
+            tauri_metadata.get("bundle", {}).get("license", "missing")
+        ),
+    }
+
+
+def find_license_mismatches(surfaces: dict[str, str]) -> dict[str, dict[str, str]]:
+    return {
+        path: {"expected": expected, "actual": surfaces.get(path, "missing")}
+        for path, expected in LICENSE_EXPECTATIONS.items()
+        if surfaces.get(path) != expected
+    }
+
+
 def changelog_section(version: str, root: Path = ROOT) -> str:
     version = validate_semver(version)
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -176,6 +268,16 @@ def check_repository(version: str | None = None, tag: str | None = None, root: P
     errors: list[str] = []
     if mismatches:
         errors.append("version surfaces are not synchronized")
+    license_surfaces: dict[str, str] = {}
+    license_mismatches: dict[str, dict[str, str]] = {}
+    try:
+        license_surfaces = collect_license_metadata(root)
+        license_mismatches = find_license_mismatches(license_surfaces)
+        if license_mismatches:
+            affected = ", ".join(sorted(license_mismatches))
+            errors.append(f"license metadata is not synchronized: {affected}")
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        errors.append(f"license metadata could not be read: {exc}")
     try:
         changelog_section(expected, root)
     except ValueError as exc:
@@ -196,6 +298,8 @@ def check_repository(version: str | None = None, tag: str | None = None, root: P
         "brand_asset_count": brand_asset_count,
         "surfaces": surfaces,
         "mismatches": mismatches,
+        "license_surfaces": license_surfaces,
+        "license_mismatches": license_mismatches,
         "errors": errors,
     }
 

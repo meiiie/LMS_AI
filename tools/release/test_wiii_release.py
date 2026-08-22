@@ -28,6 +28,34 @@ class ReleaseToolTests(unittest.TestCase):
         result = wiii_release.check_repository()
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["version"], "1.2.0")
+        self.assertFalse(result["license_mismatches"])
+
+    def test_license_surfaces_are_synchronized(self) -> None:
+        surfaces = wiii_release.collect_license_metadata()
+        self.assertEqual(set(wiii_release.LICENSE_EXPECTATIONS), set(surfaces))
+        self.assertFalse(wiii_release.find_license_mismatches(surfaces))
+
+    def test_license_drift_reports_the_affected_path(self) -> None:
+        source_root = wiii_release.ROOT
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in wiii_release.LICENSE_SOURCE_PATHS:
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_root / relative, destination)
+
+            tauri_path = root / "wiii-desktop/src-tauri/tauri.conf.json"
+            tauri_metadata = json.loads(tauri_path.read_text(encoding="utf-8"))
+            tauri_metadata["bundle"]["license"] = "MIT"
+            tauri_path.write_text(json.dumps(tauri_metadata), encoding="utf-8")
+
+            mismatches = wiii_release.find_license_mismatches(
+                wiii_release.collect_license_metadata(root)
+            )
+            self.assertEqual(
+                mismatches["wiii-desktop/src-tauri/tauri.conf.json"],
+                {"expected": "AGPL-3.0-only", "actual": "MIT"},
+            )
 
     def test_manifest_is_deterministic_and_hashed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
