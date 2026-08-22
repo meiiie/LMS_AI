@@ -76,3 +76,37 @@ fn tauri_config_enables_only_the_reviewed_capability_set() {
         ])
     );
 }
+
+#[test]
+fn main_webview_has_no_raw_agent_process_primitive() {
+    let agents = read_json("capabilities/workbench-agents.json");
+    let rendered = serde_json::to_string(&agents).expect("agent capability is serializable");
+
+    for forbidden in [
+        "neko_spawn_agent",
+        "neko_write_stdin",
+        "neko_kill_agent",
+        "neko_kill_all_agents",
+        "allow-neko-spawn-agent",
+        "allow-neko-write-stdin",
+        "allow-neko-kill-agent",
+        "allow-neko-kill-all-agents",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "raw primitive remains: {forbidden}"
+        );
+    }
+    for required in [
+        "allow-neko-control-provider-list",
+        "allow-neko-control-session-start",
+        "allow-neko-control-session-write",
+        "allow-neko-control-session-cancel",
+        "allow-neko-control-events-read",
+    ] {
+        assert!(
+            rendered.contains(required),
+            "missing scoped command: {required}"
+        );
+    }
+}

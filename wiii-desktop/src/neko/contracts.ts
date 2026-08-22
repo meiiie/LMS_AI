@@ -30,9 +30,9 @@ export type NekoProviderExtensionValue = string | number | boolean | null;
 export interface NekoDetectedProvider {
   id: string;
   name: string;
-  binary: string;
   version: string | null;
   found: boolean;
+  supportsProfiles: boolean;
 }
 
 export interface NekoLaunchProfile {

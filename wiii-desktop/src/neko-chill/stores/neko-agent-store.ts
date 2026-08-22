@@ -17,7 +17,7 @@ export async function loadAgentProfiles(
   agent: DetectedAgent,
   workspacePath: string,
 ): Promise<AgentLaunchProfile[]> {
-  if (agent.id !== "neko" || !agent.binary || !workspacePath) return [];
+  if (!agent.supportsProfiles || !agent.found || !workspacePath) return [];
   return getNekoControlClient().listProfiles({
     providerId: agent.id,
     workspacePath,

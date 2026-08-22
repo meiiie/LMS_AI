@@ -28,6 +28,14 @@ ACP runtimes reconnect with `session/resume`; Codex reconnects with
 different session. Interrupted mutations remain `unknown outcome` and are
 never replayed automatically.
 
+For local execution, the in-process Rust Neko runtime is authoritative for the
+approved provider launch contract, child-process ownership, native
+agent-session lifecycle, request idempotency and ordered lifecycle replay.
+React never supplies an executable, argument vector or PID. SQLite stores
+bounded lifecycle facts only; provider frames, prompts and high-volume output
+remain with their existing protocol/session owners. A standalone daemon is a
+later phase and is not implied by this boundary.
+
 Wiii Knowledge is independent from the selected runtime. When enabled, its
 retrieved evidence and citation metadata cross the same durability barrier as
 the user prompt before any model can observe them. A RAG outage degrades that
@@ -160,6 +168,8 @@ installer derivatives.
 - Keep mutating host actions behind preview and explicit approval.
 - Preserve session IDs and recovery state; do not convert resume failure into a
   new invisible conversation.
+- Do not treat an empty native session list as recovery from a journal error;
+  native authority failures must remain visible.
 - Keep Neko motion state-driven, brief, interruptible, and reduced-motion safe.
 
 See the repository [`AGENTS.md`](../AGENTS.md) and desktop

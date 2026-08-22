@@ -506,9 +506,9 @@ describe("Neko Chill shell UI", () => {
     const agent = {
       id: "neko",
       name: "Neko Core",
-      binary: "neko",
       version: "0.24.0",
       found: true,
+      supportsProfiles: true,
     };
     useNekoAgentStore.setState({ agents: [agent], isLoading: false });
     useNekoSessionStore.setState({

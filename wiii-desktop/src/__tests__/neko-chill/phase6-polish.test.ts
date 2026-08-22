@@ -135,9 +135,9 @@ describe("T601 — idle reap", () => {
 const AGENT: DetectedAgent = {
     id: "neko",
     name: "Neko Core",
-    binary: "neko",
     version: "0.24.0",
     found: true,
+    supportsProfiles: true,
 };
 const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 

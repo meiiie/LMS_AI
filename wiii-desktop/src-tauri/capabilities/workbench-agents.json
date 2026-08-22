@@ -1,14 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "workbench-agents",
-  "description": "Local agent discovery and lifecycle authority for Neko Chill",
+  "description": "Provider- and session-scoped authority for the Neko Rust runtime",
   "windows": ["main"],
   "permissions": [
-    "allow-neko-detect-agents",
-    "allow-neko-agent-profiles",
-    "allow-neko-spawn-agent",
-    "allow-neko-write-stdin",
-    "allow-neko-kill-agent",
-    "allow-neko-kill-all-agents"
+    "allow-neko-control-provider-list",
+    "allow-neko-control-provider-profiles",
+    "allow-neko-control-session-list",
+    "allow-neko-control-session-start",
+    "allow-neko-control-session-write",
+    "allow-neko-control-session-cancel",
+    "allow-neko-control-events-read"
   ]
 }

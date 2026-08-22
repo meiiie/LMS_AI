@@ -69,7 +69,7 @@ Response:
 }
 ```
 
-`limit` is clamped to 1..500. Events are returned in ascending sequence.
+`limit` outside 1..500 is rejected. Events are returned in ascending sequence.
 `nextAfterSeq` equals the last returned sequence or the caller cursor when no
 event is returned.
 
@@ -92,4 +92,3 @@ Live-only in Phase 2A:
 These live payloads remain owned by current provider adapters and Workbench
 session persistence. Their absence from SQLite is an explicit security and
 volume boundary, not a claim of full daemon replay.
-

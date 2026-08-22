@@ -14,9 +14,7 @@ npm run build:embed
 Repository checks:
 
 ```powershell
-$env:PYTHONUTF8='1'
-$env:PYTHONIOENCODING='utf-8'
-specify check
+& .\.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks
 git diff --check
 git status --short
 ```
@@ -29,4 +27,3 @@ Expected invariants:
 - event sequence is monotonic within a run stream and replay is cursor-based;
 - uncertain recovery becomes `unknown_outcome`, never automatic retry;
 - provider frames and credentials are absent from the SQLite lifecycle schema.
-

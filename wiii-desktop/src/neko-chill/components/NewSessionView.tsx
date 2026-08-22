@@ -68,7 +68,7 @@ export function NewSessionView() {
     return () => {
       cancelled = true;
     };
-  }, [neko?.binary, workspace?.path]);
+  }, [neko?.found, workspace?.path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +78,7 @@ export function NewSessionView() {
     if (previous) void previous.dispose();
     setCodexAccount(null);
     setCodexLoginUrl(null);
-    if (!workspace || !codex?.binary) {
+    if (!workspace || !codex?.found) {
       setCodexAccountState("idle");
       return;
     }
@@ -86,6 +86,8 @@ export function NewSessionView() {
     setCodexAccountState("checking");
     void getNekoControlClient().spawnProvider({
       providerId: "codex",
+      clientSessionId: "codex-account-bootstrap",
+      workspacePath: workspace.path,
     })
       .then(async ({ transport }) => {
         const session = new CodexAccountSession(transport);
@@ -117,7 +119,7 @@ export function NewSessionView() {
       codexAccountSession.current = null;
       if (current) void current.dispose();
     };
-  }, [codex?.binary, workspace?.path, codexBootstrapAttempt]);
+  }, [codex?.found, workspace?.path, codexBootstrapAttempt]);
 
   const chooseWorkspace = async () => {
     const selected = await chooseWorkspaceFolder();

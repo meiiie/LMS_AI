@@ -7,12 +7,13 @@ fn main() {
         "neko_workspace_changes",
         "neko_workspace_diff",
         "close_splash",
-        "neko_detect_agents",
-        "neko_agent_profiles",
-        "neko_spawn_agent",
-        "neko_write_stdin",
-        "neko_kill_agent",
-        "neko_kill_all_agents",
+        "neko_control_provider_list",
+        "neko_control_provider_profiles",
+        "neko_control_session_list",
+        "neko_control_session_start",
+        "neko_control_session_write",
+        "neko_control_session_cancel",
+        "neko_control_events_read",
     ];
 
     tauri_build::try_build(

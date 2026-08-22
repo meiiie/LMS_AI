@@ -1,12 +1,15 @@
 # Wiii ADE and Neko Agent Fabric
 
-**Status:** Foundation implemented; product-shell and daemon migration planned
+**Status:** Ontology and in-process durable runtime authority implemented;
+product shell and standalone daemon planned
 
 **Updated:** 2026-08-23
 
-**Issue:** [#939](https://github.com/meiiie/wiii/issues/939)
+**Issues:** [#939](https://github.com/meiiie/wiii/issues/939),
+[#941](https://github.com/meiiie/wiii/issues/941)
 
-**Specification:** [`specs/939-wiii-ade-neko-control/`](../../specs/939-wiii-ade-neko-control/)
+**Specifications:** [`specs/939-wiii-ade-neko-control/`](../../specs/939-wiii-ade-neko-control/),
+[`specs/941-neko-durable-runtime/`](../../specs/941-neko-durable-runtime/)
 
 ## Product boundary
 
@@ -76,17 +79,26 @@ approval resolution, normalized execution events, typed errors and bounded
 provider extensions. Unsupported versions, methods and providers fail before
 process side effects.
 
-The current transport is deliberately an in-process TypeScript client backed
-by the existing least-privilege Tauri commands. It centralizes native command
-knowledge and is replaceable, but it is **not** represented as a standalone
-crash-independent daemon.
+The current authority is an in-process Rust `NekoRuntime` behind provider- and
+session-scoped Tauri commands. React asks for an operation by provider, run,
+environment and agent-session identity; Rust resolves the approved executable
+and arguments, owns the child process, journals lifecycle facts and returns
+replayable state. The TypeScript control client is a thin protocol adapter and
+does not receive executable paths, PIDs or argument vectors.
+
+Phase 2A intentionally remains inside `Wiii.exe`. It is **not** a standalone,
+crash-independent daemon: a graceful Wiii exit cancels owned children, while a
+hard restart conservatively reports continuity loss or `unknown_outcome` from
+the journal. Extracting the stable boundary to `neko-daemon` is a later phase.
 
 ## Provider registry and capability truth
 
-`ProviderRegistry` is the catalog for provider identity, product label,
-integration level, protocol, authentication owner and launch arguments.
-`RuntimeRegistry` separately owns live driver bindings and disposal. The two
-registries solve different problems.
+The TypeScript `ProviderRegistry` is the product catalog for provider identity,
+label, integration level, protocol and authentication owner. The Rust provider
+registry is the only launch authority for executable candidates, probes,
+approved arguments and profile validation. `RuntimeRegistry` separately owns
+live TypeScript driver bindings and disposal. These catalogs and live bindings
+solve different problems and must not be merged.
 
 Current implemented provider paths are:
 
@@ -120,18 +132,30 @@ filesystem authority; that host constraint does not change the product model.
 
 ## Implementation truth on 2026-08-23
 
-Implemented in the foundation slice:
+Implemented across the foundation and Phase 2A slices:
 
 - ADE entity contracts and deterministic graph validation;
 - Neko Control Protocol v1 envelopes, methods, events and typed errors;
 - one provider registry for Neko Core, Gemini CLI and Codex;
-- one Tauri control client for discovery, profiles and process transport;
+- an in-process Rust runtime with one-writer file lease and SQLite WAL;
+- Rust-owned provider resolution, approved arguments and process/session maps;
+- request-id idempotency for start, provider-frame write and cancellation;
+- conservative recovery phases: `accepted`, `dispatched`,
+  `side_effect_started`, `committed`, `completed`, `failed` and
+  `unknown_outcome`;
+- durable per-run event streams with monotonic sequence and bounded cursor
+  replay;
+- provider/session/events Tauri commands with no WebView permission for raw
+  executable, argument vector, PID or unscoped stdin primitives;
+- one TypeScript control client for discovery, replay and live transport;
 - driver-observed capability facts and durable attach snapshots;
 - backward-compatible loading of pre-snapshot local session events.
 
 Not yet implemented and not implied by this document:
 
-- a standalone Rust `neko-daemon` or SQLite/WAL event store;
+- a standalone Rust `neko-daemon` that survives `Wiii.exe` termination;
+- durable provider stdout, transcript, tool delta or terminal replay (these
+  remain live-only and provider/session persistence keeps its existing owner);
 - persistent ADE Project/Task/Run UI and Attention Inbox;
 - worktree/environment manager or OS sandbox;
 - OpenCode, Claude, ACP v2 or generic PTY adapters;
@@ -139,15 +163,15 @@ Not yet implemented and not implied by this document:
 - local/cloud handoff, best-of-N scheduler or autonomous agent teams.
 
 Those features build on the contracts above in separate reviewable changes.
-This distinction prevents a renderer-owned bridge from being mistaken for
-daemon-level durability.
+This distinction prevents in-process lifecycle durability from being mistaken
+for provider-transcript replay or an independent daemon.
 
 ## Next dependency order
 
-1. Move lifecycle authority behind a Rust Neko service boundary and durable
-   local facts.
+1. Extract the stable in-process Neko boundary to a standalone service only
+   after its recovery and IPC contract is proven.
 2. Add environment/worktree ownership and explicit isolation policy.
-3. Build Attention and read models before a fleet dashboard.
+3. Build Attention and read models from durable facts before a fleet dashboard.
 4. Replace the local/managed surface switch with task/run/environment
    composition in the Wiii ADE shell.
 5. Add richer provider adapters through capability negotiation.

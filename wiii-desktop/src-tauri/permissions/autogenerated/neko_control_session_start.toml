@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-neko-control-session-start"
+description = "Enables the neko_control_session_start command without any pre-configured scope."
+commands.allow = ["neko_control_session_start"]
+
+[[permission]]
+identifier = "deny-neko-control-session-start"
+description = "Denies the neko_control_session_start command without any pre-configured scope."
+commands.deny = ["neko_control_session_start"]

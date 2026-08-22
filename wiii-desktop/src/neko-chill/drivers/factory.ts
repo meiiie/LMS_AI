@@ -32,6 +32,8 @@ export async function createDriverForAgent(
   const control = getNekoControlClient();
   const spawned = await control.spawnProvider({
     providerId: agent.id,
+    clientSessionId: sessionId,
+    workspacePath: launch.workspace.path,
     ...(launch.profileId ? { profileId: launch.profileId } : {}),
   });
   const { transport } = spawned;

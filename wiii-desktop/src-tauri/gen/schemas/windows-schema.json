@@ -537,28 +537,46 @@
           "markdownDescription": "Enables the close_splash command without any pre-configured scope."
         },
         {
-          "description": "Enables the neko_agent_profiles command without any pre-configured scope.",
+          "description": "Enables the neko_control_events_read command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-neko-agent-profiles",
-          "markdownDescription": "Enables the neko_agent_profiles command without any pre-configured scope."
+          "const": "allow-neko-control-events-read",
+          "markdownDescription": "Enables the neko_control_events_read command without any pre-configured scope."
         },
         {
-          "description": "Enables the neko_detect_agents command without any pre-configured scope.",
+          "description": "Enables the neko_control_provider_list command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-neko-detect-agents",
-          "markdownDescription": "Enables the neko_detect_agents command without any pre-configured scope."
+          "const": "allow-neko-control-provider-list",
+          "markdownDescription": "Enables the neko_control_provider_list command without any pre-configured scope."
         },
         {
-          "description": "Enables the neko_kill_agent command without any pre-configured scope.",
+          "description": "Enables the neko_control_provider_profiles command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-neko-kill-agent",
-          "markdownDescription": "Enables the neko_kill_agent command without any pre-configured scope."
+          "const": "allow-neko-control-provider-profiles",
+          "markdownDescription": "Enables the neko_control_provider_profiles command without any pre-configured scope."
         },
         {
-          "description": "Enables the neko_kill_all_agents command without any pre-configured scope.",
+          "description": "Enables the neko_control_session_cancel command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-neko-kill-all-agents",
-          "markdownDescription": "Enables the neko_kill_all_agents command without any pre-configured scope."
+          "const": "allow-neko-control-session-cancel",
+          "markdownDescription": "Enables the neko_control_session_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the neko_control_session_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-neko-control-session-list",
+          "markdownDescription": "Enables the neko_control_session_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the neko_control_session_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-neko-control-session-start",
+          "markdownDescription": "Enables the neko_control_session_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the neko_control_session_write command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-neko-control-session-write",
+          "markdownDescription": "Enables the neko_control_session_write command without any pre-configured scope."
         },
         {
           "description": "Enables the neko_list_workspace_files command without any pre-configured scope.",
@@ -573,12 +591,6 @@
           "markdownDescription": "Enables the neko_read_workspace_file command without any pre-configured scope."
         },
         {
-          "description": "Enables the neko_spawn_agent command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-neko-spawn-agent",
-          "markdownDescription": "Enables the neko_spawn_agent command without any pre-configured scope."
-        },
-        {
           "description": "Enables the neko_workspace_changes command without any pre-configured scope.",
           "type": "string",
           "const": "allow-neko-workspace-changes",
@@ -589,12 +601,6 @@
           "type": "string",
           "const": "allow-neko-workspace-diff",
           "markdownDescription": "Enables the neko_workspace_diff command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the neko_write_stdin command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-neko-write-stdin",
-          "markdownDescription": "Enables the neko_write_stdin command without any pre-configured scope."
         },
         {
           "description": "Enables the pick_document command without any pre-configured scope.",
@@ -615,28 +621,46 @@
           "markdownDescription": "Denies the close_splash command without any pre-configured scope."
         },
         {
-          "description": "Denies the neko_agent_profiles command without any pre-configured scope.",
+          "description": "Denies the neko_control_events_read command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-neko-agent-profiles",
-          "markdownDescription": "Denies the neko_agent_profiles command without any pre-configured scope."
+          "const": "deny-neko-control-events-read",
+          "markdownDescription": "Denies the neko_control_events_read command without any pre-configured scope."
         },
         {
-          "description": "Denies the neko_detect_agents command without any pre-configured scope.",
+          "description": "Denies the neko_control_provider_list command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-neko-detect-agents",
-          "markdownDescription": "Denies the neko_detect_agents command without any pre-configured scope."
+          "const": "deny-neko-control-provider-list",
+          "markdownDescription": "Denies the neko_control_provider_list command without any pre-configured scope."
         },
         {
-          "description": "Denies the neko_kill_agent command without any pre-configured scope.",
+          "description": "Denies the neko_control_provider_profiles command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-neko-kill-agent",
-          "markdownDescription": "Denies the neko_kill_agent command without any pre-configured scope."
+          "const": "deny-neko-control-provider-profiles",
+          "markdownDescription": "Denies the neko_control_provider_profiles command without any pre-configured scope."
         },
         {
-          "description": "Denies the neko_kill_all_agents command without any pre-configured scope.",
+          "description": "Denies the neko_control_session_cancel command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-neko-kill-all-agents",
-          "markdownDescription": "Denies the neko_kill_all_agents command without any pre-configured scope."
+          "const": "deny-neko-control-session-cancel",
+          "markdownDescription": "Denies the neko_control_session_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the neko_control_session_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-neko-control-session-list",
+          "markdownDescription": "Denies the neko_control_session_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the neko_control_session_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-neko-control-session-start",
+          "markdownDescription": "Denies the neko_control_session_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the neko_control_session_write command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-neko-control-session-write",
+          "markdownDescription": "Denies the neko_control_session_write command without any pre-configured scope."
         },
         {
           "description": "Denies the neko_list_workspace_files command without any pre-configured scope.",
@@ -651,12 +675,6 @@
           "markdownDescription": "Denies the neko_read_workspace_file command without any pre-configured scope."
         },
         {
-          "description": "Denies the neko_spawn_agent command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-neko-spawn-agent",
-          "markdownDescription": "Denies the neko_spawn_agent command without any pre-configured scope."
-        },
-        {
           "description": "Denies the neko_workspace_changes command without any pre-configured scope.",
           "type": "string",
           "const": "deny-neko-workspace-changes",
@@ -667,12 +685,6 @@
           "type": "string",
           "const": "deny-neko-workspace-diff",
           "markdownDescription": "Denies the neko_workspace_diff command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the neko_write_stdin command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-neko-write-stdin",
-          "markdownDescription": "Denies the neko_write_stdin command without any pre-configured scope."
         },
         {
           "description": "Denies the pick_document command without any pre-configured scope.",

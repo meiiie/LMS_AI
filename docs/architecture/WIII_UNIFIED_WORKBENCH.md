@@ -107,8 +107,9 @@ read an arbitrary local folder.
 The owning checks cover pure host derivation, capability filtering, local-first
 bootstrap, legacy migration, browser fail-closed behavior, Codex protocol
 fixtures, provider-owned login, knowledge schema validation, pre-dispatch
-durability, replay, TypeScript, web/embed builds, Rust detection, and focused
-backend retrieval tests.
+durability, TypeScript, web/embed builds, focused backend retrieval tests, and
+the native Neko contracts for provider-scoped launch, request idempotency,
+SQLite WAL recovery, per-run ordering and bounded cursor replay.
 
 Rollback is additive: retain the new event parser and stored surface key, hide
 new connection entry points, and restore the former surface renderer. Never
