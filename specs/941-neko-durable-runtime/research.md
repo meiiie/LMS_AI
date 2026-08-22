@@ -76,4 +76,3 @@ table. Detection does not reveal resolved paths to the WebView.
   single database and complicates future local/cloud stream composition.
 - **Worktree in the same PR**: adds a second durable resource owner before
   session authority is stable.
-

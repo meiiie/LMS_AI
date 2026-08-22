@@ -162,4 +162,3 @@ side-effect/committed phases become `unknown_outcome`.
   TypeScript, Rust tests and desktop builds pass.
 - **SC-005**: Documentation states exactly which lifecycle events are durable
   and which high-volume/provider payloads remain live-only.
-

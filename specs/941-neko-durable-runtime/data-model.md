@@ -129,4 +129,3 @@ no outgoing transition. A retry is a new Run.
 | `side_effect_started` | `unknown_outcome` | none |
 | `committed` without terminal completion | `unknown_outcome` | none |
 | Active session with no live in-process owner | `continuity_lost` | none |
-

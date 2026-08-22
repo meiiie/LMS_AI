@@ -90,4 +90,3 @@ journal state fails local Neko startup instead of silently deleting data.
 3. Focused Vitest for control client, driver factory, session/runtime paths.
 4. Full Rust and desktop tests, TypeScript, web/embed builds and hygiene.
 5. No screenshot: this phase intentionally changes authority, not visible UI.
-
