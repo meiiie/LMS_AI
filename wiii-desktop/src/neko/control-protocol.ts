@@ -76,7 +76,7 @@ export interface NekoControlEvent {
   type: NekoControlEventType;
   projectId?: string;
   taskId?: string;
-  runId?: string;
+  runId: string;
   agentSessionId?: string;
   payload: Record<string, unknown>;
   providerExtensions?: Record<string, string | number | boolean | null>;
@@ -269,6 +269,7 @@ export function isNekoControlReplayPage(
     ) return false;
     previous = event.seq;
   }
+  if (page.hasMore && page.events.length === 0) return false;
   return page.nextAfterSeq === previous;
 }
 

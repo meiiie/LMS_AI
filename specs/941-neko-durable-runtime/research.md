@@ -43,6 +43,13 @@ sessions, idempotency records and bounded lifecycle events. Sequence is
 allocated by `(stream_id, MAX(seq)+1)` inside the same immediate transaction
 that inserts the event.
 
+Startup maintenance keeps at most 10,000 lifecycle events per run and removes
+events older than 30 days, while retaining each stream's latest event as its
+sequence high-water mark. Terminal session detail is retained for 90 days;
+active sessions and request-identity records are not pruned. The WAL is then
+checkpointed with `TRUNCATE`. A retained stream therefore never reuses a prior
+sequence after history compaction.
+
 Large logs, terminal lines, provider frames, prompts, credentials and binary
 artifacts remain outside the database. A later manifested-file store can add
 replay for approved high-volume artifacts without changing event semantics.

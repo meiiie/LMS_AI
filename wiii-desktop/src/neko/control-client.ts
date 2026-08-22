@@ -160,7 +160,7 @@ class TauriNekoControlClient implements NekoControlClient {
   async spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider> {
     const provider = requireProviderDefinition(request.providerId);
     if (!request.workspacePath) {
-      throw new Error("Neko requires an explicit workspace before starting a provider.");
+      throw new Error("Neko cần một thư mục dự án rõ ràng trước khi khởi động agent.");
     }
     const execution = request.execution ?? legacyExecution(request.clientSessionId);
     const requestId = uuidv4();
@@ -176,6 +176,12 @@ class TauriNekoControlClient implements NekoControlClient {
     const unresolvedWriteIds = new Map<string, string>();
     let unlistenLine: (() => void) | null = null;
     let unlistenExit: (() => void) | null = null;
+    const detach = () => {
+      unlistenLine?.();
+      unlistenExit?.();
+      unlistenLine = null;
+      unlistenExit = null;
+    };
 
     // Subscribe before the side effect so provider bootstrap output cannot
     // race ahead of the WebView listener registration.
@@ -185,16 +191,18 @@ class TauriNekoControlClient implements NekoControlClient {
       });
       unlistenExit = await listen<number | null>(`neko-session://exit/${agentSessionId}`, (event) => {
         for (const handler of exitHandlers) handler(event.payload ?? null);
+        killed = true;
+        unresolvedWriteIds.clear();
+        queueMicrotask(detach);
       });
     } catch (error) {
-      unlistenLine?.();
-      unlistenExit?.();
+      detach();
       throw error;
     }
 
     let started: NativeSessionStartResult;
     try {
-      started = await invokeIdempotently<NativeSessionStartResult>(invoke, "neko_control_session_start", {
+      const result = await invokeIdempotently<unknown>(invoke, "neko_control_session_start", {
         request: {
           requestId,
           agentSessionId,
@@ -206,9 +214,12 @@ class TauriNekoControlClient implements NekoControlClient {
           ...(request.profileId ? { profileId: request.profileId } : {}),
         },
       });
+      if (!isNativeSessionStartResult(result)) {
+        throw new Error("Neko trả về kết quả khởi động phiên không hợp lệ.");
+      }
+      started = result;
     } catch (error) {
-      unlistenLine?.();
-      unlistenExit?.();
+      detach();
       // A rejected start may represent unknown_outcome. Never issue a second
       // native side effect as cleanup without an authoritative start result.
       throw error;
@@ -257,8 +268,7 @@ class TauriNekoControlClient implements NekoControlClient {
             });
             killed = true;
             unresolvedWriteIds.clear();
-            unlistenLine?.();
-            unlistenExit?.();
+            detach();
           })();
         }
         try {
@@ -267,6 +277,7 @@ class TauriNekoControlClient implements NekoControlClient {
           // A caller may ask again, but it will reuse the same durable request
           // identity and therefore cannot repeat an uncertain cancellation.
           killPromise = null;
+          detach();
           throw error;
         }
       },
@@ -329,6 +340,16 @@ function isNativeSessionRecord(value: unknown): value is NekoNativeSessionRecord
   );
 }
 
+function isNativeSessionStartResult(value: unknown): value is NativeSessionStartResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  return (
+    typeof result.agentSessionId === "string" &&
+    typeof result.runId === "string" &&
+    isDetectedProvider(result.provider)
+  );
+}
+
 async function invokeIdempotently<T>(
   invoke: <R>(command: string, args?: Record<string, unknown>) => Promise<R>,
   command: string,
@@ -336,11 +357,24 @@ async function invokeIdempotently<T>(
 ): Promise<T> {
   try {
     return await invoke<T>(command, args);
-  } catch {
+  } catch (first) {
+    // Rust command rejections are serialized strings and deterministic. Retry
+    // only bridge/runtime failures where response delivery is uncertain.
+    if (typeof first === "string") throw first;
     // Retrying the identical request identity is safe: Rust either returns
     // the recorded result or reports unknown_outcome without repeating the
     // side effect. Never mint a replacement request here.
-    return invoke<T>(command, args);
+    try {
+      return await invoke<T>(command, args);
+    } catch (second) {
+      if (typeof second === "string") throw second;
+      const message = second instanceof Error ? second.message : String(second);
+      const failure = new Error(`${command} failed after an uncertain IPC retry: ${message}`) as Error & {
+        cause?: unknown;
+      };
+      failure.cause = first;
+      throw failure;
+    }
   }
 }
 

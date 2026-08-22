@@ -1,8 +1,76 @@
 use serde::{Deserialize, Serialize};
-use std::process::{Command, Stdio};
+use std::io::{self, Read};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc::sync_channel;
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
+
+struct ProbeOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+}
+
+/// Run a discovery command without allowing a broken provider shim to hang
+/// the desktop. The reader drains stdout after the durable cap so the child
+/// cannot deadlock on a full pipe while remaining bounded in memory.
+fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    hidden(&mut command);
+    let mut child = command.spawn()?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("provider probe stdout was not piped"))?;
+    let (output_tx, output_rx) = sync_channel(1);
+    thread::spawn(move || {
+        let mut captured = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        let result = loop {
+            let read = match stdout.read(&mut chunk) {
+                Ok(read) => read,
+                Err(error) => break Err(error),
+            };
+            if read == 0 {
+                break Ok(captured);
+            }
+            let remaining = MAX_PROBE_OUTPUT_BYTES.saturating_sub(captured.len());
+            captured.extend_from_slice(&chunk[..read.min(remaining)]);
+        };
+        let _ = output_tx.send(result);
+    });
+    let deadline = Instant::now() + PROBE_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "provider probe timed out",
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+    let stdout = output_rx
+        .recv_timeout(Duration::from_millis(250))
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                "provider probe stdout did not close",
+            )
+        })??;
+    Ok(ProbeOutput { status, stdout })
+}
 
 pub(crate) fn hidden(command: &mut Command) -> &mut Command {
     #[cfg(windows)]
@@ -112,14 +180,8 @@ pub struct ResolvedProvider {
 fn probe_definition(provider: ProviderDefinition) -> Option<ResolvedProvider> {
     for candidate in provider.candidates() {
         let mut command = Command::new(candidate);
-        hidden(
-            command
-                .arg(provider.version_arg)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null()),
-        );
-        if let Ok(output) = command.output() {
+        command.arg(provider.version_arg);
+        if let Ok(output) = run_probe(command) {
             if output.status.success() {
                 let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 return Some(ResolvedProvider {
@@ -233,17 +295,8 @@ pub fn profiles(provider_id: &str, cwd: &str) -> Result<Vec<AgentProfile>, Strin
     }
     let resolved = resolve(provider_id)?;
     let mut command = Command::new(&resolved.program);
-    hidden(
-        command
-            .arg("profiles")
-            .current_dir(cwd_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null()),
-    );
-    let output = command
-        .output()
-        .map_err(|error| format!("profile probe failed: {error}"))?;
+    command.arg("profiles").current_dir(cwd_path);
+    let output = run_probe(command).map_err(|error| format!("profile probe failed: {error}"))?;
     if !output.status.success() {
         return Err(format!("profile probe exited with {}", output.status));
     }

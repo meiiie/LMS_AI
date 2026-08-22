@@ -6,15 +6,25 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{channel, sync_channel, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+
+const WRITER_QUEUE_CAPACITY: usize = 32;
+const WRITE_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+struct WriteJob {
+    line: String,
+    result: std::sync::mpsc::Sender<io::Result<()>>,
+}
 
 struct AgentProc {
     child: Child,
-    stdin: ChildStdin,
+    writer: SyncSender<WriteJob>,
 }
 
 struct RuntimeInner {
@@ -178,26 +188,30 @@ impl NekoRuntime {
                 .fail_request(&request.request_id, "invalid_state");
             return Err(error);
         }
-        self.emit_control_event(
+        if let Err(error) = self.emit_control_event(
             &app,
             &request.run_id,
             "session.created",
             &request.agent_session_id,
             json!({ "providerId": request.provider_id }),
-        )?;
+        ) {
+            return Err(self.reject_start_error(&app, &request, "journal_error", None, error));
+        }
 
-        self.inner
-            .journal
-            .set_request_phase(&request.request_id, OperationPhase::Dispatched)?;
-        self.inner
-            .journal
-            .set_session_phase(&request.agent_session_id, OperationPhase::Dispatched)?;
+        if let Err(error) = self.advance_start_phase(&request, OperationPhase::Dispatched) {
+            return Err(self.reject_start_error(&app, &request, "journal_error", None, error));
+        }
 
         let resolved = match provider::resolve(&request.provider_id) {
             Ok(resolved) => resolved,
             Err(error) => {
-                self.reject_start(&app, &request, "provider_unavailable", None)?;
-                return Err(error);
+                return Err(self.reject_start_error(
+                    &app,
+                    &request,
+                    "provider_unavailable",
+                    None,
+                    error,
+                ));
             }
         };
         let args = match resolved
@@ -206,22 +220,25 @@ impl NekoRuntime {
         {
             Ok(args) => args,
             Err(error) => {
-                self.reject_start(
+                return Err(self.reject_start_error(
                     &app,
                     &request,
                     "invalid_request",
                     resolved.version.as_deref(),
-                )?;
-                return Err(error);
+                    error,
+                ));
             }
         };
 
-        self.inner
-            .journal
-            .set_request_phase(&request.request_id, OperationPhase::SideEffectStarted)?;
-        self.inner
-            .journal
-            .set_session_phase(&request.agent_session_id, OperationPhase::SideEffectStarted)?;
+        if let Err(error) = self.advance_start_phase(&request, OperationPhase::SideEffectStarted) {
+            return Err(self.reject_start_error(
+                &app,
+                &request,
+                "journal_error",
+                resolved.version.as_deref(),
+                error,
+            ));
+        }
 
         let mut command = Command::new(&resolved.program);
         hidden(
@@ -235,13 +252,13 @@ impl NekoRuntime {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
-                self.reject_start(
+                return Err(self.reject_start_error(
                     &app,
                     &request,
                     "provider_unavailable",
                     resolved.version.as_deref(),
-                )?;
-                return Err(format!("spawn approved provider failed: {error}"));
+                    format!("spawn approved provider failed: {error}"),
+                ));
             }
         };
         let stdin = child.stdin.take();
@@ -260,14 +277,24 @@ impl NekoRuntime {
                     None,
                     resolved.version.as_deref(),
                 );
+                let _ = self.emit_control_event(
+                    &app,
+                    &request.run_id,
+                    "run.state_changed",
+                    &request.agent_session_id,
+                    json!({ "state": "unknown_outcome", "reason": "provider_stdio_unavailable" }),
+                );
                 return Err(
                     "provider stdio became unavailable after spawn; outcome is unknown".into(),
                 );
             }
         };
         let pid = child.id();
-        lock(&self.inner.processes)
-            .insert(request.agent_session_id.clone(), AgentProc { child, stdin });
+        let writer = spawn_writer(stdin);
+        lock(&self.inner.processes).insert(
+            request.agent_session_id.clone(),
+            AgentProc { child, writer },
+        );
 
         let result = SessionStartResult {
             agent_session_id: request.agent_session_id.clone(),
@@ -326,6 +353,13 @@ impl NekoRuntime {
                 None,
                 resolved.version.as_deref(),
             );
+            let _ = self.emit_control_event(
+                &app,
+                &request.run_id,
+                "run.state_changed",
+                &request.agent_session_id,
+                json!({ "state": "unknown_outcome", "reason": "ownership_commit_failed" }),
+            );
             return Err(format!(
                 "provider spawned but ownership commit failed: {error}"
             ));
@@ -355,54 +389,89 @@ impl NekoRuntime {
         if request.line.is_empty() || request.line.len() > 1024 * 1024 {
             return Err("provider frame must be between 1 byte and 1 MiB".into());
         }
-        let _operation = lock(&self.inner.operations);
         let target = digest_target(&[&request.agent_session_id, &request.line]);
-        match self
-            .inner
-            .journal
-            .begin_request(&request.request_id, "session/write", &target)?
-        {
-            RequestDecision::Replay(_) => return Ok(()),
-            RequestDecision::RecordedError(code) => {
-                return Err(format!("recorded session write failed: {code}"));
+        let writer = {
+            let _operation = lock(&self.inner.operations);
+            match self
+                .inner
+                .journal
+                .begin_request(&request.request_id, "session/write", &target)?
+            {
+                RequestDecision::Replay(_) => return Ok(()),
+                RequestDecision::RecordedError(code) => {
+                    return Err(format!("recorded session write failed: {code}"));
+                }
+                RequestDecision::UnknownOutcome => {
+                    return Err(
+                        "session write has unknown_outcome; automatic replay is forbidden".into(),
+                    );
+                }
+                RequestDecision::Execute => {}
             }
-            RequestDecision::UnknownOutcome => {
+            self.inner
+                .journal
+                .set_request_phase(&request.request_id, OperationPhase::Dispatched)?;
+            let writer = lock(&self.inner.processes)
+                .get(&request.agent_session_id)
+                .map(|process| process.writer.clone());
+            let Some(writer) = writer else {
+                self.inner
+                    .journal
+                    .fail_request(&request.request_id, "invalid_state")?;
+                return Err("no live provider process for this agent session".into());
+            };
+            self.inner
+                .journal
+                .set_request_phase(&request.request_id, OperationPhase::SideEffectStarted)?;
+            writer
+        };
+
+        // Never hold the global lifecycle lock during provider I/O. Each
+        // session has a bounded writer queue, so one stalled provider cannot
+        // freeze cancellation, shutdown, or unrelated sessions.
+        let (result_tx, result_rx) = channel();
+        match writer.try_send(WriteJob {
+            line: request.line,
+            result: result_tx,
+        }) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                let _operation = lock(&self.inner.operations);
+                self.inner
+                    .journal
+                    .fail_request(&request.request_id, "provider_busy")?;
                 return Err(
-                    "session write has unknown_outcome; automatic replay is forbidden".into(),
+                    "provider stdin queue is full; retry with a new request identity".into(),
                 );
             }
-            RequestDecision::Execute => {}
+            Err(TrySendError::Disconnected(_)) => {
+                let _operation = lock(&self.inner.operations);
+                self.inner
+                    .journal
+                    .fail_request(&request.request_id, "invalid_state")?;
+                return Err("provider stdin is no longer available".into());
+            }
         }
-        self.inner
-            .journal
-            .set_request_phase(&request.request_id, OperationPhase::Dispatched)?;
-        if !lock(&self.inner.processes).contains_key(&request.agent_session_id) {
-            self.inner
-                .journal
-                .fail_request(&request.request_id, "invalid_state")?;
-            return Err("no live provider process for this agent session".into());
-        }
-        self.inner
-            .journal
-            .set_request_phase(&request.request_id, OperationPhase::SideEffectStarted)?;
-        let result = {
-            let mut processes = lock(&self.inner.processes);
-            let process = processes
-                .get_mut(&request.agent_session_id)
-                .ok_or("no live provider process for this agent session")?;
-            process
-                .stdin
-                .write_all(request.line.as_bytes())
-                .and_then(|_| process.stdin.write_all(b"\n"))
-                .and_then(|_| process.stdin.flush())
-        };
-        if let Err(error) = result {
-            self.inner
-                .journal
-                .mark_request_unknown(&request.request_id)?;
-            return Err(format!(
-                "provider stdin write failed after dispatch; outcome is unknown: {error}"
-            ));
+        let result = result_rx.recv_timeout(WRITE_RESULT_TIMEOUT);
+        let _operation = lock(&self.inner.operations);
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                self.inner
+                    .journal
+                    .mark_request_unknown(&request.request_id)?;
+                return Err(format!(
+                    "provider stdin write failed after dispatch; outcome is unknown: {error}"
+                ));
+            }
+            Err(error) => {
+                self.inner
+                    .journal
+                    .mark_request_unknown(&request.request_id)?;
+                return Err(format!(
+                    "provider stdin acknowledgement was lost; outcome is unknown: {error}"
+                ));
+            }
         }
         self.inner
             .journal
@@ -559,24 +628,63 @@ impl NekoRuntime {
         reason: &str,
         provider_version: Option<&str>,
     ) -> Result<(), String> {
-        self.inner
-            .journal
-            .fail_request(&request.request_id, reason)?;
-        self.inner.journal.update_session(
+        let mut failures = Vec::new();
+        if let Err(error) = self.inner.journal.fail_request(&request.request_id, reason) {
+            failures.push(error);
+        }
+        if let Err(error) = self.inner.journal.update_session(
             &request.agent_session_id,
             RunState::Failed,
             OperationPhase::Failed,
             "continuity_lost",
             None,
             provider_version,
-        )?;
-        self.emit_control_event(
+        ) {
+            failures.push(error);
+        }
+        if let Err(error) = self.emit_control_event(
             app,
             &request.run_id,
             "run.state_changed",
             &request.agent_session_id,
             json!({ "state": "failed", "reason": reason }),
-        )
+        ) {
+            failures.push(error);
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
+
+    fn reject_start_error(
+        &self,
+        app: &AppHandle,
+        request: &SessionStartRequest,
+        reason: &str,
+        provider_version: Option<&str>,
+        original: String,
+    ) -> String {
+        match self.reject_start(app, request, reason, provider_version) {
+            Ok(()) => original,
+            Err(recording_error) => format!(
+                "{original}; additionally failed to persist rejected start: {recording_error}"
+            ),
+        }
+    }
+
+    fn advance_start_phase(
+        &self,
+        request: &SessionStartRequest,
+        phase: OperationPhase,
+    ) -> Result<(), String> {
+        self.inner
+            .journal
+            .set_request_phase(&request.request_id, phase)?;
+        self.inner
+            .journal
+            .set_session_phase(&request.agent_session_id, phase)
     }
 
     fn finish_process(&self, app: &AppHandle, agent_session_id: &str) -> Option<i32> {
@@ -672,6 +780,24 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn spawn_writer(mut stdin: std::process::ChildStdin) -> SyncSender<WriteJob> {
+    let (sender, receiver) = sync_channel::<WriteJob>(WRITER_QUEUE_CAPACITY);
+    std::thread::spawn(move || {
+        for job in receiver {
+            let result = stdin
+                .write_all(job.line.as_bytes())
+                .and_then(|_| stdin.write_all(b"\n"))
+                .and_then(|_| stdin.flush());
+            let failed = result.is_err();
+            let _ = job.result.send(result);
+            if failed {
+                break;
+            }
+        }
+    });
+    sender
 }
 
 fn kill_proc(mut process: AgentProc) {

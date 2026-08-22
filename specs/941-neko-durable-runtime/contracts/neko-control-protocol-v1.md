@@ -73,6 +73,13 @@ Response:
 `nextAfterSeq` equals the last returned sequence or the caller cursor when no
 event is returned.
 
+Lifecycle replay is retained for 30 days and capped at 10,000 events per run.
+The latest event in every known stream is retained as a sequence high-water
+mark, so compaction may create a historical gap but never resets or reuses a
+stream sequence. Clients must accept the first returned sequence being greater
+than `afterSeq + 1`; restoring a full historical transcript is outside Phase
+2A because provider stdout and message/tool deltas remain live-only.
+
 ## Durable versus live-only
 
 Durable in Phase 2A:

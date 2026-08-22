@@ -179,3 +179,17 @@ for provider-transcript replay or an independent daemon.
 
 Advanced orchestration follows only after these deterministic boundaries are
 durable.
+
+## Native runtime risk and rollback
+
+The native runtime changes executable authority, process ownership, Tauri
+permissions and durable lifecycle state as one release boundary. Its main
+risks are an incompatible renderer/native command pair, an unavailable journal,
+or recovery semantics that disagree with a process side effect. Rollback must
+therefore revert the **complete desktop release**. Do not partially restore raw
+WebView spawn/stdin/PID permissions.
+
+Keep `neko-runtime-v1.sqlite3`, session snapshots, provider thread IDs, account
+records and recovery evidence intact. An older release may leave the additive
+journal unused, but rollback must never delete or reinterpret uncertain
+operations. Re-entry to a newer release must run the documented recovery path.

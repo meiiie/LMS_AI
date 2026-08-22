@@ -147,6 +147,21 @@ describe("Neko driver factory resource ownership", () => {
     expect(spawned.agentSessionId).toBe(startsCalls[0][1].request.agentSessionId);
   });
 
+  it("does not retry deterministic native command rejections", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    tauri.invoke.mockRejectedValue("invalid workspace");
+
+    await expect(getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-invalid",
+      workspacePath: "C:/tmp/project",
+    })).rejects.toBe("invalid workspace");
+
+    expect(tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_start",
+    )).toHaveLength(1);
+  });
+
   it("retains a write identity when the caller retries an unresolved frame", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     let writes = 0;

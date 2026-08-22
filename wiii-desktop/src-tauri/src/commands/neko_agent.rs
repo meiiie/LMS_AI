@@ -13,17 +13,25 @@ use crate::neko::runtime::{
 use tauri::{AppHandle, State};
 
 #[tauri::command]
-pub fn neko_control_provider_list(runtime: State<'_, NekoRuntime>) -> Vec<AgentInfo> {
-    runtime.list_providers()
+pub async fn neko_control_provider_list(
+    runtime: State<'_, NekoRuntime>,
+) -> Result<Vec<AgentInfo>, String> {
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.list_providers())
+        .await
+        .map_err(|error| format!("Neko provider discovery task failed: {error}"))
 }
 
 #[tauri::command]
-pub fn neko_control_provider_profiles(
+pub async fn neko_control_provider_profiles(
     runtime: State<'_, NekoRuntime>,
     provider_id: String,
     cwd: String,
 ) -> Result<Vec<AgentProfile>, String> {
-    runtime.list_profiles(&provider_id, &cwd)
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.list_profiles(&provider_id, &cwd))
+        .await
+        .map_err(|error| format!("Neko provider profile task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -35,29 +43,38 @@ pub fn neko_control_session_list(
 }
 
 #[tauri::command]
-pub fn neko_control_session_start(
+pub async fn neko_control_session_start(
     app: AppHandle,
     runtime: State<'_, NekoRuntime>,
     request: SessionStartRequest,
 ) -> Result<SessionStartResult, String> {
-    runtime.start_session(app, request)
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.start_session(app, request))
+        .await
+        .map_err(|error| format!("Neko session start task failed: {error}"))?
 }
 
 #[tauri::command]
-pub fn neko_control_session_write(
+pub async fn neko_control_session_write(
     runtime: State<'_, NekoRuntime>,
     request: SessionWriteRequest,
 ) -> Result<(), String> {
-    runtime.write_session(request)
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.write_session(request))
+        .await
+        .map_err(|error| format!("Neko session write task failed: {error}"))?
 }
 
 #[tauri::command]
-pub fn neko_control_session_cancel(
+pub async fn neko_control_session_cancel(
     app: AppHandle,
     runtime: State<'_, NekoRuntime>,
     request: SessionCancelRequest,
 ) -> Result<SessionCancelResult, String> {
-    runtime.cancel_session(&app, request)
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.cancel_session(&app, request))
+        .await
+        .map_err(|error| format!("Neko session cancel task failed: {error}"))?
 }
 
 #[tauri::command]

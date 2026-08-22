@@ -132,6 +132,43 @@ describe("Neko Control Protocol", () => {
       nextAfterSeq: 6,
       hasMore: false,
     }, "run-1", 6)).toBe(false);
+    expect(isNekoControlReplayPage({
+      streamId: "run-1",
+      events,
+      nextAfterSeq: 7,
+      hasMore: false,
+    }, "run-1", 6)).toBe(false);
+    expect(isNekoControlReplayPage({
+      streamId: "run-1",
+      events: [],
+      nextAfterSeq: 5,
+      hasMore: false,
+    }, "run-1", 6)).toBe(false);
+    expect(isNekoControlReplayPage({
+      streamId: "run-1",
+      events: [],
+      nextAfterSeq: 6,
+      hasMore: true,
+    }, "run-1", 6)).toBe(false);
+  });
+
+  it("bounds durable replay page size", () => {
+    for (const limit of [0, 501]) {
+      expect(parseNekoControlRequest({
+        v: 1,
+        requestId: `request-limit-${limit}`,
+        method: "events/read",
+        params: { streamId: "run-1", afterSeq: 0, limit },
+      })).toEqual(expect.objectContaining({ ok: false }));
+    }
+    for (const limit of [1, 500]) {
+      expect(parseNekoControlRequest({
+        v: 1,
+        requestId: `request-limit-${limit}`,
+        method: "events/read",
+        params: { streamId: "run-1", afterSeq: 0, limit },
+      })).toEqual(expect.objectContaining({ ok: true }));
+    }
   });
 
   it("rejects profile discovery for providers outside the registry", () => {

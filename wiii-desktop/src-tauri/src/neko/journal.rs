@@ -2,7 +2,7 @@ use super::lifecycle::{
     can_advance_operation, can_transition, recovery_disposition, OperationPhase,
     RecoveryDisposition, RunState,
 };
-use chrono::{SecondsFormat, Utc};
+use chrono::{Duration, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -12,6 +12,9 @@ use uuid::Uuid;
 
 const MAX_EVENT_PAYLOAD_BYTES: usize = 4 * 1024;
 const MAX_REPLAY_LIMIT: u32 = 500;
+const MAX_EVENTS_PER_STREAM: i64 = 10_000;
+const EVENT_RETENTION_DAYS: i64 = 30;
+const TERMINAL_RECORD_RETENTION_DAYS: i64 = 90;
 
 #[derive(Clone)]
 pub struct Journal {
@@ -98,6 +101,7 @@ impl Journal {
             .map_err(|error| format!("open Neko runtime journal failed: {error}"))?;
         let journal = Self::from_connection(connection)?;
         journal.recover_incomplete()?;
+        journal.run_startup_maintenance()?;
         Ok(journal)
     }
 
@@ -165,6 +169,55 @@ impl Journal {
         lock(&self.connection)
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .map_err(|error| format!("read Neko journal mode failed: {error}"))
+    }
+
+    /// Bound local metadata growth without deleting active lifecycle facts.
+    /// Large terminal output and artifacts are intentionally not stored in
+    /// this journal; retained events remain sufficient for reconnect/replay.
+    fn run_startup_maintenance(&self) -> Result<(), String> {
+        let event_cutoff = (Utc::now() - Duration::days(EVENT_RETENTION_DAYS))
+            .to_rfc3339_opts(SecondsFormat::Millis, true);
+        let terminal_cutoff = (Utc::now() - Duration::days(TERMINAL_RECORD_RETENTION_DAYS))
+            .to_rfc3339_opts(SecondsFormat::Millis, true);
+        let mut connection = lock(&self.connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("begin Neko journal maintenance failed: {error}"))?;
+        transaction
+            .execute(
+                "DELETE FROM control_events
+                  WHERE (at < ?1 AND seq < (
+                           SELECT MAX(latest.seq)
+                             FROM control_events AS latest
+                            WHERE latest.stream_id = control_events.stream_id
+                         ))
+                     OR rowid IN (
+                       SELECT rowid FROM (
+                         SELECT rowid,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY stream_id ORDER BY seq DESC
+                                ) AS retention_rank
+                           FROM control_events
+                       ) WHERE retention_rank > ?2
+                     )",
+                params![event_cutoff, MAX_EVENTS_PER_STREAM],
+            )
+            .map_err(|error| format!("prune Neko control events failed: {error}"))?;
+        transaction
+            .execute(
+                "DELETE FROM runtime_sessions
+                  WHERE state IN ('completed', 'failed', 'cancelled', 'unknown_outcome')
+                    AND updated_at < ?1",
+                [terminal_cutoff.as_str()],
+            )
+            .map_err(|error| format!("prune terminal Neko sessions failed: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit Neko journal maintenance failed: {error}"))?;
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA optimize;")
+            .map_err(|error| format!("checkpoint Neko journal failed: {error}"))?;
+        Ok(())
     }
 
     pub fn begin_request(
@@ -1031,5 +1084,71 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
         let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn startup_maintenance_bounds_history_without_reusing_stream_sequences() {
+        let journal = Journal::in_memory();
+        journal
+            .insert_session(session("stale-terminal", "run-a"))
+            .unwrap();
+        journal
+            .insert_session(session("stale-active", "run-b"))
+            .unwrap();
+        for index in 0..3 {
+            journal
+                .append_event(
+                    "run-a",
+                    "run.state_changed",
+                    "run-a",
+                    Some("stale-terminal"),
+                    json!({ "index": index }),
+                )
+                .unwrap();
+        }
+        {
+            let connection = lock(&journal.connection);
+            connection
+                .execute(
+                    "UPDATE runtime_sessions
+                        SET state = 'cancelled', operation_phase = 'completed',
+                            updated_at = '2020-01-01T00:00:00.000Z'
+                      WHERE agent_session_id = 'stale-terminal'",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE runtime_sessions
+                        SET updated_at = '2020-01-01T00:00:00.000Z'
+                      WHERE agent_session_id = 'stale-active'",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE control_events SET at = '2020-01-01T00:00:00.000Z'",
+                    [],
+                )
+                .unwrap();
+        }
+
+        journal.run_startup_maintenance().unwrap();
+
+        assert!(journal.session("stale-terminal").unwrap().is_none());
+        assert!(journal.session("stale-active").unwrap().is_some());
+        let retained = journal.replay("run-a", 0, 10).unwrap();
+        assert_eq!(retained.events.len(), 1);
+        assert_eq!(retained.events[0].seq, 3);
+        let next = journal
+            .append_event(
+                "run-a",
+                "run.state_changed",
+                "run-a",
+                None,
+                json!({ "index": 3 }),
+            )
+            .unwrap();
+        assert_eq!(next.seq, 4);
     }
 }

@@ -43,6 +43,9 @@ describe("Neko provider registry", () => {
     for (const provider of listProviderDefinitions()) {
       expect(provider).not.toHaveProperty("launchArgs");
       expect(provider).not.toHaveProperty("profileArgument");
+      expect(provider).not.toHaveProperty("binary");
+      expect(provider).not.toHaveProperty("executable");
+      expect(provider).not.toHaveProperty("command");
     }
   });
 
