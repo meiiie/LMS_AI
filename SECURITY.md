@@ -25,8 +25,9 @@ credential first, then report only a redacted identifier.
 
 | Line | Security support |
 | --- | --- |
-| Latest stable GitHub Release | Supported |
-| `main` | Development branch; fixes land here before release |
+| Public stable GitHub Release | None published yet |
+| `main` | Development branch; security fixes land here before release |
+| Candidate workflow artifacts | Evaluation only; not a supported distribution |
 | Older releases | Not supported unless a release notice says otherwise |
 
 ## Response process

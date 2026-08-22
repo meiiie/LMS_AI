@@ -27,9 +27,9 @@
 
 ## Phase 4 - Release truth (PR 3)
 
-- [ ] T013 [US3] Make candidate notes and stable dated notes distinct in the release checker.
-- [ ] T014 [US3] Add tests proving stable tag validation fails on candidate-only metadata.
-- [ ] T015 [US3] Correct changelog links, README installation copy, SECURITY support state,
+- [x] T013 [US3] Make candidate notes and stable dated notes distinct in the release checker.
+- [x] T014 [US3] Add tests proving stable tag validation fails on candidate-only metadata.
+- [x] T015 [US3] Correct changelog links, README installation copy, SECURITY support state,
   and release documentation to match the absence of a stable release.
 - [ ] T016 [US3] Run release tests/checks and dispatch a complete candidate build after merge.
 

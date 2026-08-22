@@ -264,7 +264,11 @@ jobs:
             --release-target "$RELEASE_TARGET_VALUE" \
             --version "$version" \
             --git-sha "$GIT_SHA_VALUE"
-          python tools/release/wiii_release.py notes "$version" --out artifacts/release/release-notes.md
+          arguments=(tools/release/wiii_release.py notes "$version" --out artifacts/release/release-notes.md)
+          if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
+            arguments+=(--tag "${GITHUB_REF_NAME}")
+          fi
+          python "${arguments[@]}"
 
       - name: Verify stable Windows signature
         if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')

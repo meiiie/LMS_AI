@@ -15,9 +15,12 @@ Wiii uses Semantic Versioning for the public product line:
 - **PATCH** — a backward-compatible correction or security hardening release.
 - Prereleases use SemVer suffixes such as `1.3.0-rc.1`.
 
-`VERSION` is authoritative. The release tool checks every duplicated version
-surface used by npm, Tauri, Cargo, structured metadata, splash UI, and installer
-art. A release is invalid when any surface diverges.
+`VERSION` is authoritative for the coordinated source and package version. It
+is a release target, not evidence of publication. The release tool checks every
+duplicated version surface used by npm, Tauri, Cargo, structured metadata,
+splash UI, and installer art. A candidate is invalid when any surface diverges;
+a stable release additionally requires its immutable tag, dated changelog
+section, verified artifacts, and GitHub Release.
 
 ## 2. Channels
 
@@ -36,6 +39,7 @@ tests the exact commit once, then builds this release matrix:
 Each matrix member emits professionally named packages, SHA-256 sidecars,
 release notes, and a platform manifest. Candidate artifacts are internal
 evaluation builds and must never be presented as a public stable release.
+Candidate notes come from the non-empty `Unreleased` changelog section.
 
 Ubuntu 22.04 is intentional. Tauri v2 requires WebKitGTK 4.1 and recommends
 building on the oldest supported Linux baseline to avoid raising the required
@@ -92,8 +96,11 @@ Prepare a version on a release branch:
 
 ```powershell
 python tools/release/wiii_release.py set 1.3.0
-# Move CHANGELOG entries from Unreleased into a dated [1.3.0] section.
+# Candidate mode validates non-empty [Unreleased] notes.
 python tools/release/wiii_release.py check
+# Before tagging, move those notes into a dated [1.3.0] section and validate
+# the exact stable tag contract.
+python tools/release/wiii_release.py check --tag wiii-v1.3.0
 ```
 
 After the release PR is merged and its commit is known:

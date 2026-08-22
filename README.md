@@ -60,10 +60,15 @@ Shared architecture, governance, research, and brand sources live in
 
 ## Quick start
 
-### Install a desktop release
+### Desktop distribution status
 
-Governed desktop packages are published on the
-[Wiii Releases page](https://github.com/meiiie/wiii/releases):
+Wiii does not yet have a public stable desktop release. `VERSION` identifies
+the coordinated release target in source; it does not mean a matching tag or
+download has been published. Maintainer-triggered workflow artifacts are
+unsigned evaluation candidates, not stable packages.
+
+When the signed release gates pass, stable packages will be published on the
+[Wiii Releases page](https://github.com/meiiie/wiii/releases) with this matrix:
 
 | Platform | Package |
 | --- | --- |
@@ -73,11 +78,12 @@ Governed desktop packages are published on the
 | macOS Apple Silicon | ARM64 `.dmg` |
 | macOS Intel | x64 `.dmg` |
 
-Verify the adjacent `.sha256` file before installation. Windows stable builds
-must be Authenticode-signed. macOS packages are currently ad-hoc signed but not
-Apple-notarized, so their filenames explicitly include `unnotarized`; see the
-[release standard](docs/releases/WIII_RELEASE_STANDARD.md) for Gatekeeper and
-trust guidance.
+Do not treat a CI artifact or a locally built installer as a stable release.
+Published packages must include an adjacent `.sha256` file; Windows stable
+builds must be Authenticode-signed. macOS packages are currently ad-hoc signed
+but not Apple-notarized, so their filenames explicitly include `unnotarized`;
+see the [release standard](docs/releases/WIII_RELEASE_STANDARD.md) for the exact
+trust contract.
 
 ### Desktop workbench
 
