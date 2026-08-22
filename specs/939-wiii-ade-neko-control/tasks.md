@@ -56,8 +56,8 @@
   repository hygiene checks.
 - [x] T403 Update task status and architecture documentation to match the
   implementation exactly.
-- [ ] T404 Commit, push, open the issue-linked PR with risk/rollback evidence,
-  and resolve relevant review/CI findings.
+- [x] T404 Commit, push, open PR #940 with risk/rollback evidence, and resolve
+  the repository-hygiene finding before merge.
 
 ## Dependencies
 
