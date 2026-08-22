@@ -13,6 +13,24 @@ class FakeCodexTransport implements AcpTransport {
   killed = false;
   completeSynchronously = false;
   returnTurnId = true;
+  modelData: unknown[] = [
+    {
+      model: "gpt-test",
+      displayName: "GPT Test",
+      description: "fixture model",
+      hidden: false,
+      isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+    },
+    {
+      model: "gpt-fast",
+      displayName: "GPT Fast",
+      description: "fixture fast model",
+      hidden: false,
+      isDefault: false,
+      supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }],
+    },
+  ];
 
   async send(line: string): Promise<void> {
     const frame = JSON.parse(line) as Record<string, unknown>;
@@ -23,24 +41,7 @@ class FakeCodexTransport implements AcpTransport {
     if (frame.method === "initialize") respond({ userAgent: "codex", codexHome: "C:/Codex", platformFamily: "windows", platformOs: "windows" });
     else if (frame.method === "account/read") respond({ account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: true });
     else if (frame.method === "model/list") respond({
-      data: [
-        {
-          model: "gpt-test",
-          displayName: "GPT Test",
-          description: "fixture model",
-          hidden: false,
-          isDefault: true,
-          supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
-        },
-        {
-          model: "gpt-fast",
-          displayName: "GPT Fast",
-          description: "fixture fast model",
-          hidden: false,
-          isDefault: false,
-          supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }],
-        },
-      ],
+      data: this.modelData,
       nextCursor: null,
     });
     else if (frame.method === "thread/start") respond({
@@ -91,9 +92,10 @@ class FakeCodexTransport implements AcpTransport {
   }
 }
 
-async function startFixture(completeSynchronously = false) {
+async function startFixture(completeSynchronously = false, modelData?: unknown[]) {
   const transport = new FakeCodexTransport();
   transport.completeSynchronously = completeSynchronously;
+  if (modelData) transport.modelData = modelData;
   const events: DriverEvent[] = [];
   const driver = new CodexAppServerDriver({
     sessionId: "local-1",
@@ -110,6 +112,14 @@ describe("Codex App Server driver", () => {
     const { driver, events, transport } = await startFixture();
     expect(driver.kind).toBe("codex-app-server");
     expect(driver.backendSessionId).toBe("thread-1");
+    expect(driver.runtime.observedProviderCapabilities).toEqual(expect.objectContaining({
+      resume: true,
+      modelSelection: true,
+      reasoning: true,
+      approvals: true,
+      toolEvents: true,
+      diff: true,
+    }));
     expect(events).toContainEqual(expect.objectContaining({
       type: "session-controls",
       controls: expect.arrayContaining([
@@ -135,6 +145,15 @@ describe("Codex App Server driver", () => {
       sessionId: "local-1",
       stopReason: "end_turn",
     });
+  });
+
+  it("does not advertise model or reasoning controls when the catalog is empty", async () => {
+    const { driver } = await startFixture(false, []);
+
+    expect(driver.runtime.observedProviderCapabilities).toEqual(expect.objectContaining({
+      modelSelection: false,
+      reasoning: false,
+    }));
   });
 
   it("does not lose a completion delivered before the turn waiter is installed", async () => {

@@ -1,3 +1,8 @@
+import type {
+  NekoProviderCapabilityMap,
+  NekoProviderExtensionValue,
+} from "@/neko/contracts";
+
 /**
  * Neko Chill driver contract — the provider-agnostic seam (FR-010).
  *
@@ -28,6 +33,12 @@ export interface DriverRuntimeDescriptor {
   contextContinuity: "process" | "resumable";
   /** `advisory` is a cwd hint, not an OS-enforced sandbox boundary. */
   workspaceIsolation: "advisory" | "enforced";
+  /** Provider-neutral facts established by this live adapter. */
+  observedProviderCapabilities?: Partial<NekoProviderCapabilityMap>;
+  /** Bounded JSON scalar facts only; raw provider events and secrets are forbidden. */
+  providerExtensions?: Record<string, NekoProviderExtensionValue>;
+  /** Version re-probed by Neko Control for the process being attached. */
+  providerVersion?: string | null;
 }
 
 /** Why a turn stopped — superset across backends (ACP stopReason ⊆ this). */

@@ -5,15 +5,22 @@ AI conversations, local and cloud agents, project files, tools, memory, and
 live artifacts. The interface is Vietnamese-first and uses the approved Neko
 companion identity.
 
-## Workbench surfaces
+## Product planes
 
-| Surface | Purpose |
+| Plane | Purpose |
 | --- | --- |
-| **Local Workbench (Neko Chill)** | No-account desktop workspace for Neko Core, Gemini CLI, Codex, durable sessions, project files, approvals, and live artifacts |
-| **Wiii Service** | Optional account-backed runtime, retrieval, memory, organizations, connected tools, and synchronization |
+| **Wiii ADE** | Human-facing Project, Task, Run, code, review, evidence and artifact experience |
+| **Neko Chill** | Provider-neutral agent fabric for Neko Core, Gemini CLI, Codex and future harnesses; owns local execution rather than product work |
+| **Wiii Service** | Optional managed/data plane for remote runners, retrieval, memory, organizations, connected tools, policy, audit and synchronization |
 | **Hosted web** | The same Workbench contracts with remote runtimes; browser builds never advertise local process or filesystem authority |
 | **Embed** | A constrained Wiii surface for explicit external hosts and adapters |
 | **Neko Motion Lab** | Isolated preview of mascot states, transitions, and reduced-motion behavior |
+
+The current 1.x shell still renders a local/managed surface switch for backward
+compatibility. It is a transitional UI, not the long-term architecture: a run
+will compose its provider, environment and optional Wiii Service capabilities
+independently. See
+[`WIII_ADE_AND_NEKO_AGENT_FABRIC.md`](../docs/architecture/WIII_ADE_AND_NEKO_AGENT_FABRIC.md).
 
 The Workbench owns the visible transcript and stores each provider session ID.
 ACP runtimes reconnect with `session/resume`; Codex reconnects with

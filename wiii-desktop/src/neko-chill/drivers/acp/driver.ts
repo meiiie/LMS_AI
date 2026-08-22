@@ -301,6 +301,10 @@ export class AcpDriver implements Driver {
     contextContinuity: "process",
     // cwd scopes the session semantically, but no OS sandbox is enforced.
     workspaceIsolation: "advisory",
+    observedProviderCapabilities: {
+      approvals: true,
+      toolEvents: true,
+    },
   };
 
   private readonly cwd: string;
@@ -397,6 +401,10 @@ export class AcpDriver implements Driver {
     this.legacyMode = normalizeLegacyMode(session.modes);
     this.legacyModel = normalizeLegacyModel(session.models);
     this.rebuildControls();
+    this.runtime.observedProviderCapabilities = {
+      ...this.runtime.observedProviderCapabilities,
+      resume: canResume,
+    };
   }
 
   async prompt(text: string): Promise<void> {
@@ -527,6 +535,13 @@ export class AcpDriver implements Driver {
       ...(this.legacyMode && !categories.has("mode") ? [this.legacyMode] : []),
       ...(this.legacyModel && !categories.has("model") ? [this.legacyModel] : []),
     ];
+    this.runtime.observedProviderCapabilities = {
+      ...this.runtime.observedProviderCapabilities,
+      modelSelection: this.controls.some((control) =>
+        control.category === "model" || control.category === "model_config"),
+      modes: this.controls.some((control) => control.category === "mode"),
+      reasoning: this.controls.some((control) => control.category === "thought_level"),
+    };
     this.controlRoutes.clear();
     for (const option of this.stableControls) {
       this.controlRoutes.set(option.id, { kind: "config", wireId: option.id.slice(7) });
@@ -554,10 +569,15 @@ export class AcpDriver implements Driver {
 
     switch (update.sessionUpdate) {
       case "available_commands_update": {
+        const commands = normalizeCommands(update.availableCommands);
+        this.runtime.observedProviderCapabilities = {
+          ...this.runtime.observedProviderCapabilities,
+          slashCommands: commands.length > 0,
+        };
         this.emitEvent({
           type: "available-commands",
           sessionId: this.sessionId,
-          commands: normalizeCommands(update.availableCommands),
+          commands,
         });
         return;
       }

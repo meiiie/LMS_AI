@@ -233,6 +233,12 @@ export class CodexAppServerDriver implements Driver {
     capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
     contextContinuity: "resumable",
     workspaceIsolation: "enforced",
+    observedProviderCapabilities: {
+      resume: true,
+      approvals: true,
+      toolEvents: true,
+      diff: true,
+    },
   };
 
   private readonly cwd: string;
@@ -306,6 +312,11 @@ export class CodexAppServerDriver implements Driver {
     const catalog = modelControls(modelsResult?.data);
     this.controls = catalog.controls;
     this.reasoningChoicesByModel = catalog.reasoningChoicesByModel;
+    this.runtime.observedProviderCapabilities = {
+      ...this.runtime.observedProviderCapabilities,
+      modelSelection: this.controls.some((control) => control.id === "model"),
+      reasoning: this.controls.some((control) => control.id === "reasoning-effort"),
+    };
 
     const model = this.controls.find((option) => option.id === "model")?.currentValue;
     const method = this.resumeThreadId ? "thread/resume" : "thread/start";

@@ -87,6 +87,46 @@ describe("RuntimeScope", () => {
 });
 
 describe("RuntimeRegistry", () => {
+  it("captures the provider contract observed when a known runtime attaches", async () => {
+    const registry = new RuntimeRegistry();
+    const driver = new FakeDriver("s1");
+    Object.assign(driver.runtime, {
+      providerVersion: "0.24.17",
+      observedProviderCapabilities: {
+        resume: true,
+        modelSelection: true,
+        approvals: true,
+      },
+    });
+
+    const attached = await registry.replace(
+      "s1",
+      "neko",
+      async () => driver,
+    );
+
+    expect(attached.current.providerCapabilities).toEqual(expect.objectContaining({
+      v: 1,
+      providerId: "neko",
+      providerVersion: "0.24.17",
+      integration: "acp",
+      protocol: "acp-v1",
+      capabilities: expect.objectContaining({
+        resume: true,
+        modelSelection: true,
+        approvals: true,
+        fork: false,
+      }),
+    }));
+  });
+
+  it("does not invent a capability contract for an unknown legacy provider", async () => {
+    const registry = new RuntimeRegistry();
+    const attached = await registry.replace("s1", "legacy-provider", async () => new FakeDriver("s1"));
+
+    expect(attached.current.providerCapabilities).toBeUndefined();
+  });
+
   it("keeps the old provider when replacement preparation fails", async () => {
     const registry = new RuntimeRegistry();
     const first = new FakeDriver("s1");

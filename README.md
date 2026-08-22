@@ -10,10 +10,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/meiiie/wiii" alt="AGPL-3.0-only license" /></a>
 </p>
 
-Wiii is an open-source AI workbench for durable conversations, local and cloud
-agents, project files, tools, memory, artifacts, and permission-aware
-integrations. It is built by **The Wiii Lab** and designed to stay useful across
-different models, runtimes, knowledge domains, and host applications.
+Wiii is an open-source Agentic Development Environment for durable projects,
+tasks, local and cloud agents, code, tools, memory, artifacts, evidence and
+permission-aware integrations. It is built by **The Wiii Lab** and designed to
+stay useful across different models, runtimes, knowledge domains, and host
+applications.
 
 Vietnamese is the primary product language today. The architecture itself is
 provider- and domain-extensible.
@@ -41,6 +42,9 @@ not the product boundary.
 
 | Layer | Responsibility |
 | --- | --- |
+| **Wiii ADE** | Project, Task, Run, code, review, evidence and human decisions |
+| **Neko Chill** | Provider-neutral agent fabric and local execution lifecycle |
+| **Wiii Service** | Optional managed/data plane for cloud, sync, Knowledge, Memory, policy and audit |
 | **Wiii Core** | API, orchestration, streaming, providers, tools, and retrieval |
 | **Wiii Living** | continuity, memory, identity, goals, and long-running agent state |
 | **Wiii Host** | desktop, embed, browser, LMS, and future host applications |
@@ -57,6 +61,9 @@ The repository contains two primary runtime surfaces:
 
 Shared architecture, governance, research, and brand sources live in
 [`docs/`](docs/).
+
+The work/execution boundary is documented in
+[Wiii ADE and Neko Agent Fabric](docs/architecture/WIII_ADE_AND_NEKO_AGENT_FABRIC.md).
 
 ## Quick start
 

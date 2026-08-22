@@ -6,6 +6,7 @@ import {
   type CapabilityDefinition,
 } from "@/workbench/capabilities";
 import { resolveWorkbenchHost } from "@/workbench/host";
+import { listProviderDefinitions } from "@/neko/provider-registry";
 
 describe("Workbench capability catalog", () => {
   const desktop = resolveWorkbenchHost({ tauri: true });
@@ -19,6 +20,16 @@ describe("Workbench capability catalog", () => {
     expect(states.find((item) => item.definition.id === "neko-core")?.available).toBe(true);
     expect(states.find((item) => item.definition.id === "codex")?.available).toBe(true);
     expect(states.find((item) => item.definition.id === "wiii-service")?.available).toBe(true);
+  });
+
+  it("derives local runtime metadata from the Neko provider registry", () => {
+    const localRuntimes = RUNTIME_DEFINITIONS.filter((item) => item.location === "local");
+    expect(localRuntimes.map((item) => item.id)).toEqual(
+      listProviderDefinitions().map((provider) => provider.capabilityId),
+    );
+    expect(localRuntimes.map((item) => item.label)).toEqual(
+      listProviderDefinitions().map((provider) => provider.name),
+    );
   });
 
   it("blocks every local runtime and local knowledge source on hosted web", () => {

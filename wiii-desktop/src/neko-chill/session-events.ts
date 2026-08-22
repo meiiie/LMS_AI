@@ -6,6 +6,7 @@ import type {
   DriverKind,
 } from "./drivers/types";
 import type { RuntimeProviderSnapshot } from "./runtime-manager";
+import { isNekoProviderCapabilitySnapshot } from "@/neko/contracts";
 
 export const NEKO_SESSION_EVENT_VERSION = 1;
 
@@ -178,7 +179,9 @@ function isRuntimeProvider(value: unknown): value is RuntimeProviderSnapshot {
       typeof capability === "string" &&
       Object.prototype.hasOwnProperty.call(DRIVER_CAPABILITIES, capability)) &&
     (provider.contextContinuity === "process" || provider.contextContinuity === "resumable") &&
-    (provider.workspaceIsolation === "advisory" || provider.workspaceIsolation === "enforced")
+    (provider.workspaceIsolation === "advisory" || provider.workspaceIsolation === "enforced") &&
+    (provider.providerCapabilities === undefined ||
+      isNekoProviderCapabilitySnapshot(provider.providerCapabilities))
   );
 }
 

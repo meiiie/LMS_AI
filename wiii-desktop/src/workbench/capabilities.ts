@@ -1,3 +1,5 @@
+import { listProviderDefinitions } from "@/neko/provider-registry";
+import type { NekoProviderAuthOwner } from "@/neko/contracts";
 import type {
   WorkbenchHost,
   WorkbenchHostCapability,
@@ -28,34 +30,27 @@ export interface CapabilityAvailability {
   reason?: string;
 }
 
+const PROVIDER_AUTH_OWNER: Record<NekoProviderAuthOwner, CapabilityAuthOwner> = {
+  provider: "runtime",
+  wiii: "wiii",
+  "user-credential": "api-credential",
+  none: "none",
+};
+
+const LOCAL_RUNTIME_DEFINITIONS: CapabilityDefinition[] = listProviderDefinitions().map(
+  (provider) => ({
+    id: provider.capabilityId,
+    label: provider.name,
+    kind: "runtime",
+    location: "local",
+    authOwner: PROVIDER_AUTH_OWNER[provider.authOwner],
+    hostRequirements: ["localProcess", "localWorkspace"],
+    description: provider.description,
+  }),
+);
+
 export const RUNTIME_DEFINITIONS: CapabilityDefinition[] = [
-  {
-    id: "neko-core",
-    label: "Neko Core",
-    kind: "runtime",
-    location: "local",
-    authOwner: "runtime",
-    hostRequirements: ["localProcess", "localWorkspace"],
-    description: "Runtime ACP cục bộ, phiên bền vững và profile do Neko Core quản lý.",
-  },
-  {
-    id: "gemini-cli",
-    label: "Gemini CLI",
-    kind: "runtime",
-    location: "local",
-    authOwner: "runtime",
-    hostRequirements: ["localProcess", "localWorkspace"],
-    description: "Agent ACP cục bộ dùng cấu hình và tài khoản của Gemini CLI.",
-  },
-  {
-    id: "codex",
-    label: "Codex",
-    kind: "runtime",
-    location: "local",
-    authOwner: "runtime",
-    hostRequirements: ["localProcess", "localWorkspace"],
-    description: "Codex App Server sở hữu đăng nhập, model và provider thread.",
-  },
+  ...LOCAL_RUNTIME_DEFINITIONS,
   {
     id: "wiii-service",
     label: "Wiii Service",

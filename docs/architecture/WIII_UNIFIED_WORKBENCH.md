@@ -4,6 +4,14 @@
 **Updated:** 2026-08-16
 **Issue:** [#923](https://github.com/meiiie/wiii/issues/923)
 
+> **Architecture evolution (2026-08-23):** #923 remains the implemented host
+> and capability-composition baseline. The product taxonomy now evolves under
+> [#939](https://github.com/meiiie/wiii/issues/939): Wiii ADE owns work, Neko
+> Chill owns execution, and Wiii Service is an optional managed/data plane.
+> `local`/`managed` surface keys remain transitional compatibility state, not
+> the long-term product ontology. See
+> [Wiii ADE and Neko Agent Fabric](WIII_ADE_AND_NEKO_AGENT_FABRIC.md).
+
 Wiii is one Workbench with composable capabilities. Local and managed work are
 not separate products and a future web deployment does not require a second UI
 architecture.
