@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/meiiie/wiii/actions/workflows/test-backend.yml"><img src="https://github.com/meiiie/wiii/actions/workflows/test-backend.yml/badge.svg" alt="Backend tests" /></a>
   <a href="https://github.com/meiiie/wiii/actions/workflows/test-desktop.yml"><img src="https://github.com/meiiie/wiii/actions/workflows/test-desktop.yml/badge.svg" alt="Desktop tests" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/meiiie/wiii" alt="MIT license" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/meiiie/wiii" alt="AGPL-3.0-only license" /></a>
 </p>
 
 Wiii is an open-source AI workbench for durable conversations, local and cloud
