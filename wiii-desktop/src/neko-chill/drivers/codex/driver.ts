@@ -233,6 +233,14 @@ export class CodexAppServerDriver implements Driver {
     capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
     contextContinuity: "resumable",
     workspaceIsolation: "enforced",
+    observedProviderCapabilities: {
+      resume: true,
+      modelSelection: true,
+      reasoning: true,
+      approvals: true,
+      toolEvents: true,
+      diff: true,
+    },
   };
 
   private readonly cwd: string;

@@ -7,7 +7,7 @@ import {
   type DetectedAgent,
 } from "../stores/neko-agent-store";
 import { useNekoSessionStore } from "../stores/neko-session-store";
-import { spawnTauriTransport } from "../drivers/factory";
+import { getNekoControlClient } from "@/neko/control-client";
 import {
   CodexAccountSession,
   type CodexAccountSummary,
@@ -84,7 +84,10 @@ export function NewSessionView() {
     }
 
     setCodexAccountState("checking");
-    void spawnTauriTransport(codex.binary, ["app-server"])
+    void getNekoControlClient().spawnProvider({
+      providerId: "codex",
+      program: codex.binary,
+    })
       .then(async (transport) => {
         const session = new CodexAccountSession(transport);
         bootstrapSession = session;

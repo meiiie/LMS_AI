@@ -110,6 +110,14 @@ describe("Codex App Server driver", () => {
     const { driver, events, transport } = await startFixture();
     expect(driver.kind).toBe("codex-app-server");
     expect(driver.backendSessionId).toBe("thread-1");
+    expect(driver.runtime.observedProviderCapabilities).toEqual(expect.objectContaining({
+      resume: true,
+      modelSelection: true,
+      reasoning: true,
+      approvals: true,
+      toolEvents: true,
+      diff: true,
+    }));
     expect(events).toContainEqual(expect.objectContaining({
       type: "session-controls",
       controls: expect.arrayContaining([

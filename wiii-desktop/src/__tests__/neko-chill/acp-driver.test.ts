@@ -166,6 +166,11 @@ describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
     });
     expect(driver.backendSessionId).toBe("neko-durable-new");
     expect(driver.runtime.contextContinuity).toBe("resumable");
+    expect(driver.runtime.observedProviderCapabilities).toEqual(expect.objectContaining({
+      resume: true,
+      approvals: true,
+      toolEvents: true,
+    }));
   });
 
   it("resumes the provider-owned session without replay or a replacement session/new", async () => {
@@ -348,7 +353,7 @@ describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
   it("maps command, current-mode, config, and session-info updates", async () => {
     const events: DriverEvent[] = [];
     const transport = new FakeTransport();
-    await startDriverWithSessionResult(events, transport, {
+    const driver = await startDriverWithSessionResult(events, transport, {
       modes: {
         currentModeId: "default",
         availableModes: [
@@ -416,6 +421,11 @@ describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
     expect(events.find((event) => event.type === "available-commands")).toMatchObject({
       commands: [{ name: "memory show", description: "Show memory", inputHint: "path" }],
     });
+    expect(driver.runtime.observedProviderCapabilities).toEqual(expect.objectContaining({
+      modes: true,
+      modelSelection: true,
+      slashCommands: true,
+    }));
     expect(events.find((event) => event.type === "session-info")).toMatchObject({
       title: "Agent-generated title",
       updatedAt: "2026-08-13T12:00:00.000Z",

@@ -4,6 +4,7 @@ import {
   isNekoSessionEvent,
   type NekoSessionEvent,
 } from "@/neko-chill/session-events";
+import { createProviderCapabilitySnapshot } from "@/neko/provider-registry";
 
 function event(data: NekoSessionEvent["data"]): NekoSessionEvent {
   const events: NekoSessionEvent[] = [];
@@ -11,6 +12,58 @@ function event(data: NekoSessionEvent["data"]): NekoSessionEvent {
 }
 
 describe("Neko session event validation", () => {
+  const legacyProvider = {
+    sessionId: "session-1",
+    providerId: "neko",
+    instanceId: "provider-1",
+    kind: "acp" as const,
+    backendSessionId: "backend-1",
+    capabilities: ["prompt" as const],
+    contextContinuity: "resumable" as const,
+    workspaceIsolation: "advisory" as const,
+  };
+
+  it("round-trips a historical capability snapshot and accepts legacy events", () => {
+    const legacy = event({ type: "runtime-attached", provider: legacyProvider });
+    expect(isNekoSessionEvent(JSON.parse(JSON.stringify(legacy)))).toBe(true);
+
+    const attached = event({
+      type: "runtime-attached",
+      provider: {
+        ...legacyProvider,
+        providerCapabilities: createProviderCapabilitySnapshot({
+          providerId: "neko",
+          providerVersion: "0.24.17",
+          established: { resume: true, approvals: true },
+        }),
+      },
+    });
+    const restored = JSON.parse(JSON.stringify(attached));
+    expect(isNekoSessionEvent(restored)).toBe(true);
+    expect(restored.data.provider.providerCapabilities).toEqual(
+      attached.data.type === "runtime-attached"
+        ? attached.data.provider.providerCapabilities
+        : undefined,
+    );
+  });
+
+  it("rejects a malformed capability snapshot instead of ignoring it", () => {
+    const attached = event({
+      type: "runtime-attached",
+      provider: {
+        ...legacyProvider,
+        providerCapabilities: createProviderCapabilitySnapshot({
+          providerId: "neko",
+          providerVersion: null,
+        }),
+      },
+    });
+    const malformed = JSON.parse(JSON.stringify(attached));
+    malformed.data.provider.providerCapabilities.capabilities.resume = "yes";
+
+    expect(isNekoSessionEvent(malformed)).toBe(false);
+  });
+
   it("accepts complete discriminated payloads", () => {
     const appended = event({
       type: "model-input",

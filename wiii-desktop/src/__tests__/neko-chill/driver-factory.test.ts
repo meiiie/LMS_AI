@@ -9,7 +9,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
 
 import type { Driver } from "@/neko-chill/drivers/types";
-import { createDriverForAgent, spawnTauriTransport } from "@/neko-chill/drivers/factory";
+import { createDriverForAgent } from "@/neko-chill/drivers/factory";
+import { getNekoControlClient } from "@/neko/control-client";
 
 describe("Neko driver factory resource ownership", () => {
   beforeEach(() => {
@@ -26,7 +27,10 @@ describe("Neko driver factory resource ownership", () => {
       .mockResolvedValueOnce(unlistenLine)
       .mockRejectedValueOnce(new Error("event bridge unavailable"));
 
-    await expect(spawnTauriTransport("neko", ["acp"])).rejects.toThrow(
+    await expect(getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      program: "neko",
+    })).rejects.toThrow(
       "event bridge unavailable",
     );
 
@@ -42,7 +46,10 @@ describe("Neko driver factory resource ownership", () => {
       .mockResolvedValueOnce(unlistenLine)
       .mockResolvedValueOnce(unlistenExit);
 
-    const transport = await spawnTauriTransport("neko", ["acp"]);
+    const transport = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      program: "neko",
+    });
     await transport.kill();
     await transport.kill();
 

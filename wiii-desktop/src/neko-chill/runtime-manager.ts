@@ -5,6 +5,11 @@ import type {
   DriverKind,
   DriverRuntimeDescriptor,
 } from "./drivers/types";
+import type { NekoProviderCapabilitySnapshot } from "@/neko/contracts";
+import {
+  createProviderCapabilitySnapshot,
+  findProviderDefinition,
+} from "@/neko/provider-registry";
 
 type Disposer = () => void | Promise<void>;
 
@@ -47,6 +52,12 @@ export interface RuntimeProviderSnapshot extends DriverRuntimeDescriptor {
   instanceId: string;
   kind: DriverKind;
   backendSessionId: string | null;
+  /** Historical contract observed at attach time; absent on legacy/unknown providers. */
+  providerCapabilities?: NekoProviderCapabilitySnapshot;
+}
+
+export interface RuntimeProviderMetadata {
+  providerVersion?: string | null;
 }
 
 interface RuntimeBinding {
@@ -199,6 +210,7 @@ export class RuntimeRegistry {
     sessionId: string,
     providerId: string,
     create: (instanceId: string, own: (driver: Driver) => void) => Promise<Driver>,
+    metadata: RuntimeProviderMetadata = {},
   ): Promise<RuntimeReplacement> {
     const priorCleanup = this.joinDisposal(sessionId);
     if (priorCleanup) await priorCleanup;
@@ -311,6 +323,15 @@ export class RuntimeRegistry {
         throw new Error("Driver trả về sai sessionId.");
       }
 
+      const providerDefinition = findProviderDefinition(providerId);
+      const providerCapabilities = providerDefinition
+        ? createProviderCapabilitySnapshot({
+            providerId,
+            providerVersion: metadata.providerVersion ?? null,
+            established: driver.runtime.observedProviderCapabilities,
+            extensions: driver.runtime.providerExtensions,
+          })
+        : undefined;
       const provider: RuntimeProviderSnapshot = {
         sessionId,
         providerId,
@@ -320,6 +341,7 @@ export class RuntimeRegistry {
         capabilities: [...new Set(driver.runtime.capabilities)],
         contextContinuity: driver.runtime.contextContinuity,
         workspaceIsolation: driver.runtime.workspaceIsolation,
+        ...(providerCapabilities ? { providerCapabilities } : {}),
       };
       const previous = this.bindings.get(sessionId) ?? null;
 
