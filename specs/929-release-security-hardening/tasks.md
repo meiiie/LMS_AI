@@ -11,19 +11,19 @@
 
 ## Phase 2 - License truth (PR 1)
 
-- [ ] T003 [US2] Change Tauri bundle metadata and README badge text to AGPL-3.0-only.
-- [ ] T004 [US2] Add path-specific license checks to `tools/release/wiii_release.py`.
-- [ ] T005 [US2] Add release-tool tests for valid and drifted core/SDK metadata.
-- [ ] T006 [US2] Run release tests, metadata check, diff check, and open a focused PR.
+- [x] T003 [US2] Change Tauri bundle metadata and README badge text to AGPL-3.0-only.
+- [x] T004 [US2] Add path-specific license checks to `tools/release/wiii_release.py`.
+- [x] T005 [US2] Add release-tool tests for valid and drifted core/SDK metadata.
+- [x] T006 [US2] Run release tests, metadata check, diff check, and open a focused PR.
 
 ## Phase 3 - Desktop trust boundary (PR 2)
 
-- [ ] T007 [US1] Add a non-null application CSP based on verified runtime needs.
-- [ ] T008 [US1] Declare application commands in `wiii-desktop/src-tauri/build.rs`.
-- [ ] T009 [US1] Replace the shared default capability with splash and main concern files.
-- [ ] T010 [US1] Add defense-in-depth caller validation to `close_splash`.
-- [ ] T011 [US1] Add static boundary tests for CSP, window targets, origin scope, and commands.
-- [ ] T012 [US1] Run Rust, Vitest, TypeScript, web/embed, and native build verification.
+- [x] T007 [US1] Add a non-null application CSP based on verified runtime needs.
+- [x] T008 [US1] Declare application commands in `wiii-desktop/src-tauri/build.rs`.
+- [x] T009 [US1] Replace the shared default capability with splash and main concern files.
+- [x] T010 [US1] Add defense-in-depth caller validation to `close_splash`.
+- [x] T011 [US1] Add static boundary tests for CSP, window targets, origin scope, and commands.
+- [x] T012 [US1] Run Rust, Vitest, TypeScript, web/embed, and native build verification.
 
 ## Phase 4 - Release truth (PR 3)
 

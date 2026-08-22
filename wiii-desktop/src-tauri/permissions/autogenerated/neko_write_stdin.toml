@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-neko-write-stdin"
+description = "Enables the neko_write_stdin command without any pre-configured scope."
+commands.allow = ["neko_write_stdin"]
+
+[[permission]]
+identifier = "deny-neko-write-stdin"
+description = "Denies the neko_write_stdin command without any pre-configured scope."
+commands.deny = ["neko_write_stdin"]

@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workbench-agents",
+  "description": "Local agent discovery and lifecycle authority for Neko Chill",
+  "windows": ["main"],
+  "permissions": [
+    "allow-neko-detect-agents",
+    "allow-neko-agent-profiles",
+    "allow-neko-spawn-agent",
+    "allow-neko-write-stdin",
+    "allow-neko-kill-agent",
+    "allow-neko-kill-all-agents"
+  ]
+}

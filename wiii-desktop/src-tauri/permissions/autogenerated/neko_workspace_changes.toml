@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-neko-workspace-changes"
+description = "Enables the neko_workspace_changes command without any pre-configured scope."
+commands.allow = ["neko_workspace_changes"]
+
+[[permission]]
+identifier = "deny-neko-workspace-changes"
+description = "Denies the neko_workspace_changes command without any pre-configured scope."
+commands.deny = ["neko_workspace_changes"]

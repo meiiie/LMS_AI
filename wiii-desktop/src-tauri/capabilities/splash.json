@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash",
+  "description": "Startup-only authority for the Wiii splash window",
+  "windows": ["splashscreen"],
+  "permissions": ["allow-close-splash"]
+}

@@ -42,7 +42,29 @@
       }
     ],
     "security": {
-      "csp": null
+      "capabilities": [
+        "splash",
+        "workbench-base",
+        "workbench-files",
+        "workbench-network",
+        "workbench-agents",
+        "workbench-notifications"
+      ],
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
+        "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src": "'self' data: https://fonts.gstatic.com",
+        "img-src": "'self' asset: http://asset.localhost blob: data: https://www.google.com https://wiii.holilihu.online",
+        "connect-src": "'self' ipc: http://ipc.localhost http://localhost:* http://127.0.0.1:* https: ws://localhost:* ws://127.0.0.1:* wss:",
+        "worker-src": "'self' blob:",
+        "frame-src": "'self' blob:",
+        "media-src": "'self' blob: data:",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'self'",
+        "manifest-src": "'self'"
+      }
     }
   },
   "bundle": {

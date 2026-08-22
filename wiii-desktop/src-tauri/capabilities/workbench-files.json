@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workbench-files",
+  "description": "User-selected workspace and bounded file inspection authority",
+  "windows": ["main"],
+  "permissions": [
+    "dialog:allow-open",
+    "allow-pick-document",
+    "allow-neko-list-workspace-files",
+    "allow-neko-read-workspace-file",
+    "allow-neko-workspace-changes",
+    "allow-neko-workspace-diff"
+  ]
+}
