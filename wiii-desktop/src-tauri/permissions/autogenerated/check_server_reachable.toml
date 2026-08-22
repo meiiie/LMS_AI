@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-server-reachable"
+description = "Enables the check_server_reachable command without any pre-configured scope."
+commands.allow = ["check_server_reachable"]
+
+[[permission]]
+identifier = "deny-check-server-reachable"
+description = "Denies the check_server_reachable command without any pre-configured scope."
+commands.deny = ["check_server_reachable"]

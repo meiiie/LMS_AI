@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-neko-read-workspace-file"
+description = "Enables the neko_read_workspace_file command without any pre-configured scope."
+commands.allow = ["neko_read_workspace_file"]
+
+[[permission]]
+identifier = "deny-neko-read-workspace-file"
+description = "Denies the neko_read_workspace_file command without any pre-configured scope."
+commands.deny = ["neko_read_workspace_file"]

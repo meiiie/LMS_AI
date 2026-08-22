@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-neko-agent-profiles"
+description = "Enables the neko_agent_profiles command without any pre-configured scope."
+commands.allow = ["neko_agent_profiles"]
+
+[[permission]]
+identifier = "deny-neko-agent-profiles"
+description = "Denies the neko_agent_profiles command without any pre-configured scope."
+commands.deny = ["neko_agent_profiles"]
