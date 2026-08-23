@@ -232,7 +232,9 @@ Implemented across the foundation and Phase 2A slices:
   than a retryable provider rejection when cleanup cannot be proven;
 - pre-spawn rejection, proven post-spawn cleanup, and unproven cleanup are
   distinct native outcomes. Proven cleanup retains the exact failed request
-  and session fact; only pre-spawn rejection uses the ordinary rejection path;
+  and session fact; only pre-spawn rejection uses the ordinary rejection path.
+  Discovery propagates either post-spawn outcome instead of reporting the
+  provider as not installed;
 - Codex account bootstrap cleanup is serialized by a module-level owner outside
   React; failed cleanup remains retryable and blocks replacement launch. A
   workspace handoff reconciles both control-client identities and durable

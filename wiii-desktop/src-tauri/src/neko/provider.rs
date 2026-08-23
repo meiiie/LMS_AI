@@ -660,7 +660,9 @@ fn probe_definition(
                         version: (!version.is_empty()).then_some(version),
                     }));
                 }
-                Err(error) if error.cleanup_unproven() => return Err(error),
+                Err(error) if error.cleanup_unproven() || error.post_spawn_cleanup_proven() => {
+                    return Err(error);
+                }
                 Ok(_) | Err(_) => {}
             }
         }
@@ -919,6 +921,18 @@ mod tests {
         assert!(!proven.cleanup_unproven());
         assert!(!uncertain.post_spawn_cleanup_proven());
         assert!(uncertain.cleanup_unproven());
+    }
+
+    #[test]
+    fn probe_propagates_every_post_spawn_failure_disposition() {
+        let pre_spawn = SpawnOwnedError::safe(io::Error::other("spawn rejected"));
+        let proven = SpawnOwnedError::after_proven_cleanup(io::Error::other("cleanup proven"));
+        let uncertain =
+            SpawnOwnedError::after_unproven_cleanup(io::Error::other("cleanup unproven"));
+
+        assert!(!(pre_spawn.cleanup_unproven() || pre_spawn.post_spawn_cleanup_proven()));
+        assert!(proven.cleanup_unproven() || proven.post_spawn_cleanup_proven());
+        assert!(uncertain.cleanup_unproven() || uncertain.post_spawn_cleanup_proven());
     }
 
     #[cfg(unix)]

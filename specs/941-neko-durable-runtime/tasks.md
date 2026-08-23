@@ -154,7 +154,8 @@
   spawn cleanup with its request outcome before the lifecycle transaction.
 - [x] T532 Aggregate discovery with cancellation failures, seed Codex handoff
   from renderer-retained identities before durable discovery, and route proven
-  post-spawn cleanup through the retained terminal-fact path.
+  post-spawn cleanup through the retained terminal-fact path without degrading
+  post-spawn probe failures to `not_installed`.
 
 ## Dependencies
 

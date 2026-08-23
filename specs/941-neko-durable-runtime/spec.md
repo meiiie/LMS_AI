@@ -326,7 +326,9 @@ side-effect/committed phases become `unknown_outcome`.
   seed renderer-retained identities before durable discovery, and native spawn
   errors MUST distinguish pre-spawn rejection, proven post-spawn cleanup, and
   unproven cleanup. Proven post-spawn cleanup MUST use the retained terminal
-  fact path rather than the pre-spawn rejection path.
+  fact path rather than the pre-spawn rejection path. Provider discovery MUST
+  propagate both post-spawn outcomes instead of misreporting them as
+  `not_installed`.
 
 ### Non-goals
 
@@ -384,4 +386,5 @@ side-effect/committed phases become `unknown_outcome`.
   `unknown_outcome`.
 - **SC-015**: Tests prove combined discovery/cancellation failures are both
   observable, Codex handoff cancels renderer-known identities even when native
-  discovery fails, and post-spawn cleanup classification is machine-readable.
+  discovery fails, post-spawn cleanup classification is machine-readable, and
+  provider discovery propagates every post-spawn failure disposition.
