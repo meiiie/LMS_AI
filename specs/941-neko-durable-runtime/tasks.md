@@ -142,6 +142,9 @@
   cleanup-resolution fact, keep late-owned drivers retryable, publish no
   replacement before prior cleanup succeeds, flush joined supervisor facts at
   shutdown, and preserve probe cleanup uncertainty after leader exit.
+- [x] T529 Serialize Codex account bootstrap across workspace changes by
+  reconciling retained bootstrap identities before spawn and failing closed
+  when older native start cancellation cannot be proven.
 
 ## Dependencies
 

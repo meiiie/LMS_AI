@@ -19,6 +19,7 @@ import {
 } from "../workspace";
 import {
   codexBootstrapIdentity,
+  spawnCodexAccountBootstrap,
 } from "../codex-bootstrap-identity";
 
 function recentWorkspaces(): WorkspaceRef[] {
@@ -102,14 +103,11 @@ export function NewSessionView() {
     const bootstrapIdentity = codexBootstrapIdentity(workspace.path);
     void codexAccountOwner
       .replace(async () => {
-        const { transport } = await getNekoControlClient().spawnProvider({
-          providerId: "codex",
-          // Retry the same logical caller identity until Neko proves the previous
-          // start terminal while every proven attempt receives a fresh Run.
-          clientSessionId: bootstrapIdentity.clientSessionId,
-          clientRunId: bootstrapIdentity.clientRunId,
-          workspacePath: workspace.path,
-        });
+        const controlClient = getNekoControlClient();
+        const { transport } = await spawnCodexAccountBootstrap(
+          controlClient,
+          bootstrapIdentity,
+        );
         return new CodexAccountSession(transport);
       })
       .then(async (session) => {

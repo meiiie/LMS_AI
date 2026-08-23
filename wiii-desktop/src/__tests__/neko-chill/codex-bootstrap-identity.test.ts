@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { codexBootstrapIdentity } from "@/neko-chill/codex-bootstrap-identity";
+import {
+  cancelOtherCodexBootstrapStarts,
+  codexBootstrapIdentity,
+  spawnCodexAccountBootstrap,
+} from "@/neko-chill/codex-bootstrap-identity";
+import type { AcpTransport } from "@/neko-chill/drivers/acp/client";
 
 describe("Codex account bootstrap identity", () => {
   it("keeps caller identity but mints a fresh Run for each bootstrap attempt", () => {
@@ -41,5 +46,88 @@ describe("Codex account bootstrap identity", () => {
     expect(codexBootstrapIdentity("/srv/a\\b").clientSessionId).not.toBe(
       codexBootstrapIdentity("/srv/a/b").clientSessionId,
     );
+  });
+
+  it("cancels retained bootstraps from other workspaces before a fresh launch", async () => {
+    const current = codexBootstrapIdentity("C:/workspace-b").clientSessionId;
+    const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
+    const cancelled: string[] = [];
+    const count = await cancelOtherCodexBootstrapStarts({
+      unresolvedStartSessionIds: () => [current, "ordinary-session", old, old],
+      cancelUnresolvedStarts: async (sessionId) => {
+        cancelled.push(sessionId);
+        return 1;
+      },
+    }, current);
+
+    expect(cancelled).toEqual([old]);
+    expect(count).toBe(1);
+  });
+
+  it("fails closed when an older workspace bootstrap cannot be reconciled", async () => {
+    const current = codexBootstrapIdentity("C:/workspace-b").clientSessionId;
+    const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
+
+    await expect(cancelOtherCodexBootstrapStarts({
+      unresolvedStartSessionIds: () => [old],
+      cancelUnresolvedStarts: async () => {
+        throw new Error("cancellation remains uncertain");
+      },
+    }, current)).rejects.toThrow("cancellation remains uncertain");
+  });
+
+  it("never spawns the new workspace before retained-start cancellation succeeds", async () => {
+    const identity = codexBootstrapIdentity("C:/workspace-b");
+    const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
+    const calls: string[] = [];
+    const transport = {} as AcpTransport;
+
+    const spawned = await spawnCodexAccountBootstrap({
+      unresolvedStartSessionIds: () => [old],
+      cancelUnresolvedStarts: async (sessionId) => {
+        calls.push(`cancel:${sessionId}`);
+        return 1;
+      },
+      spawnProvider: async (request) => {
+        calls.push(`spawn:${request.clientSessionId}`);
+        return {
+          provider: {
+            id: "codex",
+            name: "Codex",
+            version: "0.1.0",
+            found: true,
+            availability: "available",
+            supportsProfiles: false,
+          },
+          agentSessionId: "native-session",
+          runId: "native-run",
+          transport,
+        };
+      },
+    }, identity);
+
+    expect(spawned.transport).toBe(transport);
+    expect(calls).toEqual([
+      `cancel:${old}`,
+      `spawn:${identity.clientSessionId}`,
+    ]);
+  });
+
+  it("does not spawn a new workspace after retained-start cancellation fails", async () => {
+    const identity = codexBootstrapIdentity("C:/workspace-b");
+    const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
+    let spawned = false;
+
+    await expect(spawnCodexAccountBootstrap({
+      unresolvedStartSessionIds: () => [old],
+      cancelUnresolvedStarts: async () => {
+        throw new Error("old bootstrap remains uncertain");
+      },
+      spawnProvider: async () => {
+        spawned = true;
+        throw new Error("must not launch");
+      },
+    }, identity)).rejects.toThrow("old bootstrap remains uncertain");
+    expect(spawned).toBe(false);
   });
 });

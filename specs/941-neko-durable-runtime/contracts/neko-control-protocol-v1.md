@@ -167,6 +167,11 @@ The Codex account bootstrap has a module-level serialized owner outside React.
 A rejected App Server cleanup remains retryable and blocks replacement; a
 workspace change or component remount cannot clear the owner and launch another
 bootstrap until the previous cleanup reaches a proven terminal result.
+If both start responses were lost before that owner received a session object,
+the control client still retains the logical bootstrap identity. Before a new
+workspace can launch Codex, the application reconciles and cancels every older
+Codex bootstrap identity; failure blocks the new spawn. The current workspace
+identity and unrelated retained starts are not cancelled by this handoff.
 Mode teardown also enumerates retained start identities owned by the control
 client, refreshes that set after in-flight preparations settle, and requires
 their authoritative cancellation before it may persist a clean exit; a

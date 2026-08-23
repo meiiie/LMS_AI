@@ -305,6 +305,11 @@ side-effect/committed phases become `unknown_outcome`.
   MUST flush terminal facts retained by those supervisors before returning.
   A provider probe whose leader exited MUST still classify failed descendant
   cleanup as post-spawn cleanup uncertainty.
+- **FR-056**: Before starting a Codex account bootstrap for a different
+  workspace, the client MUST reconcile and cancel every retained Codex
+  bootstrap start from older workspace identities. Cancellation failure MUST
+  block the new workspace launch; unrelated starts and the current workspace
+  identity MUST remain untouched.
 
 ### Non-goals
 
@@ -349,3 +354,6 @@ side-effect/committed phases become `unknown_outcome`.
 - **SC-011**: Tests prove late-owned cleanup remains retryable, replacement is
   never published across failed prior cleanup, provider identity survives
   retry, and close/delete/respawn paths can resolve an uncertainty tombstone.
+- **SC-012**: Tests prove a workspace handoff deduplicates and cancels older
+  Codex bootstrap identities before spawn, and never spawns the new workspace
+  when retained-start reconciliation fails.
