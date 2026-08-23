@@ -106,7 +106,8 @@ workspace change, recovery, idle reap, or mode exit) persists a blocking
 tombstone until a later native reconciliation proves a safe terminal state.
 Cleanup success is a tagged outcome; it never depends on whether a JavaScript
 rejection reason is truthy, so even `undefined`, `null`, `false`, `0`, or `""`
-remain failures.
+remain failures. Reason formatting is non-throwing; hostile or non-stringifiable
+values fall back to a bounded generic explanation without losing the tombstone.
 These runtime-only facts live in `neko-chill-native-runtime.json`; the shared
 Workbench v2 transcript retains its previous-release vocabulary for rollback.
 

@@ -147,6 +147,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     disposed = 0;
     failDispose = false;
     failDisposeWithoutReason = false;
+    failDisposeWithoutStringifier = false;
     constructor(readonly sessionId: string, executionId: string) {
       this.runtime = {
         capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
@@ -166,6 +167,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     async dispose(): Promise<void> {
       this.disposed += 1;
       if (this.failDisposeWithoutReason) return Promise.reject(undefined);
+      if (this.failDisposeWithoutStringifier) return Promise.reject(Object.create(null));
       if (this.failDispose) throw new Error("native cancellation outcome lost");
     }
   }
@@ -265,7 +267,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   it("keeps a mode-exit cleanup failure uncertain instead of recording exit", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
-    driver.failDisposeWithoutReason = true;
+    driver.failDisposeWithoutStringifier = true;
 
     await disposeAllNekoRuntimes();
 

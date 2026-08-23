@@ -91,6 +91,8 @@
   be proven terminal, including idle reaping and mode exit.
 - [x] T515 Represent cleanup success/failure with a tagged outcome and verify
   every legal falsy JavaScript rejection remains an uncertain failure.
+- [x] T516 Format arbitrary cleanup rejection values without throwing so a
+  hostile value cannot prevent durable tombstone persistence.
 
 ## Dependencies
 

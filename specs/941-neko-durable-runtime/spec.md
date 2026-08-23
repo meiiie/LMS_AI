@@ -188,7 +188,8 @@ side-effect/committed phases become `unknown_outcome`.
   visible session as an error, and prevent replacement execution until native
   reconciliation establishes `completed`, `failed`, or `cancelled`. Cleanup
   success/failure MUST use a tagged outcome and MUST NOT depend on truthiness of
-  the rejection reason.
+  the rejection reason. Formatting an arbitrary rejection value MUST be
+  non-throwing and bounded so the durable tombstone cannot be skipped.
 
 ### Non-goals
 

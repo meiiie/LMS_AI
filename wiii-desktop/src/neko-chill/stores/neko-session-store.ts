@@ -199,9 +199,14 @@ function nativeRuntimeIdentity(provider: RuntimeProviderSnapshot): {
 }
 
 function cleanupFailureReason(error: unknown): string {
-  if (!error) return "Unknown native runtime cleanup failure.";
-  const reason = error instanceof Error ? error.message : String(error);
-  return (reason || "Unknown native runtime cleanup failure.").slice(0, 4_096);
+  const fallback = "Unknown native runtime cleanup failure.";
+  if (!error) return fallback;
+  try {
+    const reason = error instanceof Error ? String(error.message) : String(error);
+    return (reason || fallback).slice(0, 4_096);
+  } catch {
+    return fallback;
+  }
 }
 
 type RuntimeDetachReason = Extract<
