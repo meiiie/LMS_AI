@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -18,11 +18,18 @@ import {
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { WiiiMark } from "@/components/common/WiiiMark";
+import { getNekoControlClient } from "@/neko/control-client";
 import NekoChillApp from "@/neko-chill/NekoChillApp";
 import type { NekoTaskLaunchRequest } from "@/neko-chill/components/NewSessionView";
 import { useNekoSessionStore } from "@/neko-chill/stores/neko-session-store";
 import { chooseWorkspaceFolder, workspaceFromPath, type WorkspaceRef } from "@/neko-chill/workspace";
 import type { AdeRun, AdeRunState, AdeTask } from "./domain";
+import {
+  deriveAdeOutcomeFromNativeRecord,
+  deriveAdeOutcomeFromSessionEvents,
+  nativeOutcomeTransitionPath,
+  type AdeNativeOutcome,
+} from "./native-lifecycle";
 import { useAdeWorkStore } from "./store";
 import "@/neko-chill/theme.css";
 
@@ -215,6 +222,7 @@ export default function WiiiAdeApp({ onOpenManaged = () => {} }: { onOpenManaged
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [pendingLaunch, setPendingLaunch] = useState<NekoTaskLaunchRequest | null>(null);
+  const lifecycleSyncs = useRef(new Set<string>());
   const sessions = useNekoSessionStore((state) => state.sessions);
   const desktopChrome = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -222,6 +230,63 @@ export default function WiiiAdeApp({ onOpenManaged = () => {} }: { onOpenManaged
     void hydrate().catch(() => {});
     void useNekoSessionStore.getState().hydrate().catch(() => {});
   }, [hydrate]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const terminalStates: AdeRunState[] = [
+      "completed",
+      "failed",
+      "cancelled",
+      "unknown_outcome",
+    ];
+
+    const projectOutcome = async (runId: string, outcome: AdeNativeOutcome) => {
+      const key = `${runId}:${outcome}`;
+      if (lifecycleSyncs.current.has(key)) return;
+      lifecycleSyncs.current.add(key);
+      try {
+        let current = useAdeWorkStore.getState().graph.runs.find((run) => run.id === runId)?.state;
+        if (!current || terminalStates.includes(current)) return;
+        for (const nextState of nativeOutcomeTransitionPath(current, outcome)) {
+          await useAdeWorkStore.getState().transitionRun(runId, nextState);
+          current = nextState;
+        }
+      } finally {
+        lifecycleSyncs.current.delete(key);
+      }
+    };
+
+    for (const session of Object.values(sessions)) {
+      const execution = session.execution;
+      if (!execution) continue;
+      const run = graph.runs.find((candidate) => candidate.id === execution.runId);
+      if (!run || terminalStates.includes(run.state)) continue;
+
+      const durableOutcome = deriveAdeOutcomeFromSessionEvents(session.events, execution.runId);
+      if (durableOutcome) {
+        void projectOutcome(execution.runId, durableOutcome).catch(() => {});
+        continue;
+      }
+
+      // A renderer exit is only a notification. Re-read the Rust projection,
+      // whose exit event is emitted only after terminal state was persisted.
+      if (session.status === "exited") {
+        const key = `${execution.runId}:native-read`;
+        if (lifecycleSyncs.current.has(key)) continue;
+        lifecycleSyncs.current.add(key);
+        void getNekoControlClient().listSessions(execution.runId).then((records) => {
+          const bound = graph.agentSessions.find((item) => item.runId === execution.runId);
+          const record = records.find((item) => item.agentSessionId === bound?.id)
+            ?? records[records.length - 1];
+          const outcome = record ? deriveAdeOutcomeFromNativeRecord(record) : null;
+          if (outcome) return projectOutcome(execution.runId, outcome);
+          return undefined;
+        }).catch(() => {}).finally(() => {
+          lifecycleSyncs.current.delete(key);
+        });
+      }
+    }
+  }, [graph.agentSessions, graph.runs, hydrated, sessions]);
 
   const visibleTasks = useMemo(() => graph.tasks.filter((task) =>
     !selectedProjectId || task.projectId === selectedProjectId), [graph.tasks, selectedProjectId]);
@@ -251,24 +316,40 @@ export default function WiiiAdeApp({ onOpenManaged = () => {} }: { onOpenManaged
   const beginTaskExecution = (launch: NekoTaskLaunchRequest) => {
     setSelectedTaskId(launch.execution.taskId);
     const onSessionCreated = async (sessionId: string) => {
-      const session = useNekoSessionStore.getState().sessions[sessionId];
-      const runtimeId = session?.runtime?.providerExtensions?.nativeAgentSessionId;
-      if (session?.runtime && session.status !== "error") {
-        await useAdeWorkStore.getState().attachAgentSession({
-          id: typeof runtimeId === "string" ? runtimeId : sessionId,
-          runId: launch.execution.runId,
-          providerId: session.agentId,
-          providerSessionId: session.backendSessionId,
-        });
-      } else {
-        const uncertain = session?.statusDetail?.includes("unknown_outcome") ?? false;
-        await useAdeWorkStore.getState().transitionRun(
-          launch.execution.runId,
-          uncertain ? "unknown_outcome" : "failed",
-        );
+      try {
+        const session = useNekoSessionStore.getState().sessions[sessionId];
+        const runtimeId = session?.runtime?.providerExtensions?.nativeAgentSessionId;
+        if (session?.runtime && session.status !== "error") {
+          await useAdeWorkStore.getState().attachAgentSession({
+            id: typeof runtimeId === "string" ? runtimeId : sessionId,
+            runId: launch.execution.runId,
+            providerId: session.agentId,
+            providerSessionId: session.backendSessionId,
+          });
+        } else {
+          const uncertain = session?.statusDetail?.includes("unknown_outcome") ?? false;
+          await useAdeWorkStore.getState().transitionRun(
+            launch.execution.runId,
+            uncertain ? "unknown_outcome" : "failed",
+          );
+        }
+      } catch (cause) {
+        // The provider already exists. Losing its Wiii binding is uncertain and
+        // must never leave the launcher armed for a duplicate start.
+        try {
+          await useAdeWorkStore.getState().transitionRun(
+            launch.execution.runId,
+            "unknown_outcome",
+          );
+        } catch {
+          // Preserve the original durability error; recovery can use the Neko
+          // session's execution binding after storage becomes available again.
+        }
+        throw cause;
+      } finally {
+        setPendingLaunch(null);
+        setSelectedTaskId(launch.execution.taskId);
       }
-      setPendingLaunch(null);
-      setSelectedTaskId(launch.execution.taskId);
     };
     const onLaunchError = async (cause: unknown) => {
       const uncertain = (cause instanceof Error ? cause.message : String(cause)).includes("unknown_outcome");
@@ -290,7 +371,10 @@ export default function WiiiAdeApp({ onOpenManaged = () => {} }: { onOpenManaged
     return (
       <NekoChillApp
         onOpenManaged={onOpenManaged}
-        onOpenWork={() => setSurface("work")}
+        onOpenWork={() => {
+          setPendingLaunch(null);
+          setSurface("work");
+        }}
         taskLaunch={pendingLaunch}
       />
     );

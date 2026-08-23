@@ -98,4 +98,12 @@ describe("Wiii ADE work persistence", () => {
       graph,
     })).toThrow(/missing_environment/);
   });
+
+  it("rejects an invalid graph before the storage write barrier", async () => {
+    const graph = validGraph();
+    graph.runs[0].environmentId = "missing";
+
+    await expect(saveAdeWorkGraph(graph)).rejects.toThrow(/missing_environment/);
+    expect(storage.size).toBe(0);
+  });
 });

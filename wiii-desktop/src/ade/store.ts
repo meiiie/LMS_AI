@@ -62,6 +62,14 @@ function cloneGraph(graph: AdeGraph): AdeGraph {
   return structuredClone(graph);
 }
 
+function assertHydrated(hydrated: boolean): void {
+  if (!hydrated) {
+    throw new Error(
+      "Dữ liệu công việc Wiii chưa được nạp. Hãy tải lại trước khi thay đổi.",
+    );
+  }
+}
+
 function normalizedRoot(path: string): string {
   const windows = /^(?:[A-Za-z]:[\\/]|\\\\)/.test(path);
   const normalized = windows ? path.replaceAll("/", "\\") : path;
@@ -108,6 +116,7 @@ export const useAdeWorkStore = create<AdeWorkState>()(
     }),
 
     createTaskRun: async (input) => serializeMutation(async () => {
+      assertHydrated(get().hydrated);
       const title = input.title.trim();
       if (!title) throw new Error("Hãy mô tả công việc Wiii cần hoàn thành.");
       if (!input.workspace.path || !input.workspace.name) {
@@ -193,6 +202,7 @@ export const useAdeWorkStore = create<AdeWorkState>()(
     }),
 
     attachAgentSession: async (input) => serializeMutation(async () => {
+      assertHydrated(get().hydrated);
       const graph = cloneGraph(get().graph);
       const run = graph.runs.find((item) => item.id === input.runId);
       if (!run) {
@@ -213,15 +223,18 @@ export const useAdeWorkStore = create<AdeWorkState>()(
           providerSessionId: input.providerSessionId,
           role: "primary",
         };
-      if (!existing) graph.agentSessions.push(session);
+      if (existing) {
+        existing.providerId = input.providerId;
+        existing.providerSessionId = input.providerSessionId;
+      } else {
+        graph.agentSessions.push(session);
+      }
       run.state = "running";
       const task = graph.tasks.find((item) => item.id === run.taskId);
       if (task) task.state = "running";
       const environment = graph.environments.find((item) => item.id === run.environmentId);
       if (environment) environment.state = "busy";
-      if (!existing || get().graph.runs.find((item) => item.id === input.runId)?.state !== "running") {
-        await saveAdeWorkGraph(graph);
-      }
+      await saveAdeWorkGraph(graph);
       set((state) => {
         state.graph = graph;
         state.error = null;
@@ -230,6 +243,7 @@ export const useAdeWorkStore = create<AdeWorkState>()(
     }),
 
     transitionRun: async (runId, nextState) => serializeMutation(async () => {
+      assertHydrated(get().hydrated);
       const graph = cloneGraph(get().graph);
       const run = graph.runs.find((item) => item.id === runId);
       if (!run) throw new Error(`Không tìm thấy Run ${runId}.`);
@@ -242,7 +256,7 @@ export const useAdeWorkStore = create<AdeWorkState>()(
       if (task) task.state = taskStateForRun(nextState);
       const environment = graph.environments.find((item) => item.id === run.environmentId);
       if (environment) {
-        environment.state = ["completed", "failed", "cancelled", "unknown_outcome"].includes(nextState)
+        environment.state = ["review", "completed", "failed", "cancelled", "unknown_outcome"].includes(nextState)
           ? "stopped"
           : "busy";
       }

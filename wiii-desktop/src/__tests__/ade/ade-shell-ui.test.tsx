@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { saveGraph } = vi.hoisted(() => ({
   saveGraph: vi.fn(async (graph: unknown) => ({
@@ -45,6 +45,7 @@ vi.mock("@/neko-chill/NekoChillApp", () => ({
 import WiiiAdeApp from "@/ade/WiiiAdeApp";
 import { resetAdeWorkStoreForTests, useAdeWorkStore } from "@/ade/store";
 import { useNekoSessionStore } from "@/neko-chill/stores/neko-session-store";
+import type { NekoSession } from "@/neko-chill/stores/neko-session-store";
 
 describe("Wiii task-first desktop shell", () => {
   beforeEach(() => {
@@ -86,5 +87,73 @@ describe("Wiii task-first desktop shell", () => {
       state: "starting",
     });
     expect(screen.getByText(`Run ${graph.runs[0].id}`)).toBeTruthy();
+  });
+
+  it("disarms a Task launcher when the user returns to Wiii work", async () => {
+    render(<WiiiAdeApp />);
+
+    fireEvent.click(screen.getByTestId("new-task"));
+    fireEvent.click(screen.getByTestId("choose-task-workspace"));
+    await screen.findByText("C:\\src\\wiii");
+    fireEvent.change(screen.getByTestId("task-title"), {
+      target: { value: "One durable launch" },
+    });
+    fireEvent.click(screen.getByTestId("continue-task"));
+    await screen.findByText("Task launch: One durable launch");
+
+    fireEvent.click(screen.getByRole("button", { name: "Về công việc" }));
+    fireEvent.click(screen.getByTestId("open-neko"));
+    expect(screen.getByText("Manual Neko Chill")).toBeTruthy();
+    expect(screen.queryByText("Task launch: One durable launch")).toBeNull();
+  });
+
+  it("projects authoritative native completion to review and releases the environment", async () => {
+    const created = await useAdeWorkStore.getState().createTaskRun({
+      workspace: { name: "Wiii", path: "C:\\src\\wiii" },
+      title: "Review native result",
+    });
+    await useAdeWorkStore.getState().attachAgentSession({
+      id: "native-agent-1",
+      runId: created.runId,
+      providerId: "codex",
+      providerSessionId: "thread-1",
+    });
+    useNekoSessionStore.setState({
+      sessions: {
+        visible: {
+          id: "visible",
+          execution: created.execution,
+          events: [{
+            v: 1,
+            eventId: "native-completed",
+            seq: 1,
+            at: 1,
+            visibility: "runtime",
+            data: {
+              type: "native-runtime-reconciled",
+              agentSessionId: "native-agent-1",
+              runId: created.runId,
+              providerId: "codex",
+              state: "completed",
+              operationPhase: "completed",
+              continuity: "active",
+              replayedFromSeq: 0,
+              replayedThroughSeq: 1,
+              replayedEventCount: 1,
+            },
+          }],
+          status: "exited",
+        } as NekoSession,
+      },
+      activeSessionId: null,
+    });
+
+    render(<WiiiAdeApp />);
+
+    await waitFor(() => {
+      expect(useAdeWorkStore.getState().graph.runs[0].state).toBe("review");
+    });
+    expect(useAdeWorkStore.getState().graph.tasks[0].state).toBe("review");
+    expect(useAdeWorkStore.getState().graph.environments[0].state).toBe("stopped");
   });
 });

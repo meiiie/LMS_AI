@@ -144,6 +144,7 @@ describe("Neko Chill shell UI", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(switcher.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("menu", { name: "Điều hướng Wiii" })).toBeNull();
+    expect(document.activeElement).toBe(switcher);
   });
 
   it("groups every persisted session and searches all local history from Ctrl+K", () => {

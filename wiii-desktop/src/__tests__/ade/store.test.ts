@@ -19,10 +19,29 @@ vi.mock("@/ade/persistence", async () => {
 import { resetAdeWorkStoreForTests, useAdeWorkStore } from "@/ade/store";
 
 describe("Wiii ADE work store", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     failWrite = false;
     saved.length = 0;
     resetAdeWorkStoreForTests();
+    await useAdeWorkStore.getState().hydrate();
+  });
+
+  it("rejects every mutation until the durable snapshot has been hydrated", async () => {
+    resetAdeWorkStoreForTests();
+    await expect(useAdeWorkStore.getState().createTaskRun({
+      workspace: { name: "Wiii", path: "C:\\src\\wiii" },
+      title: "Do not overwrite unread state",
+    })).rejects.toThrow(/chưa được nạp/i);
+    await expect(useAdeWorkStore.getState().attachAgentSession({
+      id: "session-1",
+      runId: "run-1",
+      providerId: "codex",
+      providerSessionId: null,
+    })).rejects.toThrow(/chưa được nạp/i);
+    await expect(
+      useAdeWorkStore.getState().transitionRun("run-1", "failed"),
+    ).rejects.toThrow(/chưa được nạp/i);
+    expect(saved).toHaveLength(0);
   });
 
   it("commits the complete Task/Run chain and returns its execution binding", async () => {
@@ -85,7 +104,20 @@ describe("Wiii ADE work store", () => {
       providerId: "codex",
       providerSessionId: "thread-1",
     });
+    expect(saved).toHaveLength(2);
     expect(useAdeWorkStore.getState().graph.runs[0].state).toBe("running");
+
+    await useAdeWorkStore.getState().attachAgentSession({
+      id: "native-agent-session",
+      runId: created.runId,
+      providerId: "codex",
+      providerSessionId: "thread-2",
+    });
+    expect(saved).toHaveLength(3);
+    expect(useAdeWorkStore.getState().graph.agentSessions[0]).toMatchObject({
+      providerId: "codex",
+      providerSessionId: "thread-2",
+    });
     await expect(
       useAdeWorkStore.getState().transitionRun(created.runId, "completed"),
     ).rejects.toThrow(/không thể chuyển/i);
