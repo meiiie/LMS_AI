@@ -258,12 +258,13 @@ class TauriNekoControlClient implements NekoControlClient {
     } catch (error) {
       // A rejected start may represent unknown_outcome. Never issue a second
       // native side effect as cleanup without an authoritative start result.
-      // Native command rejections are deterministic strings. Bridge errors
-      // keep the identity, original execution binding, listener, and buffered
-      // transport state so a caller-level retry cannot spawn twice or lose
-      // provider bootstrap events.
+      // Authoritative pre-side-effect rejections release the identity. An
+      // explicit unknown_outcome or a bridge failure retains the original
+      // execution binding, listener, and buffered transport state so a
+      // caller-level retry cannot spawn twice or lose bootstrap events.
       if (
         typeof error === "string" &&
+        !isUnknownStartOutcome(error) &&
         this.unresolvedStarts.get(startKey) === startIdentity
       ) {
         this.unresolvedStarts.delete(startKey);
@@ -419,6 +420,10 @@ function isProviderBusy(error: unknown): boolean {
   return message.startsWith("provider_busy:");
 }
 
+function isUnknownStartOutcome(error: string): boolean {
+  return error.startsWith("unknown_outcome:");
+}
+
 function isDetectedProvider(value: unknown): value is NekoDetectedProvider {
   if (!value || typeof value !== "object") return false;
   const provider = value as Record<string, unknown>;
@@ -482,8 +487,8 @@ async function invokeIdempotently<T>(
   try {
     return await invoke<T>(command, args);
   } catch (first) {
-    // Rust command rejections are serialized strings and deterministic. Retry
-    // only bridge/runtime failures where response delivery is uncertain.
+    // Rust command rejections are authoritative serialized strings. Retry only
+    // bridge/runtime failures where response delivery itself is uncertain.
     if (typeof first === "string") throw first;
     // Retrying the identical request identity is safe: Rust either returns
     // the recorded result or reports unknown_outcome without repeating the

@@ -347,6 +347,35 @@ describe("Neko driver factory resource ownership", () => {
     )).toHaveLength(1);
   });
 
+  it("retains the original start identity after an authoritative unknown outcome", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    tauri.invoke.mockRejectedValue(
+      "unknown_outcome: provider spawned but ownership commit failed",
+    );
+    const request = {
+      providerId: "neko",
+      clientSessionId: "session-unknown-start",
+      workspacePath: "C:/tmp/project",
+    };
+
+    await expect(getNekoControlClient().spawnProvider(request)).rejects.toContain(
+      "unknown_outcome",
+    );
+    await expect(getNekoControlClient().spawnProvider(request)).rejects.toContain(
+      "unknown_outcome",
+    );
+
+    const startCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_start",
+    );
+    expect(startCalls).toHaveLength(2);
+    expect(startCalls[1][1].request.requestId).toBe(startCalls[0][1].request.requestId);
+    expect(startCalls[1][1].request.agentSessionId).toBe(
+      startCalls[0][1].request.agentSessionId,
+    );
+    expect(tauri.listen).toHaveBeenCalledTimes(2);
+  });
+
   it("retains a write identity when the caller retries an unresolved frame", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     let writes = 0;

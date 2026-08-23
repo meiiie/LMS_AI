@@ -18,6 +18,10 @@ method and logical target before dispatch.
   attempt. A new renderer preparation ID does not create a new logical start.
 - `provider_busy` proves a bounded writer queue rejected the frame before it
   was enqueued. A caller may retry that frame only with a new request ID.
+- Native start errors prefixed with `unknown_outcome:` are authoritative but
+  unresolved. The control client retains the original request, agent-session,
+  Run/Environment binding and listeners; it must not downgrade that result to
+  an ordinary deterministic rejection or mint a replacement start identity.
 
 Completed and failed request identities are replayable for 90 days. Startup
 maintenance may prune them after that window. Requests in `accepted`,

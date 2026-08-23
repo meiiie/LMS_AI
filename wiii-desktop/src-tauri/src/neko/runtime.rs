@@ -179,7 +179,7 @@ impl NekoRuntime {
                 }
                 RequestDecision::UnknownOutcome => {
                     return Err(
-                        "session start has unknown_outcome; automatic replay is forbidden".into(),
+                        "unknown_outcome: session start cannot be replayed automatically".into(),
                     );
                 }
                 RequestDecision::Execute => {
@@ -325,7 +325,7 @@ impl NekoRuntime {
                     json!({ "state": "unknown_outcome", "reason": "provider_stdio_unavailable" }),
                 );
                 return Err(
-                    "provider stdio became unavailable after spawn; outcome is unknown".into(),
+                    "unknown_outcome: provider stdio became unavailable after spawn".into(),
                 );
             }
         };
@@ -393,7 +393,7 @@ impl NekoRuntime {
                 json!({ "state": "unknown_outcome", "reason": "ownership_commit_failed" }),
             );
             return Err(format!(
-                "provider spawned but ownership commit failed: {error}"
+                "unknown_outcome: provider spawned but ownership commit failed: {error}"
             ));
         }
 
