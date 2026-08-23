@@ -175,9 +175,11 @@ sources and cancels every older Codex bootstrap identity. Independent cleanup
 attempts continue after one failure, but any collected failure blocks the new
 spawn. The current workspace identity and unrelated starts are not cancelled.
 Mode teardown also enumerates retained start identities owned by the control
-client, refreshes that set after in-flight preparations settle, and requires
-their authoritative cancellation before it may persist a clean exit; a
-cancellation failure remains a blocking cleanup uncertainty.
+client, refreshes that set from both renderer memory and the durable native
+catalog after in-flight preparations settle, and requires their authoritative
+cancellation before it may persist a clean exit. Durable Codex bootstrap
+cleanup is provider-scoped, so a non-Codex AgentSession sharing its Task is not
+cancelled. A cancellation failure remains a blocking cleanup uncertainty.
 
 Renderer runtime cleanup is serialized per visible session. A failed disposer
 retains its callable authority and provider cancellation identity; later close,

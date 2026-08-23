@@ -311,6 +311,11 @@ side-effect/committed phases become `unknown_outcome`.
   older workspace identities. It MUST attempt every independent cleanup before
   reporting failures. Any failure MUST block the new workspace launch;
   unrelated starts and the current workspace identity MUST remain untouched.
+- **FR-057**: Retained-start discovery MUST union renderer memory with
+  non-terminal durable Codex bootstrap sessions and MUST be used by mode-exit
+  teardown after runtime preparation settles. Durable bootstrap cancellation
+  MUST remain scoped to Codex and MUST NOT terminate another provider sharing
+  the same Task.
 
 ### Non-goals
 
@@ -359,3 +364,6 @@ side-effect/committed phases become `unknown_outcome`.
   Codex bootstrap identities before spawn, recovers durable starts after
   renderer memory loss, attempts sibling cleanup after one failure, and never
   spawns the new workspace when reconciliation fails.
+- **SC-013**: Tests prove mode exit cancels a durable Codex bootstrap after
+  renderer reload and durable reconciliation ignores a non-Codex AgentSession
+  sibling attached to the same Task.

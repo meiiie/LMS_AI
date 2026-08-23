@@ -237,8 +237,10 @@ Implemented across the foundation and Phase 2A slices:
   cleanup, and requires every cancellation to succeed before the next workspace
   can spawn Codex;
 - leaving Neko Chill enumerates retained control-client starts, refreshes that
-  set after runtime preparation settles, and requires authoritative
-  cancellation before recording a clean mode exit;
+  set from renderer and durable native authority after runtime preparation
+  settles, and requires authoritative cancellation before recording a clean
+  mode exit. Recovered Codex bootstrap cleanup remains provider-scoped and
+  cannot terminate another provider sharing the Task;
 - failed renderer runtime cleanup retains a retryable scope instead of a cached
   rejection; later lifecycle operations reuse the provider's durable
   cancellation identity, retry only failed disposers, and block replacement

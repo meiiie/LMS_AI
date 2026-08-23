@@ -141,6 +141,7 @@ const nativeControl = {
   listSessions: vi.fn(),
   readEvents: vi.fn(),
   unresolvedStartSessionIds: vi.fn(),
+  reconcilableStartSessionIds: vi.fn(),
   cancelUnresolvedStarts: vi.fn(),
 };
 
@@ -260,6 +261,7 @@ describe("neko-chill persistence", () => {
     nativeControl.listSessions.mockReset();
     nativeControl.readEvents.mockReset();
     nativeControl.unresolvedStartSessionIds.mockReset();
+    nativeControl.reconcilableStartSessionIds.mockReset();
     nativeControl.cancelUnresolvedStarts.mockReset();
     nativeControl.listSessions.mockResolvedValue([]);
     nativeControl.readEvents.mockImplementation(async (streamId: string, afterSeq = 0) => ({
@@ -269,6 +271,7 @@ describe("neko-chill persistence", () => {
       hasMore: false,
     }));
     nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([]);
     nativeControl.cancelUnresolvedStarts.mockResolvedValue(0);
     _setNativeControlReaderForTests(() => nativeControl);
     useNekoSessionStore.setState({
@@ -1397,19 +1400,29 @@ describe("neko-chill persistence", () => {
 
   it("cancels a native start retained while mode-exit joins runtime preparation", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
-    nativeControl.unresolvedStartSessionIds
-      .mockReturnValueOnce([])
-      .mockReturnValue([id]);
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([id]);
 
     await disposeAllNekoRuntimes();
 
-    expect(nativeControl.unresolvedStartSessionIds).toHaveBeenCalledTimes(2);
+    expect(nativeControl.unresolvedStartSessionIds).toHaveBeenCalledOnce();
+    expect(nativeControl.reconcilableStartSessionIds).toHaveBeenCalledOnce();
     expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
     expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
       runtime: null,
       status: "exited",
       closePending: false,
     });
+  });
+
+  it("cancels a durable Codex bootstrap found only after renderer reload", async () => {
+    const bootstrapId = "codex-account-bootstrap-after-reload";
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([bootstrapId]);
+
+    await disposeAllNekoRuntimes();
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(bootstrapId);
   });
 
   it("removes a staged prompt when the provider exits before invocation", async () => {

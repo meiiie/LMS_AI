@@ -1,7 +1,6 @@
 import { v4 as uuidv4, v5 as uuidv5 } from "uuid";
 import type {
   NekoControlClient,
-  NekoNativeSessionRecord,
   NekoSpawnedProvider,
 } from "@/neko/control-client";
 
@@ -12,14 +11,11 @@ export interface CodexBootstrapIdentity {
 }
 
 interface RetainedStartControl {
-  listSessions(runId?: string): Promise<NekoNativeSessionRecord[]>;
-  unresolvedStartSessionIds(): string[];
+  reconcilableStartSessionIds(): Promise<string[]>;
   cancelUnresolvedStarts(clientSessionId: string): Promise<number>;
 }
 
 const CODEX_BOOTSTRAP_SESSION_PREFIX = "codex-account-bootstrap-";
-const LEGACY_LOCAL_TASK_PREFIX = "legacy-local/task/";
-const NATIVE_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
 
 /**
  * Derive the account-probe caller from durable workspace identity rather than
@@ -53,11 +49,10 @@ export async function cancelOtherCodexBootstrapStarts(
   currentClientSessionId: string,
 ): Promise<number> {
   const failures: unknown[] = [];
-  const candidates = new Set(control.unresolvedStartSessionIds());
+  const candidates = new Set<string>();
   try {
-    for (const session of await control.listSessions()) {
-      const clientSessionId = codexBootstrapClientSessionId(session);
-      if (clientSessionId) candidates.add(clientSessionId);
+    for (const sessionId of await control.reconcilableStartSessionIds()) {
+      candidates.add(sessionId);
     }
   } catch (error) {
     failures.push(error);
@@ -87,28 +82,11 @@ export async function cancelOtherCodexBootstrapStarts(
   return cancelled;
 }
 
-function codexBootstrapClientSessionId(
-  session: NekoNativeSessionRecord,
-): string | null {
-  if (
-    session.providerId !== "codex" ||
-    NATIVE_TERMINAL_STATES.has(session.state) ||
-    !session.taskId.startsWith(LEGACY_LOCAL_TASK_PREFIX)
-  ) {
-    return null;
-  }
-  const clientSessionId = session.taskId.slice(LEGACY_LOCAL_TASK_PREFIX.length);
-  return clientSessionId.startsWith(CODEX_BOOTSTRAP_SESSION_PREFIX)
-    ? clientSessionId
-    : null;
-}
-
 /** Fail-closed workspace handoff followed by the one authorized launch. */
 export async function spawnCodexAccountBootstrap(
   control: Pick<
     NekoControlClient,
-    | "listSessions"
-    | "unresolvedStartSessionIds"
+    | "reconcilableStartSessionIds"
     | "cancelUnresolvedStarts"
     | "spawnProvider"
   >,

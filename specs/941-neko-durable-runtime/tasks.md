@@ -146,6 +146,9 @@
   reconciling renderer and durable bootstrap identities before spawn, attempting
   every independent cleanup, and failing closed when older native start
   cancellation cannot be proven.
+- [x] T530 Use durable retained-start discovery during mode exit and scope
+  recovered Codex bootstrap cancellation by provider so same-Task siblings are
+  never terminated.
 
 ## Dependencies
 

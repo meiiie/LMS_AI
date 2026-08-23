@@ -150,7 +150,11 @@ type DriverFactory = (
 
 type NativeControlReader = Pick<
   NekoControlClient,
-  "listSessions" | "readEvents" | "unresolvedStartSessionIds" | "cancelUnresolvedStarts"
+  | "listSessions"
+  | "readEvents"
+  | "unresolvedStartSessionIds"
+  | "reconcilableStartSessionIds"
+  | "cancelUnresolvedStarts"
 >;
 let nativeControlReaderFactory: () => NativeControlReader = getNekoControlClient;
 
@@ -2347,7 +2351,7 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     // A provider preparation can become unresolved while RuntimeRegistry is
     // joining it. Refresh after every preparation has settled so teardown
     // cannot miss a native start retained after the initial snapshot.
-    for (const sessionId of nativeControl.unresolvedStartSessionIds()) {
+    for (const sessionId of await nativeControl.reconcilableStartSessionIds()) {
       unresolvedStartSessionIds.add(sessionId);
       sessionIds.add(sessionId);
     }

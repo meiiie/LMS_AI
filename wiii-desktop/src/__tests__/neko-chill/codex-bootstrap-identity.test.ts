@@ -4,30 +4,7 @@ import {
   codexBootstrapIdentity,
   spawnCodexAccountBootstrap,
 } from "@/neko-chill/codex-bootstrap-identity";
-import type { NekoNativeSessionRecord } from "@/neko/control-client";
 import type { AcpTransport } from "@/neko-chill/drivers/acp/client";
-
-function nativeBootstrap(
-  clientSessionId: string,
-  overrides: Partial<NekoNativeSessionRecord> = {},
-): NekoNativeSessionRecord {
-  return {
-    agentSessionId: `native-${clientSessionId}`,
-    taskId: `legacy-local/task/${clientSessionId}`,
-    runId: `run-${clientSessionId}`,
-    environmentId: `environment-${clientSessionId}`,
-    providerId: "codex",
-    providerVersion: "0.1.0",
-    workspacePath: "C:/workspace",
-    state: "running",
-    operationPhase: "committed",
-    continuity: "active",
-    pid: 42,
-    createdAt: "2026-08-23T00:00:00.000Z",
-    updatedAt: "2026-08-23T00:00:00.000Z",
-    ...overrides,
-  };
-}
 
 describe("Codex account bootstrap identity", () => {
   it("keeps caller identity but mints a fresh Run for each bootstrap attempt", () => {
@@ -76,8 +53,12 @@ describe("Codex account bootstrap identity", () => {
     const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
     const cancelled: string[] = [];
     const count = await cancelOtherCodexBootstrapStarts({
-      listSessions: async () => [],
-      unresolvedStartSessionIds: () => [current, "ordinary-session", old, old],
+      reconcilableStartSessionIds: async () => [
+        current,
+        "ordinary-session",
+        old,
+        old,
+      ],
       cancelUnresolvedStarts: async (sessionId) => {
         cancelled.push(sessionId);
         return 1;
@@ -95,8 +76,7 @@ describe("Codex account bootstrap identity", () => {
     const attempted: string[] = [];
 
     await expect(cancelOtherCodexBootstrapStarts({
-      listSessions: async () => [],
-      unresolvedStartSessionIds: () => [oldC, oldA],
+      reconcilableStartSessionIds: async () => [oldC, oldA],
       cancelUnresolvedStarts: async (sessionId) => {
         attempted.push(sessionId);
         if (sessionId === oldA) throw new Error("cancellation remains uncertain");
@@ -112,17 +92,7 @@ describe("Codex account bootstrap identity", () => {
     const cancelled: string[] = [];
 
     const count = await cancelOtherCodexBootstrapStarts({
-      listSessions: async () => [
-        nativeBootstrap(old),
-        nativeBootstrap(current),
-        nativeBootstrap(codexBootstrapIdentity("C:/terminal").clientSessionId, {
-          state: "cancelled",
-        }),
-        nativeBootstrap(codexBootstrapIdentity("C:/gemini").clientSessionId, {
-          providerId: "gemini",
-        }),
-      ],
-      unresolvedStartSessionIds: () => [],
+      reconcilableStartSessionIds: async () => [old, current],
       cancelUnresolvedStarts: async (sessionId) => {
         cancelled.push(sessionId);
         return 1;
@@ -140,8 +110,7 @@ describe("Codex account bootstrap identity", () => {
     const transport = {} as AcpTransport;
 
     const spawned = await spawnCodexAccountBootstrap({
-      listSessions: async () => [],
-      unresolvedStartSessionIds: () => [old],
+      reconcilableStartSessionIds: async () => [old],
       cancelUnresolvedStarts: async (sessionId) => {
         calls.push(`cancel:${sessionId}`);
         return 1;
@@ -177,8 +146,7 @@ describe("Codex account bootstrap identity", () => {
     let spawned = false;
 
     await expect(spawnCodexAccountBootstrap({
-      listSessions: async () => [],
-      unresolvedStartSessionIds: () => [old],
+      reconcilableStartSessionIds: async () => [old],
       cancelUnresolvedStarts: async () => {
         throw new Error("old bootstrap remains uncertain");
       },

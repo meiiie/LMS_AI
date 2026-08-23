@@ -110,6 +110,7 @@ export interface NekoControlClient {
   listSessions(runId?: string): Promise<NekoNativeSessionRecord[]>;
   readEvents(streamId: string, afterSeq?: number, limit?: number): Promise<NekoControlReplayPage>;
   unresolvedStartSessionIds(): string[];
+  reconcilableStartSessionIds(): Promise<string[]>;
   cancelUnresolvedStarts(clientSessionId: string): Promise<number>;
   spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider>;
 }
@@ -118,6 +119,8 @@ const MAX_PENDING_BOOTSTRAP_FRAMES = 256;
 const MAX_PENDING_BOOTSTRAP_BYTES = 8 * 1024 * 1024;
 const NATIVE_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
 const RECONCILE_CANCEL_REQUEST_PREFIX = "reconcile-retained-start-";
+const LEGACY_LOCAL_TASK_PREFIX = "legacy-local/task/";
+const CODEX_BOOTSTRAP_SESSION_PREFIX = "codex-account-bootstrap-";
 
 function legacyExecution(
   clientSessionId: string,
@@ -138,6 +141,27 @@ class TauriNekoControlClient implements NekoControlClient {
     return [...new Set(
       [...this.unresolvedStarts.values()].map((identity) => identity.clientSessionId),
     )].sort();
+  }
+
+  async reconcilableStartSessionIds(): Promise<string[]> {
+    const identities = new Set(this.unresolvedStartSessionIds());
+    for (const session of await this.listSessions()) {
+      if (
+        session.providerId !== "codex" ||
+        NATIVE_TERMINAL_STATES.has(session.state) ||
+        !session.taskId.startsWith(LEGACY_LOCAL_TASK_PREFIX)
+      ) {
+        continue;
+      }
+      const clientSessionId = session.taskId.slice(LEGACY_LOCAL_TASK_PREFIX.length);
+      if (clientSessionId.startsWith(CODEX_BOOTSTRAP_SESSION_PREFIX)) {
+        identities.add(clientSessionId);
+      }
+    }
+    for (const sessionId of this.unresolvedStartSessionIds()) {
+      identities.add(sessionId);
+    }
+    return [...identities].sort();
   }
 
   async listProviders(): Promise<NekoDetectedProvider[]> {
@@ -236,9 +260,13 @@ class TauriNekoControlClient implements NekoControlClient {
     }
 
     try {
+      const expectedProviderId = clientSessionId.startsWith(CODEX_BOOTSTRAP_SESSION_PREFIX)
+        ? "codex"
+        : null;
       const durable = (await this.listSessions())
         .filter((session) => (
           session.taskId === legacyExecution(clientSessionId).taskId &&
+          (!expectedProviderId || session.providerId === expectedProviderId) &&
           !representedNativeSessions.has(session.agentSessionId) &&
           !NATIVE_TERMINAL_STATES.has(session.state)
         ))
@@ -435,7 +463,7 @@ class TauriNekoControlClient implements NekoControlClient {
       request.profileId ?? null,
     ]);
     const priorStart = this.unresolvedStarts.get(startKey);
-    if (!priorStart && request.clientSessionId.startsWith("codex-account-bootstrap-")) {
+    if (!priorStart && request.clientSessionId.startsWith(CODEX_BOOTSTRAP_SESSION_PREFIX)) {
       // A fresh account-probe attempt receives a fresh Run, so duplicate
       // protection must search by its stable caller Task across the complete
       // native catalog rather than query only the newly minted Run.

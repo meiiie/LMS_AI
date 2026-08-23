@@ -442,21 +442,38 @@ describe("Neko driver factory resource ownership", () => {
     let nativeState = "running";
     tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
       if (command === "neko_control_session_list") {
-        return [{
-          agentSessionId,
-          taskId: `legacy-local/task/${clientSessionId}`,
-          runId,
-          environmentId: "native-durable-environment",
-          providerId: "codex",
-          providerVersion: "0.149.0",
-          workspacePath: "C:/tmp/old-project",
-          state: nativeState,
-          operationPhase: "committed",
-          continuity: "active",
-          pid: nativeState === "running" ? 123 : null,
-          createdAt: "2026-08-23T00:00:00.000Z",
-          updatedAt: "2026-08-23T00:01:00.000Z",
-        }];
+        return [
+          {
+            agentSessionId,
+            taskId: `legacy-local/task/${clientSessionId}`,
+            runId,
+            environmentId: "native-durable-environment",
+            providerId: "codex",
+            providerVersion: "0.149.0",
+            workspacePath: "C:/tmp/old-project",
+            state: nativeState,
+            operationPhase: "committed",
+            continuity: "active",
+            pid: nativeState === "running" ? 123 : null,
+            createdAt: "2026-08-23T00:00:00.000Z",
+            updatedAt: "2026-08-23T00:01:00.000Z",
+          },
+          {
+            agentSessionId: "native-gemini-sibling",
+            taskId: `legacy-local/task/${clientSessionId}`,
+            runId: "native-gemini-run",
+            environmentId: "native-gemini-environment",
+            providerId: "gemini",
+            providerVersion: "0.1.0",
+            workspacePath: "C:/tmp/old-project",
+            state: "running",
+            operationPhase: "committed",
+            continuity: "active",
+            pid: 456,
+            createdAt: "2026-08-23T00:00:00.000Z",
+            updatedAt: "2026-08-23T00:01:00.000Z",
+          },
+        ];
       }
       if (command === "neko_control_session_cancel") {
         nativeState = "cancelled";
@@ -466,6 +483,9 @@ describe("Neko driver factory resource ownership", () => {
     });
 
     expect(getNekoControlClient().unresolvedStartSessionIds()).not.toContain(clientSessionId);
+    await expect(
+      getNekoControlClient().reconcilableStartSessionIds(),
+    ).resolves.toEqual([clientSessionId]);
     await expect(
       getNekoControlClient().cancelUnresolvedStarts(clientSessionId),
     ).resolves.toBe(1);
