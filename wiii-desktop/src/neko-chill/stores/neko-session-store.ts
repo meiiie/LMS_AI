@@ -203,6 +203,47 @@ function cleanupFailureReason(error: unknown): string {
   return (reason || "Unknown native runtime cleanup failure.").slice(0, 4_096);
 }
 
+type RuntimeDetachReason = Extract<
+  NekoSessionEventData,
+  { type: "runtime-detached" }
+>["reason"];
+
+/** A detach fact is terminal only when provider cleanup returned successfully. */
+function appendRuntimeCleanupFact(
+  session: NekoSession,
+  provider: RuntimeProviderSnapshot,
+  reason: RuntimeDetachReason,
+  cleanupError: unknown | null,
+  at: number = Date.now(),
+): void {
+  if (cleanupError) {
+    appendOwnedSessionEvent(
+      session,
+      "runtime",
+      {
+        type: "native-runtime-cleanup-uncertain",
+        ...nativeRuntimeIdentity(provider),
+        providerId: provider.providerId,
+        reason: cleanupFailureReason(cleanupError),
+      },
+      at,
+    );
+    return;
+  }
+  appendOwnedSessionEvent(
+    session,
+    "runtime",
+    {
+      type: "runtime-detached",
+      providerId: provider.providerId,
+      instanceId: provider.instanceId,
+      kind: provider.kind,
+      reason,
+    },
+    at,
+  );
+}
+
 function lastNativeCursor(session: NekoSession, runId: string): number {
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const data = session.events[index].data;
@@ -866,13 +907,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           session.backendSessionId = null;
           session.runtime = null;
           if (provider) {
-            appendOwnedSessionEvent(session, "runtime", {
-              type: "runtime-detached",
-              providerId: provider.providerId,
-              instanceId: provider.instanceId,
-              kind: provider.kind,
-              reason: "workspace-change",
-            });
+            appendRuntimeCleanupFact(
+              session,
+              provider,
+              "workspace-change",
+              disposeError,
+            );
           }
           contextEventId = appendOwnedSessionEvent(session, "model", {
             type: "session-context",
@@ -881,7 +921,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             workspacePath: workspace.path,
             launchProfileId: session.launchProfile?.id ?? null,
           }).eventId!;
-          session.status = "exited";
+          session.status = disposeError ? "error" : "exited";
           session.statusDetail = "Đã gắn dự án. Lượt tiếp theo sẽ khởi động một runtime mới trong thư mục này.";
           if (disposeError) {
             session.statusDetail = "Đã gắn dự án nhưng runtime cũ không đóng sạch.";
@@ -1511,13 +1551,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 if (current.runtime?.instanceId === revocation.provider.instanceId) {
                   current.runtime = null;
                 }
-                appendOwnedSessionEvent(current, "runtime", {
-                  type: "runtime-detached",
-                  providerId: revocation.provider.providerId,
-                  instanceId: revocation.provider.instanceId,
-                  kind: revocation.provider.kind,
-                  reason: "config-uncertain",
-                });
+                appendRuntimeCleanupFact(
+                  current,
+                  revocation.provider,
+                  "config-uncertain",
+                  revocation.error ?? null,
+                );
               }
               if (ownsControlLock) {
                 const lifecycleAlreadyClosed = current.status === "stopping" || current.status === "exited";
@@ -1601,13 +1640,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               if (current.runtime?.instanceId === revocation.provider.instanceId) {
                 current.runtime = null;
               }
-              appendOwnedSessionEvent(current, "runtime", {
-                type: "runtime-detached",
-                providerId: revocation.provider.providerId,
-                instanceId: revocation.provider.instanceId,
-                kind: revocation.provider.kind,
-                reason: "config-uncertain",
-              });
+              appendRuntimeCleanupFact(
+                current,
+                revocation.provider,
+                "config-uncertain",
+                revocation.error ?? null,
+              );
             }
             if (ownsControlLock) {
               const lifecycleAlreadyClosed = current.status === "stopping" || current.status === "exited";
@@ -1697,22 +1735,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           if (session) {
             session.runtime = null;
             if (provider) {
-              if (disposeError) {
-                appendOwnedSessionEvent(session, "runtime", {
-                  type: "native-runtime-cleanup-uncertain",
-                  ...nativeRuntimeIdentity(provider),
-                  providerId: provider.providerId,
-                  reason: cleanupFailureReason(disposeError),
-                });
-              } else {
-                appendOwnedSessionEvent(session, "runtime", {
-                  type: "runtime-detached",
-                  providerId: provider.providerId,
-                  instanceId: provider.instanceId,
-                  kind: provider.kind,
-                  reason: "close",
-                });
-              }
+              appendRuntimeCleanupFact(session, provider, "close", disposeError);
             }
             session.status = disposeError ? "error" : "exited";
             session.pendingPermission = null;
@@ -1800,19 +1823,15 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           session.deletePending = false;
           session.status = "error";
           session.statusDetail = `Không thể xóa phiên vì runtime chưa đóng sạch: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`;
-          if (
-            provider &&
-            !session.events.some((event) =>
-              event.data.type === "runtime-detached" &&
-              event.data.instanceId === provider.instanceId)
-          ) {
-            appendOwnedSessionEvent(session, "runtime", {
-              type: "runtime-detached",
-              providerId: provider.providerId,
-              instanceId: provider.instanceId,
-              kind: provider.kind,
-              reason: "delete",
-            });
+          if (provider) {
+            const identity = nativeRuntimeIdentity(provider);
+            const alreadyRecorded = session.events.some((event) => (
+              event.data.type === "native-runtime-cleanup-uncertain" &&
+              event.data.agentSessionId === identity.agentSessionId
+            ));
+            if (!alreadyRecorded) {
+              appendRuntimeCleanupFact(session, provider, "delete", disposeError);
+            }
           }
         });
         await persistSessionNowOrReport(sessionId, "lỗi cleanup trước khi xóa", {
@@ -2048,13 +2067,12 @@ async function revokeRuntimeAfterDurabilityFailure(
       if (current.runtime?.instanceId === revocation.provider.instanceId) {
         current.runtime = null;
       }
-      appendOwnedSessionEvent(current, "runtime", {
-        type: "runtime-detached",
-        providerId: revocation.provider.providerId,
-        instanceId: revocation.provider.instanceId,
-        kind: revocation.provider.kind,
-        reason: "durability-failure",
-      });
+      appendRuntimeCleanupFact(
+        current,
+        revocation.provider,
+        "durability-failure",
+        revocation.error ?? null,
+      );
       if (current.status !== "stopping") {
         current.status = revocation.error ? "error" : "exited";
         terminalDetail = revocation.error
@@ -2183,19 +2201,8 @@ export async function sweepIdleSessions(now: number = Date.now()): Promise<void>
       const s = state.sessions[session.id];
       if (s && s.status === "connecting") {
         s.runtime = null;
-        appendOwnedSessionEvent(
-          s,
-          "runtime",
-          {
-            type: "runtime-detached",
-            providerId: provider.providerId,
-            instanceId: provider.instanceId,
-            kind: provider.kind,
-            reason: "idle",
-          },
-          now,
-        );
-        s.status = "exited";
+        appendRuntimeCleanupFact(s, provider, "idle", disposeError, now);
+        s.status = disposeError ? "error" : "exited";
         s.statusDetail = "Agent tạm nghỉ sau 30 phút yên lặng — nhắn tiếp để khởi động lại.";
         if (disposeError) {
           s.statusDetail = "Runtime hết hạn nhưng báo lỗi khi thu hồi tài nguyên.";
@@ -2204,7 +2211,10 @@ export async function sweepIdleSessions(now: number = Date.now()): Promise<void>
         s.lastActivityAt = now;
       }
     });
-    await persistSessionNowOrReport(session.id, "trạng thái runtime hết hạn");
+    await persistSessionNowOrReport(session.id, "trạng thái runtime hết hạn", {
+      fatal: Boolean(disposeError),
+      strict: Boolean(disposeError),
+    });
   }
 }
 
@@ -2263,7 +2273,7 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         const result = resultsBySession.get(sessionId);
         const provider = result?.provider ?? session.runtime;
         session.runtime = null;
-        session.status = "exited";
+        session.status = result?.error ? "error" : "exited";
         session.pendingPermission = null;
         session.resolvingPermissionId = null;
         session.cancelPending = false;
@@ -2272,20 +2282,23 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
           ? "Đã rời Neko Chill nhưng runtime báo lỗi khi thu hồi tài nguyên."
           : "Runtime đã dừng khi rời Neko Chill.";
         if (provider) {
-          appendOwnedSessionEvent(session, "runtime", {
-            type: "runtime-detached",
-            providerId: provider.providerId,
-            instanceId: provider.instanceId,
-            kind: provider.kind,
-            reason: "mode-exit",
-          });
+          appendRuntimeCleanupFact(
+            session,
+            provider,
+            "mode-exit",
+            result?.error ?? null,
+          );
         }
         sessionIdsToPersist.push(sessionId);
       }
     });
     await Promise.all(
       sessionIdsToPersist.map(async (sessionId) => {
-        await persistSessionNowOrReport(sessionId, "trạng thái rời Neko Chill");
+        const failed = Boolean(resultsBySession.get(sessionId)?.error);
+        await persistSessionNowOrReport(sessionId, "trạng thái rời Neko Chill", {
+          fatal: failed,
+          strict: failed,
+        });
       }),
     );
   })();

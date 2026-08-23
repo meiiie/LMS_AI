@@ -101,7 +101,8 @@ logical start; a visible session cannot be deleted while that cancellation is
 uncertain. When terminal native projections age out of the complete catalog,
 Workbench records an explicit checkpoint-retirement fact instead of leaving a
 permanent phantom respawn lock. Active and `unknown_outcome` projections are
-never pruned automatically, and an uncertain live close persists a blocking
+never pruned automatically, and any uncertain live cleanup (close, delete,
+workspace change, recovery, idle reap, or mode exit) persists a blocking
 tombstone until a later native reconciliation proves a safe terminal state.
 These runtime-only facts live in `neko-chill-native-runtime.json`; the shared
 Workbench v2 transcript retains its previous-release vocabulary for rollback.

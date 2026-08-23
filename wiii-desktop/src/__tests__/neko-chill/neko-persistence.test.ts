@@ -1839,8 +1839,8 @@ describe("neko-chill persistence", () => {
     expect(session.events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         data: expect.objectContaining({
-          type: "runtime-detached",
-          reason: "config-uncertain",
+          type: "native-runtime-cleanup-uncertain",
+          reason: "process kill failed",
         }),
       }),
       expect.objectContaining({
@@ -2193,10 +2193,16 @@ describe("neko-chill persistence", () => {
     expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
     expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
 
-    // A process restart clears live ownership; deletion can then be retried.
+    // Losing live ownership is not proof that the process stopped. The durable
+    // uncertainty tombstone must survive restart and keep deletion blocked.
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().deleteSession(id);
-    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      deletePending: false,
+      status: "error",
+    });
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
   });
 
   it("rolls back an unpersisted workspace attachment so it can be retried", async () => {
