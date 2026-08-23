@@ -53,6 +53,7 @@ describe("Codex account bootstrap identity", () => {
     const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
     const cancelled: string[] = [];
     const count = await cancelOtherCodexBootstrapStarts({
+      unresolvedStartSessionIds: () => [],
       reconcilableStartSessionIds: async () => [
         current,
         "ordinary-session",
@@ -76,6 +77,7 @@ describe("Codex account bootstrap identity", () => {
     const attempted: string[] = [];
 
     await expect(cancelOtherCodexBootstrapStarts({
+      unresolvedStartSessionIds: () => [],
       reconcilableStartSessionIds: async () => [oldC, oldA],
       cancelUnresolvedStarts: async (sessionId) => {
         attempted.push(sessionId);
@@ -92,6 +94,7 @@ describe("Codex account bootstrap identity", () => {
     const cancelled: string[] = [];
 
     const count = await cancelOtherCodexBootstrapStarts({
+      unresolvedStartSessionIds: () => [],
       reconcilableStartSessionIds: async () => [old, current],
       cancelUnresolvedStarts: async (sessionId) => {
         cancelled.push(sessionId);
@@ -103,6 +106,26 @@ describe("Codex account bootstrap identity", () => {
     expect(count).toBe(1);
   });
 
+  it("cancels renderer-known bootstraps before reporting durable discovery failure", async () => {
+    const current = codexBootstrapIdentity("C:/workspace-b").clientSessionId;
+    const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
+    const discoveryError = new Error("durable bootstrap catalog unavailable");
+    const cancelled: string[] = [];
+
+    await expect(cancelOtherCodexBootstrapStarts({
+      unresolvedStartSessionIds: () => [old],
+      reconcilableStartSessionIds: async () => {
+        throw discoveryError;
+      },
+      cancelUnresolvedStarts: async (sessionId) => {
+        cancelled.push(sessionId);
+        return 1;
+      },
+    }, current)).rejects.toBe(discoveryError);
+
+    expect(cancelled).toEqual([old]);
+  });
+
   it("never spawns the new workspace before retained-start cancellation succeeds", async () => {
     const identity = codexBootstrapIdentity("C:/workspace-b");
     const old = codexBootstrapIdentity("C:/workspace-a").clientSessionId;
@@ -110,6 +133,7 @@ describe("Codex account bootstrap identity", () => {
     const transport = {} as AcpTransport;
 
     const spawned = await spawnCodexAccountBootstrap({
+      unresolvedStartSessionIds: () => [],
       reconcilableStartSessionIds: async () => [old],
       cancelUnresolvedStarts: async (sessionId) => {
         calls.push(`cancel:${sessionId}`);
@@ -146,6 +170,7 @@ describe("Codex account bootstrap identity", () => {
     let spawned = false;
 
     await expect(spawnCodexAccountBootstrap({
+      unresolvedStartSessionIds: () => [],
       reconcilableStartSessionIds: async () => [old],
       cancelUnresolvedStarts: async () => {
         throw new Error("old bootstrap remains uncertain");

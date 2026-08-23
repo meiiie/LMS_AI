@@ -2428,7 +2428,10 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     const unreportedFailures = [
       ...(durableDiscoveryFailure === undefined ? [] : [durableDiscoveryFailure]),
       ...[...unresolvedStartFailures]
-        .filter(([sessionId]) => !sessionIdsToPersist.includes(sessionId))
+        .filter(([sessionId]) => (
+          durableDiscoveryFailure !== undefined
+          || !sessionIdsToPersist.includes(sessionId)
+        ))
         .map(([, error]) => error),
     ];
     if (unreportedFailures.length === 1) throw unreportedFailures[0];

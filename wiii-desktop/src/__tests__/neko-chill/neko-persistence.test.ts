@@ -1442,6 +1442,30 @@ describe("neko-chill persistence", () => {
     });
   });
 
+  it("reports discovery and visible cancellation failures after persisting teardown state", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const discoveryError = new Error("native catalog unavailable");
+    const cancellationError = new Error("known start cancellation unavailable");
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([id]);
+    nativeControl.reconcilableStartSessionIds.mockRejectedValue(discoveryError);
+    nativeControl.cancelUnresolvedStarts.mockRejectedValueOnce(cancellationError);
+
+    const rejection = await disposeAllNekoRuntimes().catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(AggregateError);
+    expect((rejection as AggregateError).errors).toEqual([
+      discoveryError,
+      cancellationError,
+    ]);
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "error",
+      closePending: false,
+    });
+  });
+
   it("propagates cancellation failure for a catalog-only durable bootstrap", async () => {
     const bootstrapId = "codex-account-bootstrap-catalog-only";
     const cancellationError = new Error("durable cancellation unavailable");

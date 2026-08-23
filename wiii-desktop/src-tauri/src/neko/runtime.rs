@@ -406,6 +406,16 @@ impl NekoRuntime {
                     format!("spawn approved provider failed: {error}"),
                 ));
             }
+            Err(error) if error.post_spawn_cleanup_proven() => {
+                return Err(self.classify_spawn_failure(
+                    &app,
+                    &request,
+                    "provider_unavailable",
+                    resolved.version.as_deref(),
+                    format!("spawn approved provider failed: {error}"),
+                    Ok(()),
+                ));
+            }
             Err(error) => {
                 return Err(self.reject_start_error(
                     &app,

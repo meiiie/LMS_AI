@@ -230,6 +230,9 @@ Implemented across the foundation and Phase 2A slices:
 - provider launch and discovery preserve post-spawn cleanup uncertainty as a
   machine-readable outcome; an admitted start becomes `unknown_outcome` rather
   than a retryable provider rejection when cleanup cannot be proven;
+- pre-spawn rejection, proven post-spawn cleanup, and unproven cleanup are
+  distinct native outcomes. Proven cleanup retains the exact failed request
+  and session fact; only pre-spawn rejection uses the ordinary rejection path;
 - Codex account bootstrap cleanup is serialized by a module-level owner outside
   React; failed cleanup remains retryable and blocks replacement launch. A
   workspace handoff reconciles both control-client identities and durable
@@ -244,6 +247,9 @@ Implemented across the foundation and Phase 2A slices:
 - a failed durable-catalog read cannot skip renderer-known cancellation, and a
   catalog-only cancellation failure is propagated instead of disappearing
   outside the visible Zustand session set;
+- durable discovery and cancellation failures are aggregated when both occur;
+  Codex workspace handoff seeds renderer identities before catalog discovery,
+  so discovery failure cannot strand a known older bootstrap;
 - when post-spawn cleanup is proven, the failed session transition, provider
   version, and request error are retained before the authoritative transaction,
   so recovery preserves an exact failure rather than false uncertainty;

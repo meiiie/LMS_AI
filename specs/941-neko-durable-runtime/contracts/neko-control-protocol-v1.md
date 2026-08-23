@@ -158,7 +158,9 @@ supervisor to finish durable terminal reconciliation and flushes any exact
 terminal facts those supervisors retained before returning. Provider launch and
 discovery preserve whether a failure happened before spawn/after proven cleanup
 or after cleanup became unproven, including descendant cleanup after a probe
-leader exits; only the former is a safe rejection.
+leader exits. A pre-spawn failure is a safe rejection, a proven post-spawn
+cleanup retains the exact failed request/session fact, and unproven cleanup
+becomes `unknown_outcome`.
 
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).
@@ -183,7 +185,10 @@ cancelled. A cancellation failure remains a blocking cleanup uncertainty.
 If durable catalog discovery fails, teardown still cancels identities already
 retained by the renderer and then reports the catalog uncertainty. A failure
 for an identity that exists only in native authority is propagated rather than
-being mistaken for a clean mode exit.
+being mistaken for a clean mode exit. If renderer-known cancellation also
+fails, both errors are reported. Codex workspace handoff likewise seeds its
+candidate set from renderer memory before durable discovery, so a catalog read
+failure cannot skip cancellation of a known older bootstrap.
 
 After a provider was spawned, proven process-tree cleanup is itself a durable
 fact. Neko retains the failed session transition together with the start

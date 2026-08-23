@@ -49,31 +49,50 @@ pub(crate) struct OwnedChild {
 }
 
 /// Distinguishes a launch rejection that leaves no child behind from a
-/// post-spawn cleanup whose outcome could not be proven. Callers must never
-/// turn the latter into permission to retry the side effect.
+/// post-spawn failure whose cleanup was either proven or uncertain. Callers
+/// must retain the proven terminal fact and must never turn an uncertain
+/// cleanup into permission to retry the side effect.
 #[derive(Debug)]
 pub(crate) struct SpawnOwnedError {
     error: io::Error,
-    cleanup_unproven: bool,
+    disposition: SpawnFailureDisposition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpawnFailureDisposition {
+    PreSpawn,
+    PostSpawnCleanupProven,
+    PostSpawnCleanupUnproven,
 }
 
 impl SpawnOwnedError {
     fn safe(error: io::Error) -> Self {
         Self {
             error,
-            cleanup_unproven: false,
+            disposition: SpawnFailureDisposition::PreSpawn,
+        }
+    }
+
+    fn after_proven_cleanup(error: io::Error) -> Self {
+        Self {
+            error,
+            disposition: SpawnFailureDisposition::PostSpawnCleanupProven,
         }
     }
 
     fn after_unproven_cleanup(error: io::Error) -> Self {
         Self {
             error,
-            cleanup_unproven: true,
+            disposition: SpawnFailureDisposition::PostSpawnCleanupUnproven,
         }
     }
 
     pub(crate) fn cleanup_unproven(&self) -> bool {
-        self.cleanup_unproven
+        self.disposition == SpawnFailureDisposition::PostSpawnCleanupUnproven
+    }
+
+    pub(crate) fn post_spawn_cleanup_proven(&self) -> bool {
+        self.disposition == SpawnFailureDisposition::PostSpawnCleanupProven
     }
 
     #[cfg(test)]
@@ -129,7 +148,7 @@ impl Drop for WindowsJob {
 #[cfg(windows)]
 fn probe_failure_after_cleanup(child: &mut OwnedChild, original: io::Error) -> SpawnOwnedError {
     match terminate_child_tree(child) {
-        Ok(()) => SpawnOwnedError::safe(original),
+        Ok(()) => SpawnOwnedError::after_proven_cleanup(original),
         Err(cleanup) => SpawnOwnedError::after_unproven_cleanup(io::Error::other(format!(
             "{original}; provider probe process-tree termination was not proven: {cleanup}"
         ))),
@@ -394,7 +413,7 @@ pub(crate) fn spawn_owned(command: &mut Command) -> Result<OwnedChild, SpawnOwne
             let termination = child.kill();
             let cleanup = finish_failed_spawn_cleanup(&mut child, termination);
             return Err(match cleanup {
-                Ok(()) => SpawnOwnedError::safe(error),
+                Ok(()) => SpawnOwnedError::after_proven_cleanup(error),
                 Err(cleanup) => SpawnOwnedError::after_unproven_cleanup(spawn_cleanup_error(
                     error,
                     Err(cleanup),
@@ -409,7 +428,7 @@ pub(crate) fn spawn_owned(command: &mut Command) -> Result<OwnedChild, SpawnOwne
             };
             let cleanup = finish_failed_spawn_cleanup(&mut child, termination);
             return Err(match cleanup {
-                Ok(()) => SpawnOwnedError::safe(error),
+                Ok(()) => SpawnOwnedError::after_proven_cleanup(error),
                 Err(cleanup) => SpawnOwnedError::after_unproven_cleanup(spawn_cleanup_error(
                     error,
                     Err(cleanup),
@@ -889,11 +908,16 @@ mod tests {
     }
 
     #[test]
-    fn post_spawn_cleanup_uncertainty_is_machine_readable() {
+    fn post_spawn_cleanup_outcome_is_machine_readable() {
         let safe = SpawnOwnedError::safe(io::Error::other("spawn rejected"));
+        let proven = SpawnOwnedError::after_proven_cleanup(io::Error::other("cleanup proven"));
         let uncertain =
             SpawnOwnedError::after_unproven_cleanup(io::Error::other("cleanup unproven"));
         assert!(!safe.cleanup_unproven());
+        assert!(!safe.post_spawn_cleanup_proven());
+        assert!(proven.post_spawn_cleanup_proven());
+        assert!(!proven.cleanup_unproven());
+        assert!(!uncertain.post_spawn_cleanup_proven());
         assert!(uncertain.cleanup_unproven());
     }
 

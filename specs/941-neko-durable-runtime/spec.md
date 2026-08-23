@@ -321,6 +321,12 @@ side-effect/committed phases become `unknown_outcome`.
   Cancellation failures for catalog-only identities MUST be propagated. When
   post-spawn process-tree cleanup is proven, Neko MUST retain the exact failed
   session and request outcome before attempting the authoritative transaction.
+- **FR-059**: A durable discovery failure MUST NOT hide any cancellation
+  failure encountered during the same teardown. Codex bootstrap handoff MUST
+  seed renderer-retained identities before durable discovery, and native spawn
+  errors MUST distinguish pre-spawn rejection, proven post-spawn cleanup, and
+  unproven cleanup. Proven post-spawn cleanup MUST use the retained terminal
+  fact path rather than the pre-spawn rejection path.
 
 ### Non-goals
 
@@ -376,3 +382,6 @@ side-effect/committed phases become `unknown_outcome`.
   catalog-only cancellation failure is observable, and a proven spawn cleanup
   fact survives transaction failure/recovery without becoming
   `unknown_outcome`.
+- **SC-015**: Tests prove combined discovery/cancellation failures are both
+  observable, Codex handoff cancels renderer-known identities even when native
+  discovery fails, and post-spawn cleanup classification is machine-readable.

@@ -11,6 +11,7 @@ export interface CodexBootstrapIdentity {
 }
 
 interface RetainedStartControl {
+  unresolvedStartSessionIds(): string[];
   reconcilableStartSessionIds(): Promise<string[]>;
   cancelUnresolvedStarts(clientSessionId: string): Promise<number>;
 }
@@ -49,7 +50,7 @@ export async function cancelOtherCodexBootstrapStarts(
   currentClientSessionId: string,
 ): Promise<number> {
   const failures: unknown[] = [];
-  const candidates = new Set<string>();
+  const candidates = new Set(control.unresolvedStartSessionIds());
   try {
     for (const sessionId of await control.reconcilableStartSessionIds()) {
       candidates.add(sessionId);
@@ -86,6 +87,7 @@ export async function cancelOtherCodexBootstrapStarts(
 export async function spawnCodexAccountBootstrap(
   control: Pick<
     NekoControlClient,
+    | "unresolvedStartSessionIds"
     | "reconcilableStartSessionIds"
     | "cancelUnresolvedStarts"
     | "spawnProvider"
