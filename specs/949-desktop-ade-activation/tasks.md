@@ -31,7 +31,7 @@
 - [x] T015 Run focused/broad desktop tests, TypeScript and build.
 - [x] T016 Native Rust was not changed; the mandatory Native Desktop Gate verifies the affected desktop branch in CI.
 - [x] T017 Capture visual evidence.
-- [ ] T018 Update spec/tasks/PR evidence and resolve review findings.
+- [x] T018 Update spec/tasks/PR evidence and resolve review findings.
 
 ## Non-goals
 
