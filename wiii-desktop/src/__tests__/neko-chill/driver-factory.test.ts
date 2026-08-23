@@ -197,10 +197,12 @@ describe("Neko driver factory resource ownership", () => {
     await expect(getNekoControlClient().spawnProvider({
       providerId: "codex",
       clientSessionId: identity,
+      clientRunId: "new-account-probe-attempt",
       workspacePath: "C:/tmp/project",
     })).rejects.toThrow("automatic duplicate launch is forbidden");
 
     expect(tauri.listen).not.toHaveBeenCalled();
+    expect(tauri.invoke).toHaveBeenCalledWith("neko_control_session_list", { runId: null });
     expect(tauri.invoke).not.toHaveBeenCalledWith(
       "neko_control_session_start",
       expect.anything(),
@@ -813,9 +815,13 @@ describe("Neko driver factory resource ownership", () => {
       clientSessionId: "session-unpersisted-exit",
       workspacePath: "C:/tmp/project",
     });
+    const exits: Array<number | null> = [];
+    transport.onExit((code) => exits.push(code));
     onExit?.({
       payload: { exitCode: 17, terminationProven: true, terminalStatePersisted: false },
     });
+    await Promise.resolve();
+    expect(exits).toEqual([]);
     tauri.invoke.mockImplementation(async (command: string) => {
       if (command === "neko_control_session_cancel") {
         return { agentSessionId, cancelled: false };
@@ -841,9 +847,56 @@ describe("Neko driver factory resource ownership", () => {
     });
 
     await expect(transport.kill()).rejects.toThrow("unknown_outcome:");
+    expect(exits).toEqual([]);
     expect(tauri.invoke.mock.calls.filter(
       ([command]) => command === "neko_control_session_list",
     )).toHaveLength(1);
+  });
+
+  it("delivers a withheld exit once cancellation reconciles a terminal projection", async () => {
+    let onExit: ((event: { payload: ExitNotice }) => void) | null = null;
+    tauri.listen.mockImplementation(async (event: string, handler: any) => {
+      if (event.includes("/exit/")) onExit = handler;
+      return vi.fn();
+    });
+    const { transport, agentSessionId, runId } = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-late-terminal-commit",
+      workspacePath: "C:/tmp/project",
+    });
+    const exits: Array<number | null> = [];
+    transport.onExit((code) => exits.push(code));
+    onExit?.({
+      payload: { exitCode: 17, terminationProven: true, terminalStatePersisted: false },
+    });
+    expect(exits).toEqual([]);
+
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "neko_control_session_cancel") {
+        return { agentSessionId, cancelled: false };
+      }
+      if (command === "neko_control_session_list") {
+        return [{
+          agentSessionId,
+          taskId: "legacy-local/task/session-late-terminal-commit",
+          runId,
+          environmentId: "legacy-local/environment/session-late-terminal-commit",
+          providerId: "neko",
+          providerVersion: "0.25.0",
+          workspacePath: "C:/tmp/project",
+          state: "failed",
+          operationPhase: "failed",
+          continuity: "continuity_lost",
+          pid: null,
+          createdAt: "2026-08-23T00:00:00Z",
+          updatedAt: "2026-08-23T00:00:01Z",
+        }];
+      }
+      return undefined;
+    });
+
+    await expect(transport.kill()).resolves.toBeUndefined();
+    expect(exits).toEqual([17]);
   });
 
   it("exposes ownership before ACP initialization completes", async () => {

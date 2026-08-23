@@ -107,21 +107,22 @@ flight re-checks that gate before spawning a process.
 
 The live `neko-session://exit/<agentSessionId>` notice carries `exitCode`,
 `terminationProven`, and `terminalStatePersisted`. A renderer may notify its
-adapter about leader exit, but it cannot mark transport cleanup complete until
-native authority proves both the tree stopped and the terminal lifecycle fact
-committed. A `cancelled: false` response is also reconciled against
+adapter only after native authority proves both the tree stopped and the
+terminal lifecycle fact committed. A `cancelled: false` response is reconciled against
 `session/list`; an active or uncertain projection remains fail-closed.
 
-Windows containment is a pre-execution Job Object. Linux containment is a
-delegated cgroup v2 leaf terminated with `cgroup.kill`. Hosts without an
-approved non-escapable primitive reject provider launch before spawn; POSIX
-process groups are not accepted as cleanup proof because a child can call
-`setsid()`.
+Windows containment is a pre-execution Job Object. Unix provider execution is
+currently rejected before spawn because POSIX process groups are escapable and
+a same-UID provider can migrate out of a writable cgroup leaf. Unix packages and
+owner-only persistence/probes remain supported; execution stays unavailable
+until an approved primitive prevents migration.
 
 Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution
 blocks respawn even when a newer Run is already terminal. Native `session/list`
-is the complete retained projection catalog: when a formerly reconciled,
+first flushes any verified terminal fact retained after a transient journal
+failure and fails closed if that commit still cannot be proven. It is then the
+complete retained projection catalog: when a formerly reconciled,
 provably terminal projection has been pruned, Workbench appends a retirement
 fact and stops treating that historical checkpoint as a live respawn barrier.
 An absent active/unknown checkpoint remains blocking. Reconciliation and

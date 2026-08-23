@@ -164,7 +164,24 @@ impl NekoRuntime {
         provider::profiles(provider_id, cwd)
     }
 
-    pub fn list_sessions(&self, run_id: Option<&str>) -> Result<Vec<SessionRecord>, String> {
+    pub fn list_sessions(
+        &self,
+        app: &AppHandle,
+        run_id: Option<&str>,
+    ) -> Result<Vec<SessionRecord>, String> {
+        let _operation = lock(&self.inner.operations);
+        let pending = lock(&self.inner.pending_terminal_facts)
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for agent_session_id in pending {
+            self.flush_pending_terminal_fact(app, &agent_session_id)
+                .map_err(|error| {
+                    unknown_outcome_error(format!(
+                        "verified process exit is awaiting durable lifecycle commit; session hydration is blocked: {error}"
+                    ))
+                })?;
+        }
         self.inner.journal.sessions(run_id)
     }
 
@@ -969,6 +986,15 @@ impl NekoRuntime {
         let Some(fact) = fact else {
             return Ok(false);
         };
+        if self
+            .inner
+            .journal
+            .session(agent_session_id)?
+            .is_some_and(|session| session.state.is_terminal())
+        {
+            lock(&self.inner.pending_terminal_facts).remove(agent_session_id);
+            return Ok(true);
+        }
         self.persist_terminal_fact(app, agent_session_id, fact)?;
         Ok(true)
     }
@@ -1000,55 +1026,38 @@ impl NekoRuntime {
         // stranded and no orphan survives after lifecycle ownership ends.
         let termination =
             terminate_child_tree(&mut process.child).map_err(|error| bounded_error(&error));
+        let fact = terminal_fact_for_termination(&termination, reason, "exit_termination_unproven");
         // Preserve the provider's final bounded frames before notifying the
         // renderer of exit. A broken descendant may still retain the pipe, so
         // draining is bounded and happens without the global lifecycle lock.
         let _ = reader_finished.recv_timeout(PROVIDER_READER_DRAIN_TIMEOUT);
         let _operation = lock(&self.inner.operations);
-        let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
-            return ProcessPoll::Exited(ProcessExitNotice {
-                exit_code: code,
-                termination_proven: termination.is_ok(),
-                terminal_state_persisted: false,
-            });
-        };
-        let terminal_state_persisted = if session.state.is_terminal() {
-            true
-        } else {
-            let fact = match &termination {
-                Ok(()) => PendingTerminalFact {
-                    next_state: RunState::Failed,
-                    phase: OperationPhase::Failed,
-                    continuity: "continuity_lost",
-                    event_type: "run.state_changed",
-                    payload: json!({ "state": "failed", "reason": reason }),
-                },
-                Err(error) => PendingTerminalFact {
-                    next_state: RunState::UnknownOutcome,
-                    phase: OperationPhase::UnknownOutcome,
-                    continuity: "unknown_outcome",
-                    event_type: "run.state_changed",
-                    payload: json!({
-                        "state": "unknown_outcome",
-                        "reason": "exit_termination_unproven",
-                        "detail": error,
-                    }),
-                },
-            };
-            self.persist_terminal_fact(app, agent_session_id, fact)
-                .is_ok()
-        };
-        let _ = self.emit_control_event(
-            app,
-            &session.run_id,
-            "process.exited",
+        let session = session_or_retain_terminal_fact(
+            self.inner.journal.session(agent_session_id),
+            &self.inner.pending_terminal_facts,
             agent_session_id,
-            json!({
-                "exitCode": code,
-                "terminationProven": termination.is_ok(),
-                "terminalStatePersisted": terminal_state_persisted,
-            }),
+            &fact,
         );
+        let terminal_state_persisted = match session.as_ref() {
+            Some(session) if session.state.is_terminal() => true,
+            Some(_) => self
+                .persist_terminal_fact(app, agent_session_id, fact)
+                .is_ok(),
+            None => false,
+        };
+        if let Some(session) = session {
+            let _ = self.emit_control_event(
+                app,
+                &session.run_id,
+                "process.exited",
+                agent_session_id,
+                json!({
+                    "exitCode": code,
+                    "terminationProven": termination.is_ok(),
+                    "terminalStatePersisted": terminal_state_persisted,
+                }),
+            );
+        }
         ProcessPoll::Exited(ProcessExitNotice {
             exit_code: code,
             termination_proven: termination.is_ok(),
@@ -1063,7 +1072,18 @@ impl NekoRuntime {
             return;
         };
         let termination = kill_proc(&mut process);
-        let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
+        let fact = terminal_fact_for_termination(
+            &termination,
+            "provider_protocol_failure",
+            "protocol_failure_termination_unproven",
+        );
+        let session = session_or_retain_terminal_fact(
+            self.inner.journal.session(agent_session_id),
+            &self.inner.pending_terminal_facts,
+            agent_session_id,
+            &fact,
+        );
+        let Some(session) = session else {
             let _ = app.emit(
                 &format!("neko-session://exit/{agent_session_id}"),
                 ProcessExitNotice {
@@ -1077,26 +1097,6 @@ impl NekoRuntime {
         let terminal_state_persisted = if session.state.is_terminal() {
             true
         } else {
-            let fact = match &termination {
-                Ok(()) => PendingTerminalFact {
-                    next_state: RunState::Failed,
-                    phase: OperationPhase::Failed,
-                    continuity: "continuity_lost",
-                    event_type: "run.state_changed",
-                    payload: json!({ "state": "failed", "reason": "provider_protocol_failure" }),
-                },
-                Err(error) => PendingTerminalFact {
-                    next_state: RunState::UnknownOutcome,
-                    phase: OperationPhase::UnknownOutcome,
-                    continuity: "unknown_outcome",
-                    event_type: "run.state_changed",
-                    payload: json!({
-                        "state": "unknown_outcome",
-                        "reason": "protocol_failure_termination_unproven",
-                        "detail": error,
-                    }),
-                },
-            };
             self.persist_terminal_fact(app, agent_session_id, fact)
                 .is_ok()
         };
@@ -1120,6 +1120,48 @@ impl NekoRuntime {
                 terminal_state_persisted,
             },
         );
+    }
+}
+
+fn terminal_fact_for_termination(
+    termination: &Result<(), String>,
+    proven_reason: &'static str,
+    unproven_reason: &'static str,
+) -> PendingTerminalFact {
+    match termination {
+        Ok(()) => PendingTerminalFact {
+            next_state: RunState::Failed,
+            phase: OperationPhase::Failed,
+            continuity: "continuity_lost",
+            event_type: "run.state_changed",
+            payload: json!({ "state": "failed", "reason": proven_reason }),
+        },
+        Err(error) => PendingTerminalFact {
+            next_state: RunState::UnknownOutcome,
+            phase: OperationPhase::UnknownOutcome,
+            continuity: "unknown_outcome",
+            event_type: "run.state_changed",
+            payload: json!({
+                "state": "unknown_outcome",
+                "reason": unproven_reason,
+                "detail": bounded_error(error),
+            }),
+        },
+    }
+}
+
+fn session_or_retain_terminal_fact(
+    session: Result<Option<SessionRecord>, String>,
+    pending: &Mutex<HashMap<String, PendingTerminalFact>>,
+    agent_session_id: &str,
+    fact: &PendingTerminalFact,
+) -> Option<SessionRecord> {
+    match session {
+        Ok(Some(session)) => Some(session),
+        Ok(None) | Err(_) => {
+            lock(pending).insert(agent_session_id.to_string(), fact.clone());
+            None
+        }
     }
 }
 
@@ -1348,6 +1390,31 @@ mod tests {
         assert!(validate_identity("runId", "run\n1").is_err());
         assert!(validate_channel_identity("agentSessionId", "session-1").is_ok());
         assert!(validate_channel_identity("agentSessionId", "session/escape").is_err());
+    }
+
+    #[test]
+    fn terminal_fact_survives_a_projection_read_failure() {
+        let pending = Mutex::new(HashMap::new());
+        let fact = terminal_fact_for_termination(
+            &Ok(()),
+            "provider_process_exited",
+            "exit_termination_unproven",
+        );
+
+        assert!(session_or_retain_terminal_fact(
+            Err("journal unavailable".into()),
+            &pending,
+            "session-1",
+            &fact,
+        )
+        .is_none());
+        let retained = lock(&pending).get("session-1").cloned().unwrap();
+        assert_eq!(retained.next_state, RunState::Failed);
+        assert_eq!(retained.phase, OperationPhase::Failed);
+        assert_eq!(
+            retained.payload,
+            json!({ "state": "failed", "reason": "provider_process_exited" })
+        );
     }
 
     #[test]

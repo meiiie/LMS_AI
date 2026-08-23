@@ -1,15 +1,17 @@
-import { v5 as uuidv5 } from "uuid";
+import { v4 as uuidv4, v5 as uuidv5 } from "uuid";
 
 export interface CodexBootstrapIdentity {
   workspacePath: string;
   clientSessionId: string;
+  clientRunId: string;
 }
 
 /**
  * Derive the account-probe caller from durable workspace identity rather than
  * React component lifetime. Remounting NewSessionView or reloading the WebView
- * therefore reaches the same native Run and cannot silently create a second
- * App Server while the first start remains non-terminal.
+ * therefore reaches the same unresolved native start while it remains
+ * non-terminal. Each invocation still receives a fresh Run identity so a
+ * later bootstrap after a proven terminal attempt cannot reuse its lifecycle.
  */
 export function codexBootstrapIdentity(workspacePath: string): CodexBootstrapIdentity {
   const normalizedWorkspace = canonicalWorkspaceIdentity(workspacePath);
@@ -20,6 +22,7 @@ export function codexBootstrapIdentity(workspacePath: string): CodexBootstrapIde
   return {
     workspacePath,
     clientSessionId: `codex-account-bootstrap-${scope}`,
+    clientRunId: `codex-account-bootstrap-run-${uuidv4()}`,
   };
 }
 

@@ -42,7 +42,9 @@ not left displayed as active. An uncertain or still-active native execution
 without a live renderer channel is shown fail-closed instead of being silently
 started a second time. Unresolved starts retain their original execution and
 early transport buffer across renderer retries. Unix journal data is stored in
-an owner-only directory with owner-only SQLite files.
+an owner-only directory with owner-only SQLite files. Local provider execution
+is currently authorized on Windows only; Linux/macOS packages fail closed before
+spawn until Wiii has a containment primitive that a same-UID child cannot escape.
 
 Wiii Knowledge is independent from the selected runtime. When enabled, its
 retrieved evidence and citation metadata cross the same durability barrier as

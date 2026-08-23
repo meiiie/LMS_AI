@@ -205,8 +205,10 @@ side-effect/committed phases become `unknown_outcome`.
   NOT commit `cancelled`, `failed`, or another respawn-permitting terminal fact.
 - **FR-032**: The Codex account bootstrap UI MUST derive a stable logical caller
   identity from its workspace across retry attempts, component remounts and
-  WebView reloads. A durable non-terminal native Run MUST block an automatic
-  duplicate App Server launch after volatile client state is lost.
+  WebView reloads, but each new attempt MUST receive a fresh Run identity. An
+  unresolved caller retry MUST retain its original Run; a durable non-terminal
+  native Run MUST block an automatic duplicate App Server launch after volatile
+  client state is lost.
 - **FR-033**: Admission of a fresh `session/start` request, its listable
   `Starting/Accepted` projection, and `session.created` MUST commit in one
   transaction. Shutdown MAY reject a new identity but MUST preserve replay of
@@ -217,9 +219,9 @@ side-effect/committed phases become `unknown_outcome`.
   cleanup because an intermediate process may exit first.
 - **FR-035**: A live exit notice MUST carry `terminationProven` and
   `terminalStatePersisted`. The renderer MUST NOT treat leader exit alone as
-  completed cleanup or skip an explicit cancellation/reconciliation attempt
-  unless both complete process-tree termination and the durable terminal
-  lifecycle transition are proven.
+  completed cleanup, notify driver exit handlers, or skip an explicit
+  cancellation/reconciliation attempt unless both complete process-tree
+  termination and the durable terminal lifecycle transition are proven.
 - **FR-036**: Post-spawn setup or ownership-commit failure MAY become ordinary
   `failed` only after native cleanup proves the complete process tree stopped.
   `unknown_outcome` is reserved for unproven cleanup or an uncertain persisted
@@ -233,13 +235,14 @@ side-effect/committed phases become `unknown_outcome`.
   reconciled against the durable session projection. A remaining active or
   uncertain record MUST fail closed and MUST NOT release renderer ownership.
 - **FR-039**: Provider launch MUST use non-escapable OS containment. Windows
-  MUST use a pre-execution Job Object; Linux MUST use a delegated cgroup v2
-  leaf with `cgroup.kill`; a host without an approved primitive MUST reject
-  before spawn and MUST NOT downgrade to an escapable POSIX process group.
+  MUST use a pre-execution Job Object. Unix hosts MUST reject before spawn until
+  an approved primitive prevents same-UID migration; a writable cgroup leaf or
+  POSIX process group MUST NOT be treated as complete containment.
 - **FR-040**: A verified native exit whose terminal lifecycle transaction
   fails MUST remain pending inside the runtime authority. The renderer MUST be
-  told that terminal persistence is unproven, and cancellation MUST retry that
-  exact terminal fact before it may return a safe no-op result.
+  told that terminal persistence is unproven. Cancellation and `session/list`
+  hydration MUST retry that exact terminal fact before returning a safe result;
+  failure to read the session projection after termination MUST retain the fact.
 - **FR-041**: Each concurrent logical `session/write` invocation MUST receive
   its own request identity even when serialized frames are byte-identical. A
   bounded IPC retry of one invocation MUST reuse that invocation's identity;
@@ -272,4 +275,5 @@ side-effect/committed phases become `unknown_outcome`.
   transport events; and Unix probe/journal files are owner-only.
 - **SC-007**: Tests prove atomic start admission rollback, shutdown-safe replay,
   Windows Job Object ownership across an exited intermediate, host-aware
-  workspace identity, and fail-closed handling of an unproven exit notice.
+  workspace identity with fresh Run attempts, Unix pre-spawn rejection, and
+  fail-closed handling of an unproven or unpersisted exit notice.

@@ -40,11 +40,15 @@ Expected invariants:
 - shutdown closes start admission before process cleanup;
 - Unix provider-probe captures and the journal database/WAL/SHM files are
   owner-only;
+- Unix desktop packages build, but local provider launch rejects before spawn
+  until Wiii has containment that a same-UID child cannot escape;
 - stdout EOF alone never releases a still-running provider process;
 - Windows provider descendants remain owned by one Job Object even after an
   intermediate and leader exit;
 - live exit delivery cannot mark cleanup complete without
   `terminationProven: true` and `terminalStatePersisted: true`;
+- live exit handlers remain silent while either proof is missing, and
+  `session/list` flushes any retained verified terminal fact before hydration;
 - Windows drive/UNC casing aliases derive one bootstrap identity while POSIX
   case and legal backslash distinctions remain intact;
 - native lifecycle checkpoints commit before the compatible transcript, so a

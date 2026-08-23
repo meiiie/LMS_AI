@@ -101,8 +101,9 @@ export function NewSessionView() {
     void getNekoControlClient().spawnProvider({
       providerId: "codex",
       // Retry the same logical caller identity until Neko proves the previous
-      // start terminal. The control client owns fresh native Run/session IDs.
+      // start terminal while every proven attempt receives a fresh Run.
       clientSessionId: bootstrapIdentity.clientSessionId,
+      clientRunId: bootstrapIdentity.clientRunId,
       workspacePath: workspace.path,
     })
       .then(async ({ transport }) => {

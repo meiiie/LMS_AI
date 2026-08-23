@@ -47,9 +47,9 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 40 Rust/security
-  tests and the latest 174-test review regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,919 Vitest
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 41 Rust/security
+  tests and the latest 207-test review regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,920 Vitest
   across 173 files,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
@@ -106,14 +106,19 @@
   cleanup as failed rather than unknown, and normalize Windows workspace
   casing aliases without collapsing POSIX identity.
 - [x] T520 Reconcile `cancelled: false` before releasing renderer ownership,
-  require non-escapable containment (Windows Job Object or Linux cgroup v2),
-  reject weaker Unix launch before spawn, and retain verified terminal facts
+  require non-escapable containment (Windows Job Object), reject Unix launch
+  before spawn, and retain verified terminal facts
   until their lifecycle transaction commits.
 - [x] T521 Close final client/storage review gaps: give concurrent identical
   frames independent request identities while preserving bounded IPC retries,
   persist native checkpoints before compatible transcripts, preserve legal
   POSIX backslashes, classify missing registry cleanup as uncertain, recognize
   undecodable recorded starts, and exact-lock the WebView capability set.
+- [x] T522 Close runtime-authority review gaps: fail closed on all Unix provider
+  launches until same-UID migration is impossible, withhold renderer exit until
+  termination and persistence are both proven, flush retained terminal facts on
+  session hydration, retain facts across projection-read errors, and mint a
+  fresh Codex bootstrap Run for each proven new attempt.
 
 ## Dependencies
 

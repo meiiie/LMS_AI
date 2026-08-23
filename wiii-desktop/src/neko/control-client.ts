@@ -77,7 +77,6 @@ interface StartTransportState {
   overflowCancellation: Promise<boolean> | null;
   exitObserved: boolean;
   pendingExitCode: number | null;
-  exitTerminationProven: boolean;
   killed: boolean;
   killPromise: Promise<void> | null;
   cancelRequestId: string;
@@ -367,8 +366,14 @@ class TauriNekoControlClient implements NekoControlClient {
     ]);
     const priorStart = this.unresolvedStarts.get(startKey);
     if (!priorStart && request.clientSessionId.startsWith("codex-account-bootstrap-")) {
-      const existing = (await this.listSessions(requestedExecution.runId)).find(
-        (candidate) => !NATIVE_TERMINAL_STATES.has(candidate.state),
+      // A fresh account-probe attempt receives a fresh Run, so duplicate
+      // protection must search by its stable caller Task across the complete
+      // native catalog rather than query only the newly minted Run.
+      const existing = (await this.listSessions()).find(
+        (candidate) =>
+          candidate.taskId === requestedExecution.taskId &&
+          candidate.providerId === provider.id &&
+          !NATIVE_TERMINAL_STATES.has(candidate.state),
       );
       if (existing) {
         throw new Error(
@@ -507,10 +512,11 @@ class TauriNekoControlClient implements NekoControlClient {
         }
       },
       onExit(handler: (code: number | null) => void): void {
-        transportState.exitHandlers.push(handler);
-        if (transportState.exitObserved) {
+        if (transportState.killed && transportState.exitObserved) {
           queueMicrotask(() => handler(transportState.pendingExitCode));
+          return;
         }
+        transportState.exitHandlers.push(handler);
       },
       async kill(): Promise<void> {
         if (transportState.killed) return;
@@ -535,6 +541,7 @@ class TauriNekoControlClient implements NekoControlClient {
             );
             transportState.killed = true;
             transportState.unresolvedWriteIds.clear();
+            notifyProvenExit(transportState);
             detachStartListeners(transportState);
           })();
         }
@@ -544,7 +551,6 @@ class TauriNekoControlClient implements NekoControlClient {
           // A caller may ask again, but it will reuse the same durable request
           // identity and therefore cannot repeat an uncertain cancellation.
           transportState.killPromise = null;
-          detachStartListeners(transportState);
           throw error;
         }
       },
@@ -568,7 +574,6 @@ function createStartTransportState(): StartTransportState {
     overflowCancellation: null,
     exitObserved: false,
     pendingExitCode: null,
-    exitTerminationProven: false,
     killed: false,
     killPromise: null,
     cancelRequestId: uuidv4(),
@@ -597,6 +602,12 @@ function detachStartListeners(state: StartTransportState): void {
   state.unlistenExit?.();
   state.unlistenLine = null;
   state.unlistenExit = null;
+}
+
+function notifyProvenExit(state: StartTransportState): void {
+  if (!state.killed || !state.exitObserved) return;
+  const handlers = state.exitHandlers.splice(0);
+  for (const handler of handlers) handler(state.pendingExitCode);
 }
 
 async function ensureStartListeners(
@@ -647,13 +658,15 @@ async function ensureStartListeners(
             : { exitCode: null, terminationProven: false, terminalStatePersisted: false };
           state.exitObserved = true;
           state.pendingExitCode = notice.exitCode;
-          state.exitTerminationProven = notice.terminationProven;
-          for (const handler of state.exitHandlers) handler(state.pendingExitCode);
           // A leader exit is not proof that its process tree disappeared.
-          // Keep cancellation live until native authority certifies cleanup.
+          // Renderer-facing exit is also withheld until native authority has
+          // durably recorded the terminal lifecycle fact.
           state.killed = notice.terminationProven && notice.terminalStatePersisted;
-          state.unresolvedWriteIds.clear();
-          queueMicrotask(() => detachStartListeners(state));
+          if (state.killed) {
+            state.unresolvedWriteIds.clear();
+            notifyProvenExit(state);
+            queueMicrotask(() => detachStartListeners(state));
+          }
         },
       );
       state.unlistenExit = unlistenExit;

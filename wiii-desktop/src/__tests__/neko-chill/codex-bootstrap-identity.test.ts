@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 import { codexBootstrapIdentity } from "@/neko-chill/codex-bootstrap-identity";
 
 describe("Codex account bootstrap identity", () => {
-  it("derives one caller identity across retries and component remounts", () => {
+  it("keeps caller identity but mints a fresh Run for each bootstrap attempt", () => {
     const first = codexBootstrapIdentity("C:/workspace");
     const remounted = codexBootstrapIdentity("C:/workspace");
 
     expect(remounted).not.toBe(first);
-    expect(remounted).toEqual(first);
+    expect(remounted.clientSessionId).toBe(first.clientSessionId);
+    expect(remounted.clientRunId).not.toBe(first.clientRunId);
     expect(first.clientSessionId).toMatch(/^codex-account-bootstrap-[0-9a-f-]{36}$/);
+    expect(first.clientRunId).toMatch(/^codex-account-bootstrap-run-[0-9a-f-]{36}$/);
   });
 
   it("normalizes Windows separators but isolates different workspaces", () => {

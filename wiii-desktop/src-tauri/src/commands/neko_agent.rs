@@ -36,10 +36,11 @@ pub async fn neko_control_provider_profiles(
 
 #[tauri::command]
 pub fn neko_control_session_list(
+    app: AppHandle,
     runtime: State<'_, NekoRuntime>,
     run_id: Option<String>,
 ) -> Result<Vec<SessionRecord>, String> {
-    runtime.list_sessions(run_id.as_deref())
+    runtime.list_sessions(&app, run_id.as_deref())
 }
 
 #[tauri::command]

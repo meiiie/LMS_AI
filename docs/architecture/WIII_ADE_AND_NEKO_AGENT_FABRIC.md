@@ -102,14 +102,16 @@ owner and cannot infer that the Task is idle. Cancellation is terminal only afte
 termination succeeds; an unavailable process owner or failed OS tree kill is
 recorded as `unknown_outcome`, never as permission to launch a replacement.
 Windows launches are assigned to a kill-on-close Job Object while the leader is
-still suspended; only then is execution resumed. Linux launches require a
-delegated cgroup v2 leaf with `cgroup.kill`. Other Unix hosts currently reject
-local provider launch before spawn rather than downgrade to an escapable POSIX
-process group. Live exit IPC carries both `terminationProven` and
+still suspended; only then is execution resumed. Unix local-provider launches
+currently reject before spawn: a POSIX process group is escapable, and a
+same-UID provider can migrate out of a writable cgroup leaf. Linux and macOS
+packages still build, but local Neko execution remains unavailable there until
+an approved boundary prevents that migration. Live exit IPC carries both `terminationProven` and
 `terminalStatePersisted`, so the renderer cannot mistake leader exit—or an
 uncommitted journal transition—for complete cleanup. A verified exit whose
 terminal transaction temporarily fails is retained by native authority and
-retried on explicit cancellation.
+retried on explicit cancellation or session-list hydration. Exit handlers are
+withheld until both proofs are true.
 
 The compatibility client also bounds bootstrap output before a provider
 adapter attaches: at most 256 frames and 8 MiB are retained. Overflow detaches
@@ -188,9 +190,10 @@ Implemented across the foundation and Phase 2A slices:
 - caller-level start retry retains the same logical identity after unresolved
   IPC delivery, including its original Run/Environment binding and buffered
   bootstrap/exit events across a fresh RuntimeRegistry preparation; the Codex
-  account probe derives one host-aware workspace identity across retry,
+  account probe derives one host-aware workspace caller identity across retry,
   remount and WebView reload, including Windows drive/UNC separator and casing
-  aliases, and a durable non-terminal Run blocks duplicate bootstrap;
+  aliases; each new attempt receives a fresh Run, while a durable non-terminal
+  Run blocks duplicate bootstrap;
   completed/failed identities have a 90-day replay window while uncertain
   identities are not automatically pruned;
 - conservative recovery phases: `accepted`, `dispatched`,
@@ -210,6 +213,8 @@ Implemented across the foundation and Phase 2A slices:
   bounded owner-only capture files, while Windows probes use a producer-bounded
   pipe; checked tree cleanup and bounded reaping gate successful discovery; the
   Unix SQLite parent, database and WAL/SHM sidecars are owner-only as well;
+- Windows is the only host currently authorized to launch local providers;
+  Unix builds fail closed before spawn until non-escapable containment exists;
 - driver-observed capability facts and durable attach snapshots;
 - backward-compatible loading of pre-snapshot local session events.
 
