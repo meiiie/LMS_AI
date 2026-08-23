@@ -1,9 +1,9 @@
 # Feature Specification: Desktop ADE Activation
 
-**Feature Branch**: `codex/949-feat-desktop-ade-activation`  
-**Created**: 2026-08-24  
-**Status**: In progress  
-**Issue**: #949  
+**Feature Branch**: `codex/949-feat-desktop-ade-activation`
+**Created**: 2026-08-24
+**Status**: In progress
+**Issue**: #949
 **Input**: Make the existing `Project -> Task -> Run -> AgentSession`
 foundation visible and durable in Wiii Desktop while preserving Neko Chill as
 the manual Agent Fabric surface.

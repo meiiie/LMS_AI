@@ -1,6 +1,6 @@
 # Implementation Plan: Desktop ADE Activation
 
-**Branch**: `codex/949-feat-desktop-ade-activation` | **Date**: 2026-08-24 | **Spec**: [spec.md](./spec.md)  
+**Branch**: `codex/949-feat-desktop-ade-activation` | **Date**: 2026-08-24 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/949-desktop-ade-activation/spec.md`
 
 ## Summary
@@ -14,14 +14,14 @@ changes.
 
 ## Technical Context
 
-**Language/Version**: TypeScript 5.x, React 18, Rust stable (existing native runtime)  
-**Primary Dependencies**: Zustand, Tauri v2 plugin-store, existing Neko Control client/runtime  
-**Storage**: Strict versioned local Tauri store with browser fallback through `src/lib/storage.ts`  
-**Testing**: Vitest/Testing Library, TypeScript, existing Rust/Tauri gate, Vite build  
-**Target Platform**: Wiii Desktop on Windows, Linux and macOS; local browser development fallback  
-**Project Type**: Tauri desktop application  
-**Performance Goals**: Hydrate small ADE graph before local shell becomes interactive; no per-token work-state writes  
-**Constraints**: Offline-capable, persistence-before-dispatch, backwards-compatible Neko transcripts, no backend migration  
+**Language/Version**: TypeScript 5.x, React 18, Rust stable (existing native runtime)
+**Primary Dependencies**: Zustand, Tauri v2 plugin-store, existing Neko Control client/runtime
+**Storage**: Strict versioned local Tauri store with browser fallback through `src/lib/storage.ts`
+**Testing**: Vitest/Testing Library, TypeScript, existing Rust/Tauri gate, Vite build
+**Target Platform**: Wiii Desktop on Windows, Linux and macOS; local browser development fallback
+**Project Type**: Tauri desktop application
+**Performance Goals**: Hydrate small ADE graph before local shell becomes interactive; no per-token work-state writes
+**Constraints**: Offline-capable, persistence-before-dispatch, backwards-compatible Neko transcripts, no backend migration
 **Scale/Scope**: One initial Run per created Task; existing Neko Core, Gemini CLI and Codex providers
 
 ## Constitution Check
