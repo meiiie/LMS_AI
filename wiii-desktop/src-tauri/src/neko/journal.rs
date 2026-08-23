@@ -297,7 +297,7 @@ impl Journal {
         transaction
             .execute(
                 "DELETE FROM runtime_sessions
-                  WHERE state IN ('completed', 'failed', 'cancelled', 'unknown_outcome')
+                  WHERE state IN ('completed', 'failed', 'cancelled')
                     AND updated_at < ?1",
                 [terminal_cutoff.as_str()],
             )
@@ -1512,6 +1512,9 @@ mod tests {
         journal
             .insert_session(session("stale-active", "run-b"))
             .unwrap();
+        journal
+            .insert_session(session("stale-unknown", "run-c"))
+            .unwrap();
         for index in 0..3 {
             journal
                 .append_event(
@@ -1590,6 +1593,16 @@ mod tests {
                 .unwrap();
             connection
                 .execute(
+                    "UPDATE runtime_sessions
+                        SET state = 'unknown_outcome', operation_phase = 'unknown_outcome',
+                            continuity = 'unknown_outcome',
+                            updated_at = '2020-01-01T00:00:00.000Z'
+                      WHERE agent_session_id = 'stale-unknown'",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
                     "UPDATE control_events SET at = '2020-01-01T00:00:00.000Z'",
                     [],
                 )
@@ -1608,6 +1621,9 @@ mod tests {
 
         assert!(journal.session("stale-terminal").unwrap().is_none());
         assert!(journal.session("stale-active").unwrap().is_some());
+        let stale_unknown = journal.session("stale-unknown").unwrap().unwrap();
+        assert_eq!(stale_unknown.state, RunState::UnknownOutcome);
+        assert_eq!(stale_unknown.operation_phase, OperationPhase::UnknownOutcome);
         let request_phase = |request_id: &str| {
             lock(&journal.connection)
                 .query_row(

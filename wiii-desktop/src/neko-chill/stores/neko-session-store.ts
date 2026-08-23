@@ -174,6 +174,35 @@ function nativeSessionsForTask(
   return candidates;
 }
 
+function nativeRuntimeIdentity(provider: RuntimeProviderSnapshot): {
+  agentSessionId: string;
+  runId: string;
+} {
+  const extensions = provider.providerCapabilities?.extensions;
+  const agentSessionId = extensions?.nativeAgentSessionId;
+  const runId = extensions?.nativeRunId;
+  if (
+    typeof agentSessionId === "string" &&
+    agentSessionId.length > 0 &&
+    typeof runId === "string" &&
+    runId.length > 0
+  ) {
+    return { agentSessionId, runId };
+  }
+  // Legacy/test drivers can lack the native identifiers. Preserve a durable,
+  // deliberately unresolvable tombstone instead of allowing an uncertain
+  // cleanup to become permission for a replacement side effect.
+  return {
+    agentSessionId: `unresolved/${provider.instanceId}`,
+    runId: `unresolved/${provider.instanceId}`,
+  };
+}
+
+function cleanupFailureReason(error: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  return (reason || "Unknown native runtime cleanup failure.").slice(0, 4_096);
+}
+
 function lastNativeCursor(session: NekoSession, runId: string): number {
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const data = session.events[index].data;
@@ -185,20 +214,30 @@ function lastNativeCursor(session: NekoSession, runId: string): number {
 }
 
 function nativeRunBlocksRespawn(session: NekoSession): boolean {
-  const retired = new Set<string>();
+  const safelyResolved = new Set<string>();
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const data = session.events[index].data;
     if (data.type === "runtime-attached") break;
     if (data.type === "native-runtime-retired") {
-      retired.add(data.agentSessionId);
+      safelyResolved.add(data.agentSessionId);
       continue;
     }
-    if (data.type !== "native-runtime-reconciled") continue;
-    if (retired.has(data.agentSessionId)) continue;
+    if (data.type === "native-runtime-reconciled") {
+      if (safelyResolved.has(data.agentSessionId)) continue;
+      if (
+        data.state === "unknown_outcome" ||
+        data.operationPhase === "unknown_outcome" ||
+        data.continuity === "unknown_outcome" ||
+        !NATIVE_TERMINAL_STATES.has(data.state)
+      ) {
+        return true;
+      }
+      safelyResolved.add(data.agentSessionId);
+      continue;
+    }
     if (
-      data.state === "unknown_outcome" ||
-      data.operationPhase === "unknown_outcome" ||
-      !NATIVE_TERMINAL_STATES.has(data.state)
+      data.type === "native-runtime-cleanup-uncertain" &&
+      !safelyResolved.has(data.agentSessionId)
     ) {
       return true;
     }
@@ -222,7 +261,12 @@ function retireAbsentNativeCheckpoints(
     }
     if (data.type !== "native-runtime-reconciled" || resolved.has(data.agentSessionId)) continue;
     resolved.add(data.agentSessionId);
-    if (!present.has(data.agentSessionId)) {
+    if (
+      !present.has(data.agentSessionId) &&
+      NATIVE_TERMINAL_STATES.has(data.state) &&
+      data.operationPhase !== "unknown_outcome" &&
+      data.continuity !== "unknown_outcome"
+    ) {
       retire.push({ agentSessionId: data.agentSessionId, runId: data.runId });
     }
   }
@@ -1653,26 +1697,37 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           if (session) {
             session.runtime = null;
             if (provider) {
-              appendOwnedSessionEvent(session, "runtime", {
-                type: "runtime-detached",
-                providerId: provider.providerId,
-                instanceId: provider.instanceId,
-                kind: provider.kind,
-                reason: "close",
-              });
+              if (disposeError) {
+                appendOwnedSessionEvent(session, "runtime", {
+                  type: "native-runtime-cleanup-uncertain",
+                  ...nativeRuntimeIdentity(provider),
+                  providerId: provider.providerId,
+                  reason: cleanupFailureReason(disposeError),
+                });
+              } else {
+                appendOwnedSessionEvent(session, "runtime", {
+                  type: "runtime-detached",
+                  providerId: provider.providerId,
+                  instanceId: provider.instanceId,
+                  kind: provider.kind,
+                  reason: "close",
+                });
+              }
             }
-            session.status = "exited";
+            session.status = disposeError ? "error" : "exited";
             session.pendingPermission = null;
             session.resolvingPermissionId = null;
             session.cancelPending = false;
-            session.statusDetail = "Đã kết thúc phiên — nhắn tiếp để khởi động lại agent.";
+            session.statusDetail = disposeError
+              ? `Neko chưa thể xác nhận runtime đã dừng; không thể khởi động lại an toàn: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`
+              : "Đã kết thúc phiên — nhắn tiếp để khởi động lại agent.";
             session.updatedAt = Date.now();
-            if (disposeError) {
-              session.statusDetail = "Phiên đã đóng nhưng runtime báo lỗi khi thu hồi tài nguyên.";
-            }
           }
         });
-        await persistSessionNowOrReport(sessionId, "trạng thái đóng phiên");
+        await persistSessionNowOrReport(sessionId, "trạng thái đóng phiên", {
+          fatal: Boolean(disposeError),
+          strict: Boolean(disposeError),
+        });
       })();
       let tracked!: Promise<void>;
       tracked = operation.finally(() => {

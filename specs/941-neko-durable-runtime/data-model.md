@@ -41,13 +41,16 @@ prove deletion cannot permit a repeated side effect.
 
 No raw provider frame or terminal line is a `ControlEvent` in Phase 2A.
 
-### Workbench reconciliation checkpoint
+### Workbench reconciliation companion
 
-The visible session snapshot may contain a runtime-only
-`native-runtime-reconciled` event with native session/run identity, state,
-operation phase, continuity and consumed replay cursor/count. It is a bounded
-read-model checkpoint; it does not copy native event payloads or replace the
-native journal.
+The additive `neko-chill-native-runtime.json` companion may contain runtime-only
+`native-runtime-reconciled`, `native-runtime-retired`, and
+`native-runtime-cleanup-uncertain` events with native session/run identity,
+state, operation phase, continuity and consumed replay cursor/count. They are
+bounded read-model checkpoints; they do not copy native event payloads or
+replace the native journal. They deliberately do not enter the shared v2
+transcript snapshot, preserving rollback readability for the previous desktop
+release. Missing unknown/active projections never create retirement facts.
 
 ## SQLite schema direction
 

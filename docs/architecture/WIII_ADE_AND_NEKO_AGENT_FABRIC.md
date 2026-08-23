@@ -100,7 +100,11 @@ the renderer listeners and asks the native authority to cancel the same
 logical start; a visible session cannot be deleted while that cancellation is
 uncertain. When terminal native projections age out of the complete catalog,
 Workbench records an explicit checkpoint-retirement fact instead of leaving a
-permanent phantom respawn lock.
+permanent phantom respawn lock. Active and `unknown_outcome` projections are
+never pruned automatically, and an uncertain live close persists a blocking
+tombstone until a later native reconciliation proves a safe terminal state.
+These runtime-only facts live in `neko-chill-native-runtime.json`; the shared
+Workbench v2 transcript retains its previous-release vocabulary for rollback.
 
 Phase 2A intentionally remains inside `Wiii.exe`. It is **not** a standalone,
 crash-independent daemon: a graceful Wiii exit cancels owned children, while a
@@ -172,6 +176,8 @@ Implemented across the foundation and Phase 2A slices:
 - bounded aggregate bootstrap buffering, retained-start cancellation before
   deletion, explicit stale-checkpoint retirement, and strict newline-delimited
   provider frames even at EOF;
+- rollback-readable v2 conversation snapshots plus an additive native runtime
+  checkpoint companion; uncertain close cleanup remains a durable respawn lock;
 - shutdown admission closes before process drain, and Unix provider probes use
   bounded owner-only capture files; the Unix SQLite parent, database and
   WAL/SHM sidecars are owner-only as well;
@@ -216,7 +222,10 @@ or recovery semantics that disagree with a process side effect. Rollback must
 therefore revert the **complete desktop release**. Do not partially restore raw
 WebView spawn/stdin/PID permissions.
 
-Keep `neko-runtime-v1.sqlite3`, session snapshots, provider thread IDs, account
-records and recovery evidence intact. An older release may leave the additive
-journal unused, but rollback must never delete or reinterpret uncertain
-operations. Re-entry to a newer release must run the documented recovery path.
+Keep `neko-runtime-v1.sqlite3`, `neko-chill-native-runtime.json`, session
+snapshots, provider thread IDs, account records and recovery evidence intact.
+The companion file contains the new runtime-only event vocabulary, leaving the
+shared v2 session snapshots readable by the previous desktop release. An older
+release may leave the additive journal/companion unused, but rollback must never
+delete or reinterpret uncertain operations. Re-entry to a newer release must
+run the documented recovery path.

@@ -129,6 +129,14 @@ export type NekoSessionEventData =
       reason: "projection-pruned";
     }
   | {
+      /** Native cancellation returned without a provably terminal outcome. */
+      type: "native-runtime-cleanup-uncertain";
+      agentSessionId: string;
+      runId: string;
+      providerId: string;
+      reason: string;
+    }
+  | {
       type: "workspace-activity";
       activityId: string;
       title: string;
@@ -319,6 +327,18 @@ function isValidEventData(data: Record<string, unknown>): boolean {
         data.runId.length > 0 &&
         data.reason === "projection-pruned"
       );
+    case "native-runtime-cleanup-uncertain":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        typeof data.providerId === "string" &&
+        data.providerId.length > 0 &&
+        typeof data.reason === "string" &&
+        data.reason.length > 0 &&
+        data.reason.length <= 4_096
+      );
     case "workspace-activity":
       return (
         typeof data.activityId === "string" &&
@@ -365,5 +385,13 @@ export function isNekoSessionEvent(value: unknown): value is NekoSessionEvent {
     typeof data === "object" &&
     !Array.isArray(data) &&
     isValidEventData(data)
+  );
+}
+
+export function isNativeRuntimeSessionEvent(event: NekoSessionEvent): boolean {
+  return (
+    event.data.type === "native-runtime-reconciled" ||
+    event.data.type === "native-runtime-retired" ||
+    event.data.type === "native-runtime-cleanup-uncertain"
   );
 }

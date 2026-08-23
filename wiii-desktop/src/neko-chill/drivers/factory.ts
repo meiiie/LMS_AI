@@ -56,6 +56,11 @@ export async function createDriverForAgent(
         onEvent,
       });
   driver.runtime.providerVersion = spawned.provider.version;
+  driver.runtime.providerExtensions = {
+    ...(driver.runtime.providerExtensions ?? {}),
+    nativeAgentSessionId: spawned.agentSessionId,
+    nativeRunId: spawned.runId,
+  };
   try {
     // RuntimeRegistry owns the process before initialize/session-new can hang.
     ownDriver?.(driver);

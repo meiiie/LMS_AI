@@ -120,6 +120,14 @@ describe("Neko session event validation", () => {
       runId: "run-1",
       reason: "projection-pruned",
     }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "native-runtime-cleanup-uncertain",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      reason: "unknown_outcome: cancellation response was lost",
+    }))).toBe(true);
   });
 
   it.each([
@@ -150,6 +158,13 @@ describe("Neko session event validation", () => {
       agentSessionId: "native-session-1",
       runId: "run-1",
       reason: "forgotten",
+    },
+    {
+      type: "native-runtime-cleanup-uncertain",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      reason: "",
     },
   ])("rejects a malformed $type payload", (data) => {
     expect(isNekoSessionEvent({

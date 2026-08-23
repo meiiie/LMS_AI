@@ -114,10 +114,12 @@ redirects stdout while continuing to run.
 
 The visible Workbench transcript remains authoritative for user-facing
 messages, but restored sessions first list native session records and consume
-the matching run stream from their last persisted cursor. The session snapshot
-stores only a bounded reconciliation checkpoint. Native `unknown_outcome` and
-active sessions that no longer have a live renderer transport are fail-closed;
-React never treats its older snapshot as permission to spawn a replacement.
+the matching run stream from their last persisted cursor. An additive native
+companion store holds only bounded reconciliation/cleanup checkpoints; the
+shared v2 conversation snapshot remains readable by the previous release.
+Native `unknown_outcome` and active sessions that no longer have a live renderer
+transport are fail-closed; React never treats its older snapshot as permission
+to spawn a replacement.
 After consuming replay, hydration re-reads the native session projection so a
 terminal transition committed during replay is not checkpointed as active.
 

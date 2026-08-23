@@ -156,9 +156,10 @@ side-effect/committed phases become `unknown_outcome`.
   transitions committed during that read. Any native `unknown_outcome` or
   unattached active process MUST fail closed rather than trigger a replacement,
   even when a newer native Run is terminal. When the complete native catalog
-  no longer contains a previously reconciled projection because terminal
-  retention pruned it, Workbench MUST durably retire that checkpoint so it
-  cannot block respawn forever.
+  no longer contains a previously reconciled, provably terminal projection
+  because retention pruned it, Workbench MUST durably retire that checkpoint
+  so it cannot block respawn forever. Missing active or `unknown_outcome`
+  checkpoints MUST remain blocking.
 - **FR-024**: Completed and failed request identities MUST have a documented,
   bounded retry window. Accepted, dispatched, side-effect-started, committed,
   and `unknown_outcome` identities MUST NOT be pruned automatically.
@@ -178,6 +179,14 @@ side-effect/committed phases become `unknown_outcome`.
 - **FR-028**: On Unix, the durable journal directory MUST be owner-only and
   the main SQLite database plus WAL/SHM sidecars MUST not be accessible to
   group or other users.
+- **FR-029**: Native reconciliation, retirement, and uncertain-cleanup events
+  MUST persist in an additive companion store. The shared Workbench v2 session
+  snapshot MUST contain only event discriminators understood by the previous
+  desktop release so a full-release rollback can still hydrate conversations.
+- **FR-030**: A live runtime cleanup that does not prove cancellation reached a
+  safe terminal state MUST leave a durable blocking tombstone, render the
+  visible session as an error, and prevent replacement execution until native
+  reconciliation establishes `completed`, `failed`, or `cancelled`.
 
 ### Non-goals
 

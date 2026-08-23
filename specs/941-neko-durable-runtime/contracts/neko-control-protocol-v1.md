@@ -44,8 +44,9 @@ method and logical target before dispatch.
 Completed and failed request identities are replayable for 90 days. Startup
 maintenance may prune them after that window. Requests in `accepted`,
 `dispatched`, `side_effect_started`, `committed`, or `unknown_outcome` are not
-automatically pruned: deleting those identities could permit an uncertain
-side effect to be repeated.
+automatically pruned. Runtime-session projections in `unknown_outcome` are also
+retained: deleting either identity could permit an uncertain side effect to be
+repeated.
 
 ## Native methods implemented in Phase 2A
 
@@ -89,9 +90,12 @@ flight re-checks that gate before creating a session or spawning a process.
 Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution
 blocks respawn even when a newer Run is already terminal. Native `session/list`
-is the complete retained projection catalog: when a formerly reconciled
-terminal projection has been pruned, Workbench appends a retirement fact and
-stops treating that historical checkpoint as a live respawn barrier.
+is the complete retained projection catalog: when a formerly reconciled,
+provably terminal projection has been pruned, Workbench appends a retirement
+fact and stops treating that historical checkpoint as a live respawn barrier.
+An absent active/unknown checkpoint remains blocking. Reconciliation and
+uncertain-cleanup facts live in an additive companion store; the shared v2
+Workbench transcript keeps its previous-release event vocabulary.
 
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).

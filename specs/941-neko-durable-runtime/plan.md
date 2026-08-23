@@ -70,9 +70,12 @@ or claim Wiii ADE entities.
 
 No visible message or provider session is rewritten. The new database starts
 as an additive local lifecycle journal. Hydration may append a bounded
-runtime-only reconciliation checkpoint to the Workbench snapshot after it
-consumes native replay. Unknown, unavailable or corrupt journal state fails
-local Neko hydration instead of silently deleting data or respawning an agent.
+runtime-only reconciliation checkpoint after it consumes native replay. Those
+new discriminators are written to `neko-chill-native-runtime.json`, not the
+shared Workbench v2 transcript snapshot, so the previous desktop release can
+still hydrate conversations during rollback. Unknown, unavailable or corrupt
+journal/checkpoint state fails local Neko hydration instead of silently deleting
+data or respawning an agent.
 
 ## Risk and rollback
 
@@ -84,7 +87,9 @@ local Neko hydration instead of silently deleting data or respawning an agent.
 - **Provider regression**: freeze the three current launch contracts in Rust
   tests and run affected TypeScript suites.
 - **Rollback**: revert the complete PR/release. Do not restore raw spawn as a
-  partial hotfix. The additive SQLite file can remain unused by older builds.
+  partial hotfix. The additive SQLite journal and native-checkpoint companion
+  store can remain unused by older builds; the shared v2 transcript remains
+  backward-readable.
 
 ## Verification
 
