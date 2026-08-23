@@ -37,7 +37,7 @@ function groupSessions(sessions: NekoSession[], query: string): SessionGroup[] {
       : "__legacy__";
     const existing = groups.get(key) ?? {
       key,
-      name: session.workspace?.name ?? "Phiên chưa gắn dự án",
+      name: session.workspace?.name ?? "Legacy · Phiên chưa gắn dự án",
       path: session.workspace?.path ?? null,
       updatedAt: 0,
       sessions: [],

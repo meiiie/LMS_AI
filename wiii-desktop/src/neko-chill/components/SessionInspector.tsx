@@ -1,7 +1,8 @@
-import { Activity, Bot, Command, Folder, HardDrive, Settings2, X } from "lucide-react";
+import { Activity, Bot, BookOpen, BriefcaseBusiness, Command, Folder, HardDrive, LoaderCircle, Settings2, X } from "lucide-react";
 import type { DriverConfigOption } from "../drivers/types";
 import type { NekoSession } from "../stores/neko-session-store";
 import { NEKO_SESSION_STATUS_LABELS } from "../session-status";
+import { useKnowledgeConnectionStore } from "@/workbench/knowledge";
 
 interface SessionInspectorProps {
   session: NekoSession;
@@ -22,6 +23,10 @@ export function SessionInspector({
   onSetConfigOption,
   onInsertCommand,
 }: SessionInspectorProps) {
+  const knowledgeStatus = useKnowledgeConnectionStore((state) => state.status);
+  const knowledgeError = useKnowledgeConnectionStore((state) => state.error);
+  const connectKnowledge = useKnowledgeConnectionStore((state) => state.connect);
+  const disconnectKnowledge = useKnowledgeConnectionStore((state) => state.disconnect);
   const controlsDisabled =
     session.status !== "idle" ||
     Boolean(session.pendingPermission) ||
@@ -96,6 +101,57 @@ export function SessionInspector({
               </div>
             </div>
           </dl>
+        </section>
+
+        {session.execution ? (
+          <section className="mt-3 rounded-xl border border-[var(--nk-border)] bg-[var(--nk-composer)] p-3">
+            <h2 className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--nk-text-3)]">
+              <BriefcaseBusiness aria-hidden="true" className="h-3 w-3" />
+              Công việc Wiii
+            </h2>
+            <dl className="space-y-1.5 font-mono text-[10px] leading-4 text-[var(--nk-text-3)]">
+              <div className="flex justify-between gap-2"><dt>Task</dt><dd className="truncate">{session.execution.taskId}</dd></div>
+              <div className="flex justify-between gap-2"><dt>Run</dt><dd className="truncate">{session.execution.runId}</dd></div>
+              <div className="flex justify-between gap-2"><dt>Environment</dt><dd className="truncate">{session.execution.environmentId}</dd></div>
+            </dl>
+          </section>
+        ) : null}
+
+        <section className="mt-3 rounded-xl border border-[var(--nk-border)] bg-[var(--nk-composer)] p-3">
+          <h2 className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--nk-text-3)]">
+            <BookOpen aria-hidden="true" className="h-3 w-3" />
+            Ngữ cảnh
+          </h2>
+          <button
+            type="button"
+            disabled={knowledgeStatus === "connecting"}
+            className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left hover:bg-[var(--nk-overlay)] disabled:opacity-60"
+            onClick={() => {
+              if (knowledgeStatus === "ready") disconnectKnowledge();
+              else void connectKnowledge();
+            }}
+          >
+            <span className={`h-2 w-2 shrink-0 rounded-full ${
+              knowledgeStatus === "ready"
+                ? "bg-[var(--nk-success)]"
+                : knowledgeStatus === "degraded"
+                  ? "bg-[var(--nk-danger)]"
+                  : "bg-[var(--nk-ghost)]"
+            }`} />
+            <span className="min-w-0 flex-1">
+              <strong className="block text-[11.5px] font-medium text-[var(--nk-text-2)]">Wiii Knowledge</strong>
+              <small className="block text-[10px] leading-4 text-[var(--nk-ghost)]">
+                {knowledgeStatus === "ready"
+                  ? "Đang đưa RAG có nguồn vào lượt nhắn"
+                  : knowledgeStatus === "connecting"
+                    ? "Đang kiểm tra Wiii Service…"
+                    : knowledgeStatus === "degraded"
+                      ? knowledgeError ?? "Kết nối đang gián đoạn"
+                      : "Tắt · agent vẫn hoạt động độc lập"}
+              </small>
+            </span>
+            {knowledgeStatus === "connecting" ? <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> : null}
+          </button>
         </section>
 
         <section className="mt-3 rounded-xl border border-[var(--nk-border)] bg-[var(--nk-composer)] p-3">
