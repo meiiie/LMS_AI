@@ -698,7 +698,7 @@ pub fn resolve(provider_id: &str) -> Result<ResolvedProvider, SpawnOwnedError> {
     #[cfg(unix)]
     {
         let _ = provider;
-        return Err(SpawnOwnedError::safe(unix_containment_unavailable()));
+        Err(SpawnOwnedError::safe(unix_containment_unavailable()))
     }
     #[cfg(windows)]
     {

@@ -63,6 +63,7 @@ fn prepare_private_journal_path(path: &Path) -> Result<(), String> {
     }
     OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .mode(0o600)
