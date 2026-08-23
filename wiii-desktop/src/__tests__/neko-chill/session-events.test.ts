@@ -154,6 +154,18 @@ describe("Neko session event validation", () => {
       replayedEventCount: 1,
     },
     {
+      type: "native-runtime-reconciled",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      state: "running",
+      operationPhase: "committed",
+      continuity: "active",
+      replayedFromSeq: 0,
+      replayedThroughSeq: 0,
+      replayedEventCount: -1,
+    },
+    {
       type: "native-runtime-retired",
       agentSessionId: "native-session-1",
       runId: "run-1",

@@ -1188,7 +1188,8 @@ fn session_or_retain_terminal_fact(
 ) -> Option<SessionRecord> {
     match session {
         Ok(Some(session)) => Some(session),
-        Ok(None) | Err(_) => {
+        Ok(None) => None,
+        Err(_) => {
             lock(pending).insert(agent_session_id.to_string(), fact.clone());
             None
         }
@@ -1445,6 +1446,19 @@ mod tests {
             retained.payload,
             json!({ "state": "failed", "reason": "provider_process_exited" })
         );
+    }
+
+    #[test]
+    fn terminal_fact_is_not_retained_after_projection_removal() {
+        let pending = Mutex::new(HashMap::new());
+        let fact = terminal_fact_for_termination(
+            &Ok(()),
+            "provider_process_exited",
+            "exit_termination_unproven",
+        );
+
+        assert!(session_or_retain_terminal_fact(Ok(None), &pending, "session-1", &fact,).is_none());
+        assert!(lock(&pending).is_empty());
     }
 
     #[test]

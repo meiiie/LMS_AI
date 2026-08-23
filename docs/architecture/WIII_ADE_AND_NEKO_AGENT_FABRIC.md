@@ -213,12 +213,13 @@ Implemented across the foundation and Phase 2A slices:
   durable respawn lock;
 - exit supervision is published before the process-map hand-off, so hydration
   and cancellation fail closed instead of inventing missing ownership;
-- shutdown admission closes before process drain; Unix provider probes use
-  bounded owner-only capture files, while Windows probes use a producer-bounded
-  pipe; checked tree cleanup and bounded reaping gate successful discovery; the
-  Unix SQLite parent, database and WAL/SHM sidecars are owner-only as well;
-- Windows is the only host currently authorized to launch local providers;
-  Unix builds fail closed before spawn until non-escapable containment exists;
+- shutdown admission closes before process drain; Windows probes use a
+  producer-bounded pipe, and checked tree cleanup plus bounded reaping gate
+  successful discovery; Unix provider discovery and execution both reject
+  before spawn until non-escapable containment exists;
+- the Unix SQLite parent, database and WAL/SHM sidecars remain owner-only even
+  though Windows is currently the only host authorized to probe or launch local
+  providers;
 - driver-observed capability facts and durable attach snapshots;
 - backward-compatible loading of pre-snapshot local session events.
 

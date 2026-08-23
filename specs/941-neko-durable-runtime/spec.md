@@ -176,11 +176,11 @@ side-effect/committed phases become `unknown_outcome`.
   overflow MUST detach listeners, request cancellation with the retained
   identity, and remain fail-closed until cancellation is confirmed. Session
   deletion MUST reconcile or cancel retained unresolved starts first.
-- **FR-027**: Provider probe capture files MUST be created owner-only on Unix;
-  capture contents remain bounded and are deleted after the probe. Windows
-  probes MUST enforce the same producer ceiling with a bounded pipe rather than
-  relying on periodic file-length polling. Probe output is trusted only after
-  checked process-tree cleanup, and process reaping MUST have a finite deadline.
+- **FR-027**: Unix provider discovery and execution MUST reject before spawn
+  until an approved non-escapable containment primitive exists. Windows probes
+  MUST enforce a producer ceiling with a bounded pipe. Probe output is trusted
+  only after checked process-tree cleanup, and process reaping MUST have a
+  finite deadline.
 - **FR-028**: On Unix, the durable journal directory MUST be owner-only and
   the main SQLite database plus WAL/SHM sidecars MUST not be accessible to
   group or other users.
@@ -280,7 +280,8 @@ side-effect/committed phases become `unknown_outcome`.
   restored session and re-reads state after replay; shutdown rejects late
   starts; terminal request retention is bounded without pruning uncertain
   identities; real registry retries preserve one start and its buffered
-  transport events; and Unix probe/journal files are owner-only.
+  transport events; Unix provider probes reject before spawn; and Unix journal
+  files are owner-only.
 - **SC-007**: Tests prove atomic start admission rollback, shutdown-safe replay,
   Windows Job Object ownership across an exited intermediate, host-aware
   workspace identity with fresh Run attempts, Unix pre-spawn rejection, and

@@ -100,14 +100,14 @@ without allowing reconnect to infer an idle Task.
 
 Shutdown marks the runtime closed while holding the lifecycle lock before it
 drains children. Starts re-check that admission gate after an unlocked probe,
-so an in-flight discovery cannot spawn after graceful cleanup returns. Probe
-capture is bounded and owner-only (`0600`) on Unix. Windows uses a bounded
-anonymous pipe instead of a periodically-polled capture file. Every probe path
-checks tree cleanup, and OS process reaping is deadline-bounded. Windows creates
-a kill-on-close Job Object before spawning a suspended provider, assigns the
-leader, and only then resumes its primary thread. This preserves authoritative
-membership when an intermediate process exits before a grandchild and removes
-PID ancestry from the cleanup proof.
+so an in-flight discovery cannot spawn after graceful cleanup returns. Unix
+discovery rejects before child creation until non-escapable containment exists.
+Windows uses a bounded anonymous pipe; its probe path checks tree cleanup and OS
+process reaping is deadline-bounded. Windows creates a kill-on-close Job Object
+before spawning a suspended provider, assigns the leader, and only then resumes
+its primary thread. This preserves authoritative membership when an
+intermediate process exits before a grandchild and removes PID ancestry from
+the cleanup proof.
 
 ## Decision 7: Runtime replacement is a new Run
 

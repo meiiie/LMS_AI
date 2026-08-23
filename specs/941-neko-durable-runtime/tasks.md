@@ -66,7 +66,7 @@
 - [x] T507 Close final durability gaps: reconcile native state/replay during
   Workbench hydration, retain unresolved start identity across caller retry,
   reject post-shutdown starts, bound terminal request retention, and protect
-  Unix probe captures with owner-only permissions.
+  Unix journal files with owner-only permissions.
 - [x] T508 Close final re-review races: re-read native state after replay,
   retain the original execution and transport buffers across real
   RuntimeRegistry retries, and protect the Unix SQLite directory/database/
@@ -123,6 +123,9 @@
   its sequence high-water mark, scope write identities to one invocation and
   its bounded IPC retry, and publish exit-supervision ownership so cancellation
   cannot mistake the monitor hand-off for a missing process.
+- [x] T524 Close final incremental-review contracts: move native session
+  listing off the Tauri main thread, retain terminal facts only on journal read
+  errors, reject Unix discovery before spawn, and harden replay/test validation.
 
 ## Dependencies
 

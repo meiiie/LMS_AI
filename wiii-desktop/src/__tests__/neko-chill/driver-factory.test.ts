@@ -199,7 +199,7 @@ describe("Neko driver factory resource ownership", () => {
       clientSessionId: identity,
       clientRunId: "new-account-probe-attempt",
       workspacePath: "C:/tmp/project",
-    })).rejects.toThrow("automatic duplicate launch is forbidden");
+    })).rejects.toThrow("không được tự khởi chạy bản trùng");
 
     expect(tauri.listen).not.toHaveBeenCalled();
     expect(tauri.invoke).toHaveBeenCalledWith("neko_control_session_list", { runId: null });
@@ -684,7 +684,11 @@ describe("Neko driver factory resource ownership", () => {
     const frame = JSON.stringify({ jsonrpc: "2.0", method: "session/cancel" });
     const first = transport.send(frame);
     const second = transport.send(frame);
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(tauri.invoke.mock.calls.filter(
+        ([command]) => command === "neko_control_session_write",
+      )).toHaveLength(2);
+    });
 
     const writeCalls = tauri.invoke.mock.calls.filter(
       ([command]) => command === "neko_control_session_write",
@@ -817,7 +821,6 @@ describe("Neko driver factory resource ownership", () => {
     onExit?.({
       payload: { exitCode: 17, terminationProven: true, terminalStatePersisted: false },
     });
-    await Promise.resolve();
     expect(exits).toEqual([]);
     tauri.invoke.mockImplementation(async (command: string) => {
       if (command === "neko_control_session_cancel") {

@@ -1,19 +1,19 @@
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use std::ffi::OsString;
-#[cfg(unix)]
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read};
-#[cfg(unix)]
-use std::io::{Seek, SeekFrom};
+use std::io;
+#[cfg(windows)]
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+#[cfg(windows)]
+use std::process::Stdio;
+use std::process::{Child, Command, ExitStatus};
 #[cfg(windows)]
 use std::sync::mpsc;
+#[cfg(windows)]
 use std::thread;
+#[cfg(windows)]
 use std::time::{Duration, Instant};
-#[cfg(unix)]
-use uuid::Uuid;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -21,12 +21,15 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 #[cfg(windows)]
 const CREATE_SUSPENDED: u32 = 0x0000_0004;
+#[cfg(windows)]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(windows)]
 const PROCESS_TERMINATION_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(windows)]
 const PROBE_READER_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(windows)]
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(25);
+#[cfg(windows)]
 const MAX_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
 
 struct ProbeOutput {
@@ -70,75 +73,7 @@ impl Drop for WindowsJob {
     }
 }
 
-#[cfg(unix)]
-struct ProbeCapture {
-    path: PathBuf,
-    file: Option<File>,
-}
-
-#[cfg(unix)]
-impl ProbeCapture {
-    fn create() -> io::Result<Self> {
-        let path = std::env::temp_dir().join(format!("wiii-neko-probe-{}.tmp", Uuid::new_v4()));
-        let mut options = OpenOptions::new();
-        options.create_new(true).read(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            // Provider version/profile output may expose local configuration.
-            // Do not inherit a permissive process umask for this capture file.
-            options.mode(0o600);
-        }
-        let file = options.open(&path)?;
-        Ok(Self {
-            path,
-            file: Some(file),
-        })
-    }
-
-    fn stdio(&self) -> io::Result<Stdio> {
-        self.file
-            .as_ref()
-            .ok_or_else(|| io::Error::other("provider probe capture is closed"))?
-            .try_clone()
-            .map(Stdio::from)
-    }
-
-    fn read_bounded(&mut self) -> io::Result<Vec<u8>> {
-        let file = self
-            .file
-            .as_mut()
-            .ok_or_else(|| io::Error::other("provider probe capture is closed"))?;
-        file.seek(SeekFrom::Start(0))?;
-        let mut captured = Vec::new();
-        file.take(MAX_PROBE_OUTPUT_BYTES as u64)
-            .read_to_end(&mut captured)?;
-        Ok(captured)
-    }
-
-    fn len(&self) -> io::Result<u64> {
-        self.file
-            .as_ref()
-            .ok_or_else(|| io::Error::other("provider probe capture is closed"))?
-            .metadata()
-            .map(|metadata| metadata.len())
-    }
-
-    fn truncate_to_limit(&mut self) {
-        if let Some(file) = self.file.as_mut() {
-            let _ = file.set_len(MAX_PROBE_OUTPUT_BYTES as u64);
-        }
-    }
-}
-
-#[cfg(unix)]
-impl Drop for ProbeCapture {
-    fn drop(&mut self) {
-        self.file.take();
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
+#[cfg(windows)]
 fn probe_failure_after_cleanup(child: &mut OwnedChild, original: io::Error) -> io::Error {
     match terminate_child_tree(child) {
         Ok(()) => original,
@@ -148,74 +83,11 @@ fn probe_failure_after_cleanup(child: &mut OwnedChild, original: io::Error) -> i
     }
 }
 
-/// Unix discovery uses an owner-only file plus an inherited kernel file-size
-/// limit. The file avoids a reader thread that can outlive a broken descendant
-/// holding stdout open, and only a bounded prefix is returned.
+/// Unix provider discovery is staged behind the same non-escapable containment
+/// primitive as provider execution. Do not probe by spawning an unowned child.
 #[cfg(unix)]
-fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
-    let mut capture = ProbeCapture::create()?;
-    command
-        .stdin(Stdio::null())
-        .stdout(capture.stdio()?)
-        .stderr(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // Provider probes are read-only discovery calls. Apply an inherited
-        // kernel file-size ceiling so a broken producer or descendant cannot
-        // allocate unbounded capture storage between monitor polls.
-        unsafe {
-            command.pre_exec(|| {
-                let limit = libc::rlimit {
-                    rlim_cur: MAX_PROBE_OUTPUT_BYTES as libc::rlim_t,
-                    rlim_max: MAX_PROBE_OUTPUT_BYTES as libc::rlim_t,
-                };
-                if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) == 0 {
-                    Ok(())
-                } else {
-                    Err(io::Error::last_os_error())
-                }
-            });
-        }
-    }
-    let mut child = spawn_owned(&mut command)?;
-    let deadline = Instant::now() + PROBE_TIMEOUT;
-    let status = loop {
-        let capture_len = match capture.len() {
-            Ok(capture_len) => capture_len,
-            Err(error) => {
-                return Err(probe_failure_after_cleanup(&mut child, error));
-            }
-        };
-        if capture_len > MAX_PROBE_OUTPUT_BYTES as u64 {
-            capture.truncate_to_limit();
-            let error = io::Error::new(
-                io::ErrorKind::InvalidData,
-                "provider probe exceeded the output limit",
-            );
-            return Err(probe_failure_after_cleanup(&mut child, error));
-        }
-        let child_status = match child.child.try_wait() {
-            Ok(child_status) => child_status,
-            Err(error) => {
-                return Err(probe_failure_after_cleanup(&mut child, error));
-            }
-        };
-        if let Some(status) = child_status {
-            // A probe is not allowed to leave descendants behind. Its strong
-            // OS containment remains addressable after the leader exits, and
-            // cleanup is checked before the output becomes trusted.
-            terminate_child_tree(&mut child)?;
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let error = io::Error::new(io::ErrorKind::TimedOut, "provider probe timed out");
-            return Err(probe_failure_after_cleanup(&mut child, error));
-        }
-        thread::sleep(PROCESS_POLL_INTERVAL);
-    };
-    let stdout = capture.read_bounded()?;
-    Ok(ProbeOutput { status, stdout })
+fn run_probe(_command: Command) -> io::Result<ProbeOutput> {
+    Err(unix_containment_unavailable())
 }
 
 /// Windows discovery uses a bounded anonymous-pipe consumer instead of a
@@ -478,11 +350,16 @@ pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
     #[cfg(unix)]
     {
         let _ = command;
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "local Neko providers require non-escapable process containment; Unix execution is disabled until an approved primitive prevents same-UID migration",
-        ))
+        Err(unix_containment_unavailable())
     }
+}
+
+#[cfg(unix)]
+fn unix_containment_unavailable() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "local Neko providers require non-escapable process containment; Unix execution is disabled until an approved primitive prevents same-UID migration",
+    )
 }
 
 #[cfg(windows)]
@@ -833,9 +710,9 @@ mod tests {
         assert_eq!(resolved[0], std::fs::canonicalize(current).unwrap());
     }
 
+    #[cfg(windows)]
     #[test]
     fn probe_capture_never_returns_more_than_the_output_budget() {
-        #[cfg(windows)]
         let command = {
             let mut command = Command::new("powershell.exe");
             command.args([
@@ -847,22 +724,24 @@ mod tests {
             ]);
             command
         };
-        #[cfg(unix)]
-        let command = {
-            let mut command = Command::new("sh");
-            command.args(["-c", "dd if=/dev/zero bs=131072 count=1 2>/dev/null"]);
-            command
-        };
 
         match run_probe(command) {
             Ok(output) => assert!(output.stdout.len() <= MAX_PROBE_OUTPUT_BYTES),
-            Err(error) => {
-                #[cfg(windows)]
-                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-                #[cfg(unix)]
-                let _ = error;
-            }
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_probe_rejects_before_spawn_without_containment() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "exit 99"]);
+
+        let error = match run_probe(command) {
+            Ok(_) => panic!("Unix provider probe unexpectedly spawned without containment"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
     }
 
     #[test]
@@ -984,19 +863,5 @@ mod tests {
 
         terminate_child_tree(&mut child).unwrap();
         let _ = std::fs::remove_file(marker);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn probe_capture_is_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let capture = ProbeCapture::create().unwrap();
-        let mode = std::fs::metadata(&capture.path)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o600);
     }
 }

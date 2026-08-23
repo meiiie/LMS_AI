@@ -35,12 +35,15 @@ pub async fn neko_control_provider_profiles(
 }
 
 #[tauri::command]
-pub fn neko_control_session_list(
+pub async fn neko_control_session_list(
     app: AppHandle,
     runtime: State<'_, NekoRuntime>,
     run_id: Option<String>,
 ) -> Result<Vec<SessionRecord>, String> {
-    runtime.list_sessions(&app, run_id.as_deref())
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.list_sessions(&app, run_id.as_deref()))
+        .await
+        .map_err(|error| format!("Neko session list task failed: {error}"))?
 }
 
 #[tauri::command]

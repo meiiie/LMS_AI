@@ -40,10 +40,9 @@ Expected invariants:
   commit or roll back together;
 - provider probing and exit observation never block unrelated lifecycle work;
 - shutdown closes start admission before process cleanup;
-- Unix provider-probe captures and the journal database/WAL/SHM files are
-  owner-only;
-- Unix desktop packages build, but local provider launch rejects before spawn
-  until Wiii has containment that a same-UID child cannot escape;
+- Unix journal database/WAL/SHM files are owner-only;
+- Unix desktop packages build, but local provider discovery and launch reject
+  before spawn until Wiii has containment that a same-UID child cannot escape;
 - stdout EOF alone never releases a still-running provider process;
 - Windows provider descendants remain owned by one Job Object even after an
   intermediate and leader exit;

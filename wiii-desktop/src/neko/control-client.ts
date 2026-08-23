@@ -233,7 +233,7 @@ class TauriNekoControlClient implements NekoControlClient {
               { request: nativeStartRequest(identity) },
             );
             if (!isNativeSessionStartResult(replayed)) {
-              throw new Error("Neko returned an invalid retained-start replay response.");
+              throw new Error("Neko trả về phản hồi phát lại phiên khởi động đã giữ không hợp lệ.");
             }
             native = {
               agentSessionId: replayed.agentSessionId,
@@ -256,7 +256,7 @@ class TauriNekoControlClient implements NekoControlClient {
         }
         if (native && isNativeOutcomeUncertain(native)) {
           throw new Error(
-            "unknown_outcome: retained native start cannot be forgotten or cancelled automatically.",
+            "unknown_outcome: Không thể tự quên hoặc hủy phiên khởi động native đã giữ khi kết quả còn chưa chắc chắn.",
           );
         }
         if (native && !NATIVE_TERMINAL_STATES.has(native.state)) {
@@ -313,7 +313,7 @@ class TauriNekoControlClient implements NekoControlClient {
       result,
       identity.execution.runId,
       identity.agentSessionId,
-      "retained native start",
+      "phiên khởi động native đã giữ",
     );
   }
 
@@ -324,7 +324,7 @@ class TauriNekoControlClient implements NekoControlClient {
     operation: string,
   ): Promise<void> {
     if (!isNativeSessionCancelResult(result) || result.agentSessionId !== agentSessionId) {
-      throw new Error(`Neko returned an invalid ${operation} cancellation response.`);
+      throw new Error(`Neko trả về phản hồi hủy ${operation} không hợp lệ.`);
     }
     if (result.cancelled) return;
 
@@ -336,7 +336,7 @@ class TauriNekoControlClient implements NekoControlClient {
       (isNativeOutcomeUncertain(current) || !NATIVE_TERMINAL_STATES.has(current.state))
     ) {
       throw new Error(
-        `unknown_outcome: Neko could not prove the ${operation} reached a safe terminal state.`,
+        `unknown_outcome: Neko chưa chứng minh được ${operation} đã đạt trạng thái kết thúc an toàn.`,
       );
     }
   }
@@ -375,8 +375,8 @@ class TauriNekoControlClient implements NekoControlClient {
       );
       if (existing) {
         throw new Error(
-          "unknown_outcome: Codex account bootstrap is already owned by the durable native run; " +
-          "automatic duplicate launch is forbidden after a renderer reload.",
+          "unknown_outcome: Phiên khởi tạo tài khoản Codex đã thuộc quyền sở hữu của một Run native bền vững; " +
+          "không được tự khởi chạy bản trùng sau khi renderer tải lại.",
         );
       }
     }
@@ -526,7 +526,7 @@ class TauriNekoControlClient implements NekoControlClient {
               result,
               started.runId,
               started.agentSessionId,
-              "native session cancellation",
+              "phiên native",
             );
             transportState.killed = true;
             notifyProvenExit(transportState);

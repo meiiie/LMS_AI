@@ -75,14 +75,13 @@ repeated.
 and Codex adapters. It is scoped to a Rust-owned agent-session identity and is
 idempotent by request ID. It does not accept a PID or executable.
 
-Provider discovery captures are owner-only on Unix and output-bounded while the
-probe is running. Windows uses a MAX+1-byte pipe reader, so the producer cannot
-grow a capture file between monitor polls. Probe output is accepted only after
-checked tree termination; leader reaping and descendant cleanup have explicit
-deadlines. Probe and agent launches use isolated process ownership. Windows
-assigns a kill-on-close Job Object while the leader is still suspended, then
-resumes it; cleanup queries active Job membership rather than reconstructing
-PID ancestry. Timeout,
+Unix provider discovery rejects before spawn until a non-escapable containment
+primitive exists. Windows uses a MAX+1-byte pipe reader, so the producer cannot
+grow unbounded output. Probe output is accepted only after checked tree
+termination; leader reaping and descendant cleanup have explicit deadlines.
+Windows assigns a kill-on-close Job Object while the leader is still suspended,
+then resumes it; cleanup queries active Job membership rather than
+reconstructing PID ancestry. Timeout,
 output overflow, helper-thread failure and shutdown terminate the owned process
 tree rather than accepting an unverified cleanup. Live provider stdout is parsed
 with a 4 MiB per-frame ceiling; an oversized, unterminated or invalid UTF-8
@@ -116,8 +115,8 @@ terminal lifecycle fact committed. A `cancelled: false` response is reconciled a
 Windows containment is a pre-execution Job Object. Unix provider execution is
 currently rejected before spawn because POSIX process groups are escapable and
 a same-UID provider can migrate out of a writable cgroup leaf. Unix packages and
-owner-only persistence/probes remain supported; execution stays unavailable
-until an approved primitive prevents migration.
+owner-only persistence remain supported; discovery and execution stay
+unavailable until an approved primitive prevents migration.
 
 Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution
@@ -226,7 +225,6 @@ These live payloads remain owned by current provider adapters and Workbench
 session persistence. Their absence from SQLite is an explicit security and
 volume boundary, not a claim of full daemon replay.
 
-Provider discovery captures only bounded output. On Unix, the temporary
-capture is created with owner-only mode `0600` and removed when the probe
-finishes. On Windows, a bounded pipe closes after one byte beyond the ceiling,
-and no unbounded capture file is created.
+Provider discovery captures only bounded output. On Unix, discovery rejects
+before child creation. On Windows, a bounded pipe closes after one byte beyond
+the ceiling, and no unbounded capture file is created.
