@@ -241,6 +241,12 @@ Implemented across the foundation and Phase 2A slices:
   settles, and requires authoritative cancellation before recording a clean
   mode exit. Recovered Codex bootstrap cleanup remains provider-scoped and
   cannot terminate another provider sharing the Task;
+- a failed durable-catalog read cannot skip renderer-known cancellation, and a
+  catalog-only cancellation failure is propagated instead of disappearing
+  outside the visible Zustand session set;
+- when post-spawn cleanup is proven, the failed session transition, provider
+  version, and request error are retained before the authoritative transaction,
+  so recovery preserves an exact failure rather than false uncertainty;
 - failed renderer runtime cleanup retains a retryable scope instead of a cached
   rejection; later lifecycle operations reuse the provider's durable
   cancellation identity, retry only failed disposers, and block replacement

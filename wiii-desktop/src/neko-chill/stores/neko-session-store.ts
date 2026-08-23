@@ -2351,9 +2351,17 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     // A provider preparation can become unresolved while RuntimeRegistry is
     // joining it. Refresh after every preparation has settled so teardown
     // cannot miss a native start retained after the initial snapshot.
-    for (const sessionId of await nativeControl.reconcilableStartSessionIds()) {
-      unresolvedStartSessionIds.add(sessionId);
-      sessionIds.add(sessionId);
+    let durableDiscoveryFailure: unknown;
+    try {
+      for (const sessionId of await nativeControl.reconcilableStartSessionIds()) {
+        unresolvedStartSessionIds.add(sessionId);
+        sessionIds.add(sessionId);
+      }
+    } catch (error) {
+      // A catalog read is advisory to the identities already retained by this
+      // renderer. Continue revoking those known starts, then surface the read
+      // failure so mode exit cannot claim complete cleanup.
+      durableDiscoveryFailure = error;
     }
     const unresolvedStartFailures = new Map<string, unknown>();
     await Promise.all([...unresolvedStartSessionIds].map(async (sessionId) => {
@@ -2417,6 +2425,19 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         });
       }),
     );
+    const unreportedFailures = [
+      ...(durableDiscoveryFailure === undefined ? [] : [durableDiscoveryFailure]),
+      ...[...unresolvedStartFailures]
+        .filter(([sessionId]) => !sessionIdsToPersist.includes(sessionId))
+        .map(([, error]) => error),
+    ];
+    if (unreportedFailures.length === 1) throw unreportedFailures[0];
+    if (unreportedFailures.length > 1) {
+      throw new AggregateError(
+        unreportedFailures,
+        "Không thể chứng minh toàn bộ runtime đã được thu hồi khi rời Neko Chill.",
+      );
+    }
   })();
 
   let tracked!: Promise<void>;

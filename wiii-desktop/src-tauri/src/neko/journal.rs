@@ -731,6 +731,55 @@ impl Journal {
         Ok(())
     }
 
+    pub fn reconcile_terminal_request_failure(
+        &self,
+        agent_session_id: &str,
+        request_id: &str,
+        error_code: &str,
+    ) -> Result<(), String> {
+        let mut connection = lock(&self.connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("begin Neko failure reconciliation failed: {error}"))?;
+        let (phase, recorded): (String, Option<String>) = transaction
+            .query_row(
+                "SELECT phase, error_code FROM control_requests WHERE request_id = ?1",
+                [request_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| format!("read Neko failure reconciliation state failed: {error}"))?;
+        let phase = OperationPhase::parse(&phase)
+            .ok_or_else(|| "recorded Neko request has an invalid phase".to_string())?;
+        match phase {
+            OperationPhase::SideEffectStarted | OperationPhase::Committed => {
+                transaction
+                    .execute(
+                        "UPDATE control_requests SET phase = 'failed', error_code = ?2,
+                                result_json = NULL, updated_at = ?3 WHERE request_id = ?1",
+                        params![request_id, error_code, now()],
+                    )
+                    .map_err(|error| format!("reconcile Neko request failure failed: {error}"))?;
+            }
+            OperationPhase::Failed if recorded.as_deref() == Some(error_code) => {}
+            _ => {
+                return Err(format!(
+                    "retained Neko request failure cannot reconcile from phase {}",
+                    phase.as_str()
+                ));
+            }
+        }
+        transaction
+            .execute(
+                "DELETE FROM pending_terminal_facts WHERE agent_session_id = ?1",
+                [agent_session_id],
+            )
+            .map_err(|error| format!("clear reconciled Neko terminal fact failed: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit Neko failure reconciliation failed: {error}"))?;
+        Ok(())
+    }
+
     fn has_pending_terminal_fact(&self, agent_session_id: &str) -> Result<bool, String> {
         lock(&self.connection)
             .query_row(
@@ -949,6 +998,7 @@ impl Journal {
             event_type,
             payload,
             None,
+            None,
         )
     }
 
@@ -974,6 +1024,34 @@ impl Journal {
             event_type,
             payload,
             Some((request_id, result)),
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn fail_request_with_session_event(
+        &self,
+        agent_session_id: &str,
+        next_state: RunState,
+        phase: OperationPhase,
+        continuity: &str,
+        provider_version: Option<&str>,
+        event_type: &str,
+        payload: Value,
+        request_id: &str,
+        error_code: &str,
+    ) -> Result<ControlEvent, String> {
+        self.commit_session_event(
+            agent_session_id,
+            next_state,
+            phase,
+            continuity,
+            None,
+            provider_version,
+            event_type,
+            payload,
+            None,
+            Some((request_id, error_code)),
         )
     }
 
@@ -989,7 +1067,13 @@ impl Journal {
         event_type: &str,
         payload: Value,
         request_completion: Option<(&str, &Value)>,
+        request_failure: Option<(&str, &str)>,
     ) -> Result<ControlEvent, String> {
+        if request_completion.is_some() && request_failure.is_some() {
+            return Err(
+                "Neko lifecycle transaction cannot both complete and fail a request".into(),
+            );
+        }
         validate_payload(&payload)?;
         let encoded = serde_json::to_string(&payload)
             .map_err(|error| format!("encode Neko control event failed: {error}"))?;
@@ -1065,6 +1149,23 @@ impl Journal {
                 ));
             }
         }
+        if let Some((request_id, _)) = request_failure {
+            let current: String = transaction
+                .query_row(
+                    "SELECT phase FROM control_requests WHERE request_id = ?1",
+                    [request_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("read Neko request phase failed: {error}"))?;
+            let current = OperationPhase::parse(&current)
+                .ok_or_else(|| "recorded Neko request has an invalid phase".to_string())?;
+            if !can_advance_operation(current, OperationPhase::Failed) {
+                return Err(format!(
+                    "invalid Neko operation transition {} -> failed",
+                    current.as_str()
+                ));
+            }
+        }
         let timestamp = now();
         transaction
             .execute(
@@ -1127,6 +1228,16 @@ impl Journal {
                     params![request_id, encoded_result, timestamp],
                 )
                 .map_err(|error| format!("persist Neko request result failed: {error}"))?;
+        }
+        if let Some((request_id, error_code)) = request_failure {
+            transaction
+                .execute(
+                    "UPDATE control_requests SET phase = 'failed', error_code = ?2,
+                            result_json = NULL, updated_at = ?3
+                       WHERE request_id = ?1",
+                    params![request_id, error_code, timestamp],
+                )
+                .map_err(|error| format!("persist Neko request failure failed: {error}"))?;
         }
         transaction
             .execute(
@@ -1832,6 +1943,102 @@ mod tests {
                 .begin_request("cancel-a", "session/cancel", "target-a")
                 .unwrap(),
             RequestDecision::Replay(result)
+        );
+        assert!(journal.pending_terminal_facts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn retained_spawn_cleanup_fact_survives_recovery_and_fails_request_atomically() {
+        let journal = Journal::in_memory();
+        journal
+            .insert_session(session("session-a", "run-a"))
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::SideEffectStarted)
+            .unwrap();
+        assert_eq!(
+            journal
+                .begin_request("start-a", "session/start", "target-a")
+                .unwrap(),
+            RequestDecision::Execute
+        );
+        journal
+            .set_request_phase("start-a", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_request_phase("start-a", OperationPhase::SideEffectStarted)
+            .unwrap();
+
+        let fact = json!({
+            "nextState": "failed",
+            "phase": "failed",
+            "continuity": "continuity_lost",
+            "eventType": "run.state_changed",
+            "payload": { "state": "failed", "reason": "ownership_commit_failed" },
+            "providerVersion": "test-version",
+            "requestCompletion": null,
+            "requestFailure": {
+                "requestId": "start-a",
+                "errorCode": "ownership_commit_failed"
+            }
+        });
+        journal
+            .retain_terminal_fact("session-a", Some("start-a"), &fact)
+            .unwrap();
+        lock(&journal.connection)
+            .execute_batch(
+                "CREATE TRIGGER reject_retained_start_event
+                   BEFORE INSERT ON control_events
+                   BEGIN SELECT RAISE(ABORT, 'event rejected'); END;",
+            )
+            .unwrap();
+        assert!(journal
+            .fail_request_with_session_event(
+                "session-a",
+                RunState::Failed,
+                OperationPhase::Failed,
+                "continuity_lost",
+                Some("test-version"),
+                "run.state_changed",
+                json!({ "state": "failed", "reason": "ownership_commit_failed" }),
+                "start-a",
+                "ownership_commit_failed",
+            )
+            .is_err());
+        lock(&journal.connection)
+            .execute_batch("DROP TRIGGER reject_retained_start_event;")
+            .unwrap();
+
+        journal.recover_incomplete().unwrap();
+        let preserved = journal.session("session-a").unwrap().unwrap();
+        assert_eq!(preserved.state, RunState::Starting);
+        assert_eq!(preserved.operation_phase, OperationPhase::SideEffectStarted);
+        assert_eq!(journal.pending_terminal_facts().unwrap().len(), 1);
+
+        journal
+            .fail_request_with_session_event(
+                "session-a",
+                RunState::Failed,
+                OperationPhase::Failed,
+                "continuity_lost",
+                Some("test-version"),
+                "run.state_changed",
+                json!({ "state": "failed", "reason": "ownership_commit_failed" }),
+                "start-a",
+                "ownership_commit_failed",
+            )
+            .unwrap();
+        let failed = journal.session("session-a").unwrap().unwrap();
+        assert_eq!(failed.state, RunState::Failed);
+        assert_eq!(failed.provider_version.as_deref(), Some("test-version"));
+        assert_eq!(
+            journal
+                .begin_request("start-a", "session/start", "target-a")
+                .unwrap(),
+            RequestDecision::RecordedError("ownership_commit_failed".into())
         );
         assert!(journal.pending_terminal_facts().unwrap().is_empty());
     }

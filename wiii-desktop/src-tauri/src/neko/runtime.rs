@@ -69,13 +69,24 @@ struct PendingRequestCompletion {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PendingRequestFailure {
+    request_id: String,
+    error_code: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PendingTerminalFact {
     next_state: RunState,
     phase: OperationPhase,
     continuity: String,
     event_type: String,
     payload: Value,
+    #[serde(default)]
+    provider_version: Option<String>,
     request_completion: Option<PendingRequestCompletion>,
+    #[serde(default)]
+    request_failure: Option<PendingRequestFailure>,
 }
 
 struct RuntimeInner {
@@ -740,11 +751,13 @@ impl NekoRuntime {
                 continuity: "active".into(),
                 event_type: "run.state_changed".into(),
                 payload: json!({ "state": "cancelled", "reason": "requested" }),
+                provider_version: None,
                 request_completion: Some(PendingRequestCompletion {
                     request_id: request.request_id.clone(),
                     result: serde_json::to_value(&result)
                         .map_err(|error| format!("encode session cancel result failed: {error}"))?,
                 }),
+                request_failure: None,
             };
             self.persist_terminal_fact(app, &request.agent_session_id, fact)?;
         } else {
@@ -781,7 +794,9 @@ impl NekoRuntime {
                     continuity: "active".into(),
                     event_type: "run.state_changed".into(),
                     payload: json!({ "state": "cancelled", "reason": "application_exit" }),
+                    provider_version: None,
                     request_completion: None,
+                    request_failure: None,
                 },
                 Err(error) => PendingTerminalFact {
                     next_state: RunState::UnknownOutcome,
@@ -793,7 +808,9 @@ impl NekoRuntime {
                         "reason": "shutdown_termination_unproven",
                         "detail": bounded_error(&error),
                     }),
+                    provider_version: None,
                     request_completion: None,
+                    request_failure: None,
                 },
             };
             match self.inner.journal.session(&agent_session_id) {
@@ -967,7 +984,27 @@ impl NekoRuntime {
     ) -> String {
         let original = original.into();
         match termination {
-            Ok(()) => self.reject_start_error(app, request, reason, provider_version, original),
+            Ok(()) => {
+                let fact = PendingTerminalFact {
+                    next_state: RunState::Failed,
+                    phase: OperationPhase::Failed,
+                    continuity: "continuity_lost".into(),
+                    event_type: "run.state_changed".into(),
+                    payload: json!({ "state": "failed", "reason": reason }),
+                    provider_version: provider_version.map(str::to_string),
+                    request_completion: None,
+                    request_failure: Some(PendingRequestFailure {
+                        request_id: request.request_id.clone(),
+                        error_code: reason.to_string(),
+                    }),
+                };
+                match self.persist_terminal_fact(app, &request.agent_session_id, fact) {
+                    Ok(()) => original,
+                    Err(recording_error) => format!(
+                        "{original}; additionally failed to persist rejected start: {recording_error}"
+                    ),
+                }
+            }
             Err(error) => self.mark_termination_unknown(
                 app,
                 &request.request_id,
@@ -1052,7 +1089,12 @@ impl NekoRuntime {
         let request_id = fact
             .request_completion
             .as_ref()
-            .map(|completion| completion.request_id.as_str());
+            .map(|completion| completion.request_id.as_str())
+            .or_else(|| {
+                fact.request_failure
+                    .as_ref()
+                    .map(|failure| failure.request_id.as_str())
+            });
         let encoded = serde_json::to_value(&fact)
             .map_err(|error| format!("encode retained Neko terminal fact failed: {error}"))?;
         let retention =
@@ -1076,6 +1118,23 @@ impl NekoRuntime {
                 .map(|event| {
                     let _ = app.emit("neko-control://event", event);
                 })
+        } else if let Some(failure) = &fact.request_failure {
+            self.inner
+                .journal
+                .fail_request_with_session_event(
+                    agent_session_id,
+                    fact.next_state,
+                    fact.phase,
+                    &fact.continuity,
+                    fact.provider_version.as_deref(),
+                    &fact.event_type,
+                    fact.payload.clone(),
+                    &failure.request_id,
+                    &failure.error_code,
+                )
+                .map(|event| {
+                    let _ = app.emit("neko-control://event", event);
+                })
         } else {
             self.transition_session_event(
                 app,
@@ -1084,7 +1143,7 @@ impl NekoRuntime {
                 fact.phase,
                 &fact.continuity,
                 None,
-                None,
+                fact.provider_version.as_deref(),
                 &fact.event_type,
                 fact.payload.clone(),
             )
@@ -1125,6 +1184,12 @@ impl NekoRuntime {
                     agent_session_id,
                     &completion.request_id,
                     &completion.result,
+                )?;
+            } else if let Some(failure) = &fact.request_failure {
+                self.inner.journal.reconcile_terminal_request_failure(
+                    agent_session_id,
+                    &failure.request_id,
+                    &failure.error_code,
                 )?;
             } else {
                 self.inner.journal.remove_terminal_fact(agent_session_id)?;
@@ -1278,7 +1343,9 @@ fn terminal_fact_for_termination(
             continuity: "continuity_lost".into(),
             event_type: "run.state_changed".into(),
             payload: json!({ "state": "failed", "reason": proven_reason }),
+            provider_version: None,
             request_completion: None,
+            request_failure: None,
         },
         Err(error) => PendingTerminalFact {
             next_state: RunState::UnknownOutcome,
@@ -1290,7 +1357,9 @@ fn terminal_fact_for_termination(
                 "reason": unproven_reason,
                 "detail": bounded_error(error),
             }),
+            provider_version: None,
             request_completion: None,
+            request_failure: None,
         },
     }
 }

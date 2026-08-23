@@ -1425,6 +1425,35 @@ describe("neko-chill persistence", () => {
     expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(bootstrapId);
   });
 
+  it("continues known-start cleanup when durable discovery fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const discoveryError = new Error("native catalog unavailable");
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([id]);
+    nativeControl.reconcilableStartSessionIds.mockRejectedValue(discoveryError);
+
+    await expect(disposeAllNekoRuntimes()).rejects.toBe(discoveryError);
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "exited",
+      closePending: false,
+    });
+  });
+
+  it("propagates cancellation failure for a catalog-only durable bootstrap", async () => {
+    const bootstrapId = "codex-account-bootstrap-catalog-only";
+    const cancellationError = new Error("durable cancellation unavailable");
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([bootstrapId]);
+    nativeControl.cancelUnresolvedStarts.mockRejectedValueOnce(cancellationError);
+
+    await expect(disposeAllNekoRuntimes()).rejects.toBe(cancellationError);
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(bootstrapId);
+  });
+
   it("removes a staged prompt when the provider exits before invocation", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     let release!: () => void;

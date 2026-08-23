@@ -149,6 +149,9 @@
 - [x] T530 Use durable retained-start discovery during mode exit and scope
   recovered Codex bootstrap cancellation by provider so same-Task siblings are
   never terminated.
+- [x] T531 Continue known-start cleanup across durable catalog failure,
+  propagate catalog-only cancellation uncertainty, and retain proven failed
+  spawn cleanup with its request outcome before the lifecycle transaction.
 
 ## Dependencies
 

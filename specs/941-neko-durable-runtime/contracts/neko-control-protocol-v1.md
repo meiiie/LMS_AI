@@ -180,6 +180,17 @@ catalog after in-flight preparations settle, and requires their authoritative
 cancellation before it may persist a clean exit. Durable Codex bootstrap
 cleanup is provider-scoped, so a non-Codex AgentSession sharing its Task is not
 cancelled. A cancellation failure remains a blocking cleanup uncertainty.
+If durable catalog discovery fails, teardown still cancels identities already
+retained by the renderer and then reports the catalog uncertainty. A failure
+for an identity that exists only in native authority is propagated rather than
+being mistaken for a clean mode exit.
+
+After a provider was spawned, proven process-tree cleanup is itself a durable
+fact. Neko retains the failed session transition together with the start
+request error before attempting the authoritative SQLite transaction. A
+transaction failure therefore reconciles to the exact failed outcome after
+restart; it does not manufacture `unknown_outcome` for a process already
+proved terminated.
 
 Renderer runtime cleanup is serialized per visible session. A failed disposer
 retains its callable authority and provider cancellation identity; later close,

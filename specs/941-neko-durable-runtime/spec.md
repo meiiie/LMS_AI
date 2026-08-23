@@ -316,6 +316,11 @@ side-effect/committed phases become `unknown_outcome`.
   teardown after runtime preparation settles. Durable bootstrap cancellation
   MUST remain scoped to Codex and MUST NOT terminate another provider sharing
   the same Task.
+- **FR-058**: Mode exit MUST continue cancelling renderer-known starts when
+  durable catalog discovery fails, then report that discovery uncertainty.
+  Cancellation failures for catalog-only identities MUST be propagated. When
+  post-spawn process-tree cleanup is proven, Neko MUST retain the exact failed
+  session and request outcome before attempting the authoritative transaction.
 
 ### Non-goals
 
@@ -367,3 +372,7 @@ side-effect/committed phases become `unknown_outcome`.
 - **SC-013**: Tests prove mode exit cancels a durable Codex bootstrap after
   renderer reload and durable reconciliation ignores a non-Codex AgentSession
   sibling attached to the same Task.
+- **SC-014**: Tests prove catalog-read failure cannot skip known-start cleanup,
+  catalog-only cancellation failure is observable, and a proven spawn cleanup
+  fact survives transaction failure/recovery without becoming
+  `unknown_outcome`.
