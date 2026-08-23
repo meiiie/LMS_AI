@@ -1,27 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { codexBootstrapIdentity } from "@/neko-chill/codex-bootstrap-identity";
 
 describe("Codex account bootstrap identity", () => {
-  it("reuses one caller identity across uncertain retries", () => {
-    const createId = vi.fn()
-      .mockReturnValueOnce("first")
-      .mockReturnValueOnce("second");
-    const first = codexBootstrapIdentity(null, "C:/workspace", createId);
-    const retry = codexBootstrapIdentity(first, "C:/workspace", createId);
+  it("derives one caller identity across retries and component remounts", () => {
+    const first = codexBootstrapIdentity("C:/workspace");
+    const remounted = codexBootstrapIdentity("C:/workspace");
 
-    expect(retry).toBe(first);
-    expect(retry.clientSessionId).toBe("codex-account-bootstrap-first");
-    expect(createId).toHaveBeenCalledTimes(1);
+    expect(remounted).not.toBe(first);
+    expect(remounted).toEqual(first);
+    expect(first.clientSessionId).toMatch(/^codex-account-bootstrap-[0-9a-f-]{36}$/);
   });
 
-  it("mints a different caller scope for a different workspace", () => {
-    const createId = vi.fn()
-      .mockReturnValueOnce("first")
-      .mockReturnValueOnce("second");
-    const first = codexBootstrapIdentity(null, "C:/workspace-a", createId);
-    const next = codexBootstrapIdentity(first, "C:/workspace-b", createId);
+  it("normalizes Windows separators but isolates different workspaces", () => {
+    const slash = codexBootstrapIdentity("C:/workspace-a/");
+    const backslash = codexBootstrapIdentity("C:\\workspace-a");
+    const next = codexBootstrapIdentity("C:/workspace-b");
 
-    expect(next.clientSessionId).toBe("codex-account-bootstrap-second");
-    expect(createId).toHaveBeenCalledTimes(2);
+    expect(backslash.clientSessionId).toBe(slash.clientSessionId);
+    expect(next.clientSessionId).not.toBe(slash.clientSessionId);
   });
 });

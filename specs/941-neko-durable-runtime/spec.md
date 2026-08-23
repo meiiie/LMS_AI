@@ -166,8 +166,8 @@ side-effect/committed phases become `unknown_outcome`.
 - **FR-025**: Runtime shutdown MUST close admission before draining owned
   processes. A provider probe already in flight MUST re-check admission before
   spawn. A fresh start MUST publish its `Starting/Accepted` session projection
-  before the lifecycle lock is released for provider discovery, so reconnect
-  cannot mistake an accepted operation for an idle Task.
+  before any unlocked workspace or provider-discovery I/O, so reconnect cannot
+  mistake an accepted operation for an idle Task.
 - **FR-026**: If both bounded IPC attempts lose a `session/start` response,
   the TypeScript client MUST retain the same request, agent-session, Run,
   Environment, listener and early transport buffer for a caller-level retry,
@@ -177,7 +177,10 @@ side-effect/committed phases become `unknown_outcome`.
   identity, and remain fail-closed until cancellation is confirmed. Session
   deletion MUST reconcile or cancel retained unresolved starts first.
 - **FR-027**: Provider probe capture files MUST be created owner-only on Unix;
-  capture contents remain bounded and are deleted after the probe.
+  capture contents remain bounded and are deleted after the probe. Windows
+  probes MUST enforce the same producer ceiling with a bounded pipe rather than
+  relying on periodic file-length polling. Probe output is trusted only after
+  checked process-tree cleanup, and process reaping MUST have a finite deadline.
 - **FR-028**: On Unix, the durable journal directory MUST be owner-only and
   the main SQLite database plus WAL/SHM sidecars MUST not be accessible to
   group or other users.
@@ -196,9 +199,10 @@ side-effect/committed phases become `unknown_outcome`.
   An OS termination failure or missing owner for a side-effecting live session
   MUST transition the request and native session to `unknown_outcome`; it MUST
   NOT commit `cancelled`, `failed`, or another respawn-permitting terminal fact.
-- **FR-032**: The Codex account bootstrap UI MUST keep a stable logical caller
-  identity across retry attempts in one workspace. A lost native response MUST
-  therefore recover the retained start rather than mint another App Server.
+- **FR-032**: The Codex account bootstrap UI MUST derive a stable logical caller
+  identity from its workspace across retry attempts, component remounts and
+  WebView reloads. A durable non-terminal native Run MUST block an automatic
+  duplicate App Server launch after volatile client state is lost.
 
 ### Non-goals
 

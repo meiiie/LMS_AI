@@ -5378,6 +5378,7 @@ dependencies = [
  "tauri-plugin-store",
  "tokio",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

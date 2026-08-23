@@ -209,25 +209,12 @@ impl NekoRuntime {
             }
         }
 
-        if let Err(error) = validate_start_workspace(&request) {
-            let _operation = lock(&self.inner.operations);
-            return match self
-                .inner
-                .journal
-                .fail_request(&request.request_id, "invalid_workspace")
-            {
-                Ok(()) => Err(error),
-                Err(recording_error) => Err(format!(
-                    "{error}; additionally failed to persist rejected start: {recording_error}"
-                )),
-            };
-        }
-
-        // Publish the accepted native projection before releasing the
-        // lifecycle lock for provider discovery. A renderer that reconnects
-        // during a slow probe must see this Starting/Accepted owner and keep
-        // the visible Task blocked; otherwise it could restore the Task as
-        // exited and launch a second provider while this start is still live.
+        // Publish the accepted native projection before *any* unlocked host
+        // I/O. Both workspace metadata and provider discovery can block on a
+        // removable or network filesystem. A renderer that reconnects during
+        // either operation must see this Starting/Accepted owner and keep the
+        // visible Task blocked; otherwise it could infer that no native owner
+        // exists and launch a second provider.
         {
             let _operation = lock(&self.inner.operations);
             if let Err(error) = self.ensure_accepting_starts() {
@@ -266,6 +253,11 @@ impl NekoRuntime {
                     return Err(error);
                 }
             }
+        }
+
+        if let Err(error) = validate_start_workspace(&request) {
+            let _operation = lock(&self.inner.operations);
+            return Err(self.reject_start_error(&app, &request, "invalid_workspace", None, error));
         }
 
         // Version/profile discovery can invoke a slow or broken provider shim.

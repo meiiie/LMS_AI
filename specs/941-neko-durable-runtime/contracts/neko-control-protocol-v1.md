@@ -41,9 +41,10 @@ method and logical target before dispatch.
   start therefore remains replayable if its workspace was renamed or is
   temporarily unavailable.
 - A new start publishes a listable `Starting/Accepted` session and its creation
-  event before provider discovery releases the lifecycle lock. Account-probe
-  retries keep one workspace-scoped caller identity, allowing the compatibility
-  client to recover the retained native operation after lost IPC responses.
+  event before any unlocked workspace or provider-discovery I/O. Account-probe
+  retries derive one workspace-scoped caller identity across component remount
+  and WebView reload; a durable non-terminal native Run blocks duplicate launch
+  when the renderer's volatile retained-start map has been lost.
 
 Completed and failed request identities are replayable for 90 days. Startup
 maintenance may prune them after that window. Requests in `accepted`,
@@ -68,10 +69,13 @@ repeated.
 and Codex adapters. It is scoped to a Rust-owned agent-session identity and is
 idempotent by request ID. It does not accept a PID or executable.
 
-Provider discovery captures are owner-only and output-bounded while the probe
-is running. Probe and agent launches use isolated process groups; timeout,
+Provider discovery captures are owner-only on Unix and output-bounded while the
+probe is running. Windows uses a MAX+1-byte pipe reader, so the producer cannot
+grow a capture file between monitor polls. Probe output is accepted only after
+checked tree termination; leader reaping and descendant cleanup have explicit
+deadlines. Probe and agent launches use isolated process ownership; timeout,
 output overflow, helper-thread failure and shutdown terminate the owned process
-tree rather than dropping a live child handle. Live provider stdout is parsed
+tree rather than accepting an unverified cleanup. Live provider stdout is parsed
 with a 4 MiB per-frame ceiling; an oversized, unterminated or invalid UTF-8
 frame is a terminal provider-protocol failure, not an unbounded renderer input.
 EOF never acts as an implicit delimiter for a short partial frame.
@@ -190,4 +194,5 @@ volume boundary, not a claim of full daemon replay.
 
 Provider discovery captures only bounded output. On Unix, the temporary
 capture is created with owner-only mode `0600` and removed when the probe
-finishes.
+finishes. On Windows, a bounded pipe closes after one byte beyond the ceiling,
+and no unbounded capture file is created.

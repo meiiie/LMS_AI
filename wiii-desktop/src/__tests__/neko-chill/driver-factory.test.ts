@@ -165,6 +165,42 @@ describe("Neko driver factory resource ownership", () => {
     await transport.kill();
   });
 
+  it("does not duplicate a durable Codex account bootstrap after a renderer reload", async () => {
+    const identity = "codex-account-bootstrap-4f088e4d-13bc-58e4-8439-a80235ae7e44";
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "neko_control_session_list") {
+        return [{
+          agentSessionId: "native-account-probe",
+          taskId: `legacy-local/task/${identity}`,
+          runId: `legacy-local/run/${identity}`,
+          environmentId: `legacy-local/environment/${identity}`,
+          providerId: "codex",
+          providerVersion: "0.149.0",
+          workspacePath: "C:/tmp/project",
+          state: "starting",
+          operationPhase: "accepted",
+          continuity: "active",
+          pid: null,
+          createdAt: "2026-08-23T00:00:00Z",
+          updatedAt: "2026-08-23T00:00:00Z",
+        }];
+      }
+      return undefined;
+    });
+
+    await expect(getNekoControlClient().spawnProvider({
+      providerId: "codex",
+      clientSessionId: identity,
+      workspacePath: "C:/tmp/project",
+    })).rejects.toThrow("automatic duplicate launch is forbidden");
+
+    expect(tauri.listen).not.toHaveBeenCalled();
+    expect(tauri.invoke).not.toHaveBeenCalledWith(
+      "neko_control_session_start",
+      expect.anything(),
+    );
+  });
+
   it("retries a lost start response with the same request and session identities", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     let starts = 0;

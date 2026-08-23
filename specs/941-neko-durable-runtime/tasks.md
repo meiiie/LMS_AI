@@ -47,9 +47,9 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 37 Rust/security
-  tests and the latest 56-test review regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,909 Vitest
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 38 Rust/security
+  tests and the latest 57-test review regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,910 Vitest
   across 173 files,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
@@ -97,6 +97,9 @@
 - [x] T517 Publish accepted starts before unlocked provider probes, require a
   verified process-tree termination before safe terminal state, and retain one
   Codex account-bootstrap caller identity across uncertain UI retries.
+- [x] T518 Publish accepted ownership before volatile workspace I/O, derive the
+  Codex bootstrap identity across remount/reload, enforce a producer-side
+  Windows probe quota, check every probe cleanup, and bound process reaping.
 
 ## Dependencies
 

@@ -95,9 +95,9 @@ and active sessions without a live renderer transport stay locked against
 automatic respawn.
 
 For a fresh start, Rust publishes the durable `Starting/Accepted` session
-projection before releasing its lifecycle lock for provider discovery. A UI
-reload during a slow probe therefore sees the accepted owner and cannot infer
-that the Task is idle. Cancellation is terminal only after process-tree
+projection before any unlocked workspace or provider-discovery I/O. A UI
+reload during a slow filesystem lookup or probe therefore sees the accepted
+owner and cannot infer that the Task is idle. Cancellation is terminal only after process-tree
 termination succeeds; an unavailable process owner or failed OS tree kill is
 recorded as `unknown_outcome`, never as permission to launch a replacement.
 
@@ -177,7 +177,8 @@ Implemented across the foundation and Phase 2A slices:
 - caller-level start retry retains the same logical identity after unresolved
   IPC delivery, including its original Run/Environment binding and buffered
   bootstrap/exit events across a fresh RuntimeRegistry preparation; the Codex
-  account probe also retains one caller identity across its retry UI;
+  account probe derives one workspace identity across retry, remount and
+  WebView reload, and a durable non-terminal Run blocks duplicate bootstrap;
   completed/failed identities have a 90-day replay window while uncertain
   identities are not automatically pruned;
 - conservative recovery phases: `accepted`, `dispatched`,
@@ -193,9 +194,10 @@ Implemented across the foundation and Phase 2A slices:
   provider frames even at EOF;
 - rollback-readable v2 conversation snapshots plus an additive native runtime
   checkpoint companion; uncertain close cleanup remains a durable respawn lock;
-- shutdown admission closes before process drain, and Unix provider probes use
-  bounded owner-only capture files; the Unix SQLite parent, database and
-  WAL/SHM sidecars are owner-only as well;
+- shutdown admission closes before process drain; Unix provider probes use
+  bounded owner-only capture files, while Windows probes use a producer-bounded
+  pipe; checked tree cleanup and bounded reaping gate successful discovery; the
+  Unix SQLite parent, database and WAL/SHM sidecars are owner-only as well;
 - driver-observed capability facts and durable attach snapshots;
 - backward-compatible loading of pre-snapshot local session events.
 

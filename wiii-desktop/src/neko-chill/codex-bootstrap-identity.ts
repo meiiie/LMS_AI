@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from "uuid";
+import { v5 as uuidv5 } from "uuid";
 
 export interface CodexBootstrapIdentity {
   workspacePath: string;
@@ -6,20 +6,19 @@ export interface CodexBootstrapIdentity {
 }
 
 /**
- * Keep one logical caller identity while a Codex account probe is retried.
- * Neko's control client can then recover an unresolved native start instead
- * of minting a second App Server. A workspace change is a different scope;
- * fresh native execution IDs after a proven terminal outcome remain owned by
- * the control client behind this stable caller key.
+ * Derive the account-probe caller from durable workspace identity rather than
+ * React component lifetime. Remounting NewSessionView or reloading the WebView
+ * therefore reaches the same native Run and cannot silently create a second
+ * App Server while the first start remains non-terminal.
  */
-export function codexBootstrapIdentity(
-  current: CodexBootstrapIdentity | null,
-  workspacePath: string,
-  createId: () => string = uuidv4,
-): CodexBootstrapIdentity {
-  if (current?.workspacePath === workspacePath) return current;
+export function codexBootstrapIdentity(workspacePath: string): CodexBootstrapIdentity {
+  const normalizedWorkspace = workspacePath.replaceAll("\\", "/").replace(/\/+$/, "");
+  const scope = uuidv5(
+    normalizedWorkspace,
+    "ce6c70a7-cb49-5fd8-992f-a10e1459fa8e",
+  );
   return {
     workspacePath,
-    clientSessionId: `codex-account-bootstrap-${createId()}`,
+    clientSessionId: `codex-account-bootstrap-${scope}`,
   };
 }

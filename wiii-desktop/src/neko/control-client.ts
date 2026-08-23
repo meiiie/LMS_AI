@@ -348,6 +348,17 @@ class TauriNekoControlClient implements NekoControlClient {
       request.profileId ?? null,
     ]);
     const priorStart = this.unresolvedStarts.get(startKey);
+    if (!priorStart && request.clientSessionId.startsWith("codex-account-bootstrap-")) {
+      const existing = (await this.listSessions(requestedExecution.runId)).find(
+        (candidate) => !NATIVE_TERMINAL_STATES.has(candidate.state),
+      );
+      if (existing) {
+        throw new Error(
+          "unknown_outcome: Codex account bootstrap is already owned by the durable native run; " +
+          "automatic duplicate launch is forbidden after a renderer reload.",
+        );
+      }
+    }
     if (priorStart?.transport.terminalError) {
       const cancelled = await this.confirmOverflowCancellation(priorStart);
       const message = priorStart.transport.terminalError;

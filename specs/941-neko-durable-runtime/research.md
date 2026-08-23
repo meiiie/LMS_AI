@@ -88,14 +88,16 @@ table. Detection does not reveal resolved paths to the WebView. Rust resolves
 and probes an absolute canonical executable and launches that exact path; a
 later workspace `cwd` therefore cannot change which executable is selected.
 Slow provider probes run outside the global lifecycle lock. Request identity
-is durably accepted first and completed idempotent replay is resolved before a
-new probe, so unrelated sessions remain responsive without making replay
-depend on current provider availability.
+and its listable `Starting/Accepted` projection are durably published before
+volatile workspace or provider I/O, so unrelated sessions remain responsive
+without allowing reconnect to infer an idle Task.
 
 Shutdown marks the runtime closed while holding the lifecycle lock before it
 drains children. Starts re-check that admission gate after an unlocked probe,
 so an in-flight discovery cannot spawn after graceful cleanup returns. Probe
-capture is bounded, owner-only (`0600`) on Unix, and deleted on completion.
+capture is bounded and owner-only (`0600`) on Unix. Windows uses a bounded
+anonymous pipe instead of a periodically-polled capture file. Every probe path
+checks tree cleanup, and OS process reaping is deadline-bounded.
 
 ## Decision 7: Runtime replacement is a new Run
 

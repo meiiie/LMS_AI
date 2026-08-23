@@ -18,7 +18,6 @@ import {
 } from "../workspace";
 import {
   codexBootstrapIdentity,
-  type CodexBootstrapIdentity,
 } from "../codex-bootstrap-identity";
 
 function recentWorkspaces(): WorkspaceRef[] {
@@ -50,7 +49,6 @@ export function NewSessionView() {
   const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
   const [codexBootstrapAttempt, setCodexBootstrapAttempt] = useState(0);
   const codexAccountSession = useRef<CodexAccountSession | null>(null);
-  const codexBootstrap = useRef<CodexBootstrapIdentity | null>(null);
   const recent = useMemo(() => recentWorkspaces(), [sessions]);
   const neko = agents.find((agent) => agent.id === "neko" && agent.found);
   const codex = agents.find((agent) => agent.id === "codex" && agent.found);
@@ -99,8 +97,7 @@ export function NewSessionView() {
     }
 
     setCodexAccountState("checking");
-    const bootstrapIdentity = codexBootstrapIdentity(codexBootstrap.current, workspace.path);
-    codexBootstrap.current = bootstrapIdentity;
+    const bootstrapIdentity = codexBootstrapIdentity(workspace.path);
     void getNekoControlClient().spawnProvider({
       providerId: "codex",
       // Retry the same logical caller identity until Neko proves the previous
