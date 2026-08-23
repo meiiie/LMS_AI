@@ -58,13 +58,18 @@ transaction that commits the terminal event and optional request result.
 ### Workbench reconciliation companion
 
 The additive `neko-chill-native-runtime.json` companion may contain runtime-only
-`native-runtime-reconciled`, `native-runtime-retired`, and
-`native-runtime-cleanup-uncertain` events with native session/run identity,
+`native-runtime-reconciled`, `native-runtime-retired`,
+`native-runtime-cleanup-uncertain`, and `native-runtime-cleanup-resolved` events
+with native session/run identity,
 state, operation phase, continuity and consumed replay cursor/count. They are
 bounded read-model checkpoints; they do not copy native event payloads or
 replace the native journal. They deliberately do not enter the shared v2
 transcript snapshot, preserving rollback readability for the previous desktop
 release. Missing unknown/active projections never create retirement facts.
+`native-runtime-cleanup-resolved` is the matching bounded resolution fact: it
+preserves native session/run/provider identity after a retained disposer later
+proves termination, allowing the read model to ignore the older uncertainty
+without deleting or rewriting history.
 
 ## SQLite schema direction
 

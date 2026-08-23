@@ -48,9 +48,9 @@
 ## Phase 6: Verification and delivery
 
 - [x] T501 Run focused Rust and Vitest suites plus TypeScript: 49 Rust/security
-  tests and the latest 135-test, 100-test, and 142-test review regression slices
+  tests and the latest 135-test, 100-test, 142-test, and 177-test review slices
   passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,931 Vitest
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,936 Vitest
   across 173 files,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
@@ -138,6 +138,10 @@
 - [x] T527 Retain failed renderer cleanup as retryable authority, serialize
   later attempts, retry only unresolved disposers with the same provider
   cancellation identity, and block replacement until cleanup is proven.
+- [x] T528 Preserve provider identity with retained cleanup, add a durable
+  cleanup-resolution fact, keep late-owned drivers retryable, publish no
+  replacement before prior cleanup succeeds, flush joined supervisor facts at
+  shutdown, and preserve probe cleanup uncertainty after leader exit.
 
 ## Dependencies
 

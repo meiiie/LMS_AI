@@ -205,7 +205,11 @@ fn run_probe(mut command: Command) -> Result<ProbeOutput, SpawnOwnedError> {
 
         match child.child.try_wait() {
             Ok(Some(status)) => {
-                terminate_child_tree(&mut child).map_err(SpawnOwnedError::safe)?;
+                terminate_child_tree(&mut child).map_err(|cleanup| {
+                    SpawnOwnedError::after_unproven_cleanup(io::Error::other(format!(
+                        "provider probe leader exited but process-tree termination was not proven: {cleanup}"
+                    )))
+                })?;
                 break status;
             }
             Ok(None) => {}

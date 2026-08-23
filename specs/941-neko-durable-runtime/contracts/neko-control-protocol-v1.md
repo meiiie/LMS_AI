@@ -154,9 +154,11 @@ lost ownership.
 
 Graceful shutdown releases lifecycle serialization after closing admission and
 draining the live process map, then waits for every previously published exit
-supervisor to finish durable terminal reconciliation. Provider launch and
+supervisor to finish durable terminal reconciliation and flushes any exact
+terminal facts those supervisors retained before returning. Provider launch and
 discovery preserve whether a failure happened before spawn/after proven cleanup
-or after cleanup became unproven; only the former is a safe rejection.
+or after cleanup became unproven, including descendant cleanup after a probe
+leader exits; only the former is a safe rejection.
 
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).
@@ -174,7 +176,12 @@ Renderer runtime cleanup is serialized per visible session. A failed disposer
 retains its callable authority and provider cancellation identity; later close,
 delete, teardown, or replacement operations retry only unresolved disposers.
 Successful siblings are not repeated, and replacement remains blocked until
-the retained cleanup succeeds.
+the retained cleanup succeeds. The new driver is not published while prior
+cleanup is uncertain; a failed prior cleanup also closes the prepared driver.
+Late-owned drivers receive their own retryable scope rather than a one-shot
+cleanup Promise. A successful retry returns the retained provider identity and
+appends `native-runtime-cleanup-resolved` before a normal detach fact, allowing
+the Workbench read model to retire the matching uncertainty tombstone.
 
 ## Event ordering
 

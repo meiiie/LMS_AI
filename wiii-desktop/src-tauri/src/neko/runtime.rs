@@ -805,6 +805,18 @@ impl NekoRuntime {
             }
         }
         self.wait_for_exit_supervisions();
+        // A joined supervisor may have proved termination but retained the
+        // exact terminal fact after a transient projection read/write error.
+        // Flush those newly published facts before shutdown returns so a clean
+        // application exit cannot manufacture unknown_outcome on next boot.
+        let _operation = lock(&self.inner.operations);
+        let pending = lock(&self.inner.pending_terminal_facts)
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for agent_session_id in pending {
+            let _ = self.flush_pending_terminal_fact(app, &agent_session_id);
+        }
     }
 
     fn ensure_accepting_starts(&self) -> Result<(), String> {

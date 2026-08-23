@@ -28,6 +28,7 @@ const RUNTIME_DETACH_REASONS = [
   "workspace-change",
   "config-uncertain",
   "durability-failure",
+  "replacement",
 ] as const;
 
 type RuntimeDetachReason = (typeof RUNTIME_DETACH_REASONS)[number];
@@ -135,6 +136,13 @@ export type NekoSessionEventData =
       runId: string;
       providerId: string;
       reason: string;
+    }
+  | {
+      /** A retained cleanup authority later proved that native execution stopped. */
+      type: "native-runtime-cleanup-resolved";
+      agentSessionId: string;
+      runId: string;
+      providerId: string;
     }
   | {
       type: "workspace-activity";
@@ -339,6 +347,15 @@ function isValidEventData(data: Record<string, unknown>): boolean {
         data.reason.length > 0 &&
         data.reason.length <= 4_096
       );
+    case "native-runtime-cleanup-resolved":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        typeof data.providerId === "string" &&
+        data.providerId.length > 0
+      );
     case "workspace-activity":
       return (
         typeof data.activityId === "string" &&
@@ -392,6 +409,7 @@ export function isNativeRuntimeSessionEvent(event: NekoSessionEvent): boolean {
   return (
     event.data.type === "native-runtime-reconciled" ||
     event.data.type === "native-runtime-retired" ||
-    event.data.type === "native-runtime-cleanup-uncertain"
+    event.data.type === "native-runtime-cleanup-uncertain" ||
+    event.data.type === "native-runtime-cleanup-resolved"
   );
 }

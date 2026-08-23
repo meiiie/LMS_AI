@@ -290,7 +290,7 @@ describe("RuntimeRegistry", () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const driver = new BlockingFailingDisposeDriver("s1", gate);
-    await registry.replace("s1", "neko", async () => driver);
+    const attached = await registry.replace("s1", "neko", async () => driver);
 
     const firstOutcome = registry.detach("s1").then(
       () => null,
@@ -305,7 +305,7 @@ describe("RuntimeRegistry", () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
       sessionId: "s1",
-      provider: null,
+      provider: { instanceId: attached.current.instanceId },
       error: expect.objectContaining({ message: "process kill failed" }),
     });
     expect(registry.ownedSessionIds()).toEqual(["s1"]);
@@ -392,7 +392,8 @@ describe("RuntimeRegistry", () => {
     const replacement = new FakeDriver("s1");
 
     const replacing = registry.replace("s1", "new", async () => replacement);
-    await vi.waitFor(() => expect(registry.get("s1")?.providerId).toBe("new"));
+    await vi.waitFor(() => expect(old.disposed).toBe(1));
+    expect(registry.get("s1")).toBeNull();
     const teardown = registry.disposeAll();
     releaseOld();
 
@@ -400,6 +401,26 @@ describe("RuntimeRegistry", () => {
     await teardown;
     expect(registry.get("s1")).toBeNull();
     expect(replacement.disposed).toBe(1);
+  });
+
+  it("does not publish a replacement until prior cleanup succeeds", async () => {
+    const registry = new RuntimeRegistry();
+    const old = new FlakyDisposeDriver("s1");
+    await registry.replace("s1", "old", async () => old);
+    const rejected = new FakeDriver("s1");
+
+    await expect(registry.replace("s1", "new", async () => rejected))
+      .rejects.toThrow("kill response was lost");
+
+    expect(registry.get("s1")).toBeNull();
+    expect(rejected.disposed).toBe(1);
+    expect(registry.hasRetainedCleanup("s1")).toBe(true);
+
+    const accepted = new FakeDriver("s1");
+    await expect(registry.replace("s1", "new", async () => accepted))
+      .resolves.toMatchObject({ current: { providerId: "new" } });
+    expect(old.disposed).toBe(2);
+    expect(registry.get("s1")?.providerId).toBe("new");
   });
 
   it("disposes an in-flight provider if mode teardown wins the race", async () => {
@@ -504,6 +525,27 @@ describe("RuntimeRegistry", () => {
     expect(await createOutcome).toBeInstanceOf(AggregateError);
     expect(await detachOutcome).toMatchObject({ message: "process kill failed" });
     expect(registry.get("s1")).toBeNull();
+  });
+
+  it("retains a late unowned driver as retryable cleanup authority", async () => {
+    const registry = new RuntimeRegistry();
+    const driver = new FlakyDisposeDriver("s1");
+    let finishCreate!: (driver: Driver) => void;
+    const creating = registry.replace(
+      "s1",
+      "neko",
+      async () => new Promise<Driver>((resolve) => { finishCreate = resolve; }),
+    );
+    const detaching = registry.detach("s1");
+
+    finishCreate(driver);
+    await expect(creating).rejects.toBeInstanceOf(AggregateError);
+    await expect(detaching).rejects.toThrow("kill response was lost");
+    expect(registry.hasRetainedCleanup("s1")).toBe(true);
+
+    await expect(registry.detach("s1")).resolves.toBeNull();
+    expect(driver.disposed).toBe(2);
+    expect(registry.hasRetainedCleanup("s1")).toBe(false);
   });
 
   it("owns and cancels a driver while its preparation is still pending", async () => {

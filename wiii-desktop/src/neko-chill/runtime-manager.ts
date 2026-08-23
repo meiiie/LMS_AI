@@ -14,15 +14,6 @@ import {
 type Disposer = () => void | Promise<void>;
 type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
 
-async function observeCleanup(operation: Promise<unknown>): Promise<CleanupOutcome> {
-  try {
-    await operation;
-    return { failed: false };
-  } catch (error) {
-    return { failed: true, error };
-  }
-}
-
 /**
  * Owns every resource created for one runtime. Disposal is idempotent and
  * runs in reverse registration order, matching nested resource ownership.
@@ -99,6 +90,11 @@ interface RuntimePreparation {
   complete: (outcome: { ok: true } | { ok: false; error: unknown }) => void;
 }
 
+interface RuntimeCleanupAuthority {
+  scope: RuntimeScope;
+  provider: RuntimeProviderSnapshot | null;
+}
+
 export interface RuntimeReplacement {
   current: RuntimeProviderSnapshot;
   previous: RuntimeProviderSnapshot | null;
@@ -143,7 +139,10 @@ export class RuntimeRegistry {
   private readonly sessionGenerations = new Map<string, number>();
   private readonly pendingPreparations = new Map<string, Set<RuntimePreparation>>();
   private readonly inFlightDisposals = new Map<string, Promise<void>>();
-  private readonly retainedCleanupScopes = new Map<string, Set<RuntimeScope>>();
+  private readonly retainedCleanupScopes = new Map<
+    string,
+    Map<RuntimeScope, RuntimeProviderSnapshot | null>
+  >();
   private generation = 0;
 
   get(sessionId: string): RuntimeProviderSnapshot | null {
@@ -152,6 +151,10 @@ export class RuntimeRegistry {
 
   isCurrent(sessionId: string, instanceId: string): boolean {
     return this.bindings.get(sessionId)?.provider.instanceId === instanceId;
+  }
+
+  hasRetainedCleanup(sessionId: string): boolean {
+    return (this.retainedCleanupScopes.get(sessionId)?.size ?? 0) > 0;
   }
 
   /** Sessions with either a committed provider or an owned preparation. */
@@ -198,13 +201,18 @@ export class RuntimeRegistry {
 
   private cleanupSession(
     sessionId: string,
-    scopes: Iterable<RuntimeScope>,
+    authorities: Iterable<RuntimeCleanupAuthority>,
     completions: Iterable<Promise<void>> = [],
   ): Promise<void> | null {
-    const suppliedScopes = [...new Set(scopes)];
-    if (suppliedScopes.length > 0) {
-      const retained = this.retainedCleanupScopes.get(sessionId) ?? new Set<RuntimeScope>();
-      for (const scope of suppliedScopes) retained.add(scope);
+    const suppliedAuthorities = [...authorities];
+    if (suppliedAuthorities.length > 0) {
+      const retained = this.retainedCleanupScopes.get(sessionId) ?? new Map();
+      for (const authority of suppliedAuthorities) {
+        const existing = retained.get(authority.scope);
+        if (!retained.has(authority.scope) || (existing === null && authority.provider)) {
+          retained.set(authority.scope, authority.provider);
+        }
+      }
       this.retainedCleanupScopes.set(sessionId, retained);
     }
     const completionList = [...new Set(completions)];
@@ -212,9 +220,7 @@ export class RuntimeRegistry {
       return this.joinDisposal(sessionId);
     }
     return this.joinDisposal(sessionId, async () => {
-      const retained = [
-        ...(this.retainedCleanupScopes.get(sessionId) ?? new Set<RuntimeScope>()),
-      ];
+      const retained = [...(this.retainedCleanupScopes.get(sessionId) ?? new Map()).keys()];
       const results = await Promise.allSettled([
         ...retained.map((scope) => scope.dispose()),
         ...completionList,
@@ -231,10 +237,24 @@ export class RuntimeRegistry {
     });
   }
 
-  private retainCleanupScope(sessionId: string, scope: RuntimeScope): void {
-    const retained = this.retainedCleanupScopes.get(sessionId) ?? new Set<RuntimeScope>();
-    retained.add(scope);
+  private retainCleanupScope(
+    sessionId: string,
+    scope: RuntimeScope,
+    provider: RuntimeProviderSnapshot | null = null,
+  ): void {
+    const retained = this.retainedCleanupScopes.get(sessionId) ?? new Map();
+    const existing = retained.get(scope);
+    if (!retained.has(scope) || (existing === null && provider)) {
+      retained.set(scope, provider);
+    }
     this.retainedCleanupScopes.set(sessionId, retained);
+  }
+
+  private retainedProvider(sessionId: string): RuntimeProviderSnapshot | null {
+    for (const provider of this.retainedCleanupScopes.get(sessionId)?.values() ?? []) {
+      if (provider) return provider;
+    }
+    return null;
   }
 
   requireInstance(
@@ -257,6 +277,7 @@ export class RuntimeRegistry {
     providerId: string,
     create: (instanceId: string, own: (driver: Driver) => void) => Promise<Driver>,
   ): Promise<RuntimeReplacement> {
+    const recoveredProvider = this.retainedProvider(sessionId);
     const priorCleanup = this.cleanupSession(sessionId, []);
     if (priorCleanup) await priorCleanup;
     let completePreparation!: () => void;
@@ -281,12 +302,14 @@ export class RuntimeRegistry {
     preparations.add(preparation);
     this.pendingPreparations.set(sessionId, preparations);
     let ownedDriver: Driver | null = null;
-    const unownedCleanups: Promise<void>[] = [];
+    const unownedScopes: RuntimeScope[] = [];
     let preparationCleanupFailed = false;
     let preparationCleanupError: unknown;
     const own = (driver: Driver) => {
       if (ownedDriver && ownedDriver !== driver) {
-        unownedCleanups.push(driver.dispose());
+        const scope = new RuntimeScope();
+        scope.add(() => driver.dispose());
+        unownedScopes.push(scope);
         throw new Error("Runtime preparation returned more than one driver.");
       }
       if (ownedDriver) return;
@@ -297,9 +320,21 @@ export class RuntimeRegistry {
         // Teardown may have disposed an empty preparation scope while the
         // factory was still constructing its transport. Retain this cleanup;
         // the preparation completion below does not resolve until it settles.
-        unownedCleanups.push(driver.dispose());
+        const scope = new RuntimeScope();
+        scope.add(() => driver.dispose());
+        unownedScopes.push(scope);
         throw error;
       }
+    };
+    const disposePreparation = async (): Promise<CleanupOutcome> => {
+      const scopes = [preparation.scope, ...unownedScopes];
+      const results = await Promise.allSettled(scopes.map((scope) => scope.dispose()));
+      const failed = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (!failed) return { failed: false };
+      for (const scope of scopes) this.retainCleanupScope(sessionId, scope);
+      return { failed: true, error: failed.reason };
     };
     try {
       // Transaction prepare: no registry mutation until creation succeeds.
@@ -311,18 +346,12 @@ export class RuntimeRegistry {
         driver = await create(instanceId, own);
         own(driver);
       } catch (error) {
-        const cleanupResults = await Promise.allSettled([
-          preparation.scope.dispose(),
-          ...unownedCleanups,
-        ]);
-        const cleanupError = cleanupResults.find(
-          (result): result is PromiseRejectedResult => result.status === "rejected",
-        );
-        if (cleanupError) {
+        const cleanup = await disposePreparation();
+        if (cleanup.failed) {
           preparationCleanupFailed = true;
-          preparationCleanupError = cleanupError.reason;
+          preparationCleanupError = cleanup.error;
           throw new AggregateError(
-            [error, cleanupError.reason],
+            [error, cleanup.error],
             "Runtime preparation and cleanup both failed.",
           );
         }
@@ -338,7 +367,7 @@ export class RuntimeRegistry {
         generation !== this.generation ||
         sessionGeneration !== (this.sessionGenerations.get(sessionId) ?? 0)
       ) {
-        const cleanup = await observeCleanup(preparation.scope.dispose());
+        const cleanup = await disposePreparation();
         if (cleanup.failed) {
           preparationCleanupFailed = true;
           preparationCleanupError = cleanup.error;
@@ -350,7 +379,7 @@ export class RuntimeRegistry {
         throw new Error("Runtime preparation was cancelled during teardown.");
       }
       if (driver.sessionId !== sessionId) {
-        const cleanup = await observeCleanup(preparation.scope.dispose());
+        const cleanup = await disposePreparation();
         if (cleanup.failed) {
           preparationCleanupFailed = true;
           preparationCleanupError = cleanup.error;
@@ -384,32 +413,56 @@ export class RuntimeRegistry {
       };
       const previous = this.bindings.get(sessionId) ?? null;
 
-      // Commit: all consumers resolve to the new provider identity atomically.
-      this.bindings.set(sessionId, { driver, provider, scope: preparation.scope });
-      let cleanupFailed = false;
-      let cleanupError: unknown;
+      // Revoke the old identity before cleanup, but never publish the new one
+      // until the old process/transport has been proven closed.
       if (previous) {
+        if (this.bindings.get(sessionId)?.provider.instanceId !== previous.provider.instanceId) {
+          const cleanup = await disposePreparation();
+          if (cleanup.failed) {
+            preparationCleanupFailed = true;
+            preparationCleanupError = cleanup.error;
+          }
+          throw new RuntimeProviderChangedError();
+        }
+        this.bindings.delete(sessionId);
         try {
-          await this.cleanupSession(sessionId, [previous.scope]);
+          await this.cleanupSession(sessionId, [{ scope: previous.scope, provider: previous.provider }]);
         } catch (error) {
-          cleanupFailed = true;
-          cleanupError = error;
+          const cleanup = await disposePreparation();
+          if (cleanup.failed) {
+            preparationCleanupFailed = true;
+            preparationCleanupError = cleanup.error;
+            throw new AggregateError(
+              [error, cleanup.error],
+              "Previous runtime cleanup and replacement cleanup both failed.",
+            );
+          }
+          throw error;
         }
       }
-      if (this.bindings.get(sessionId)?.provider.instanceId !== instanceId) {
-        // Teardown or another replacement won while the prior scope was
-        // closing. Never report a provider whose ownership was revoked.
+      if (
+        generation !== this.generation ||
+        sessionGeneration !== (this.sessionGenerations.get(sessionId) ?? 0) ||
+        this.bindings.has(sessionId)
+      ) {
+        const cleanup = await disposePreparation();
+        if (cleanup.failed) {
+          preparationCleanupFailed = true;
+          preparationCleanupError = cleanup.error;
+        }
         throw new RuntimeProviderChangedError();
       }
+      // Commit: all consumers resolve to the new provider identity atomically.
+      this.bindings.set(sessionId, { driver, provider, scope: preparation.scope });
       return {
         current: provider,
-        previous: previous?.provider ?? null,
-        cleanupFailed,
-        ...(cleanupFailed ? { cleanupError } : {}),
+        previous: previous?.provider ?? recoveredProvider,
+        cleanupFailed: false,
       };
     } finally {
       if (preparationCleanupFailed) {
         this.retainCleanupScope(sessionId, preparation.scope);
+        for (const scope of unownedScopes) this.retainCleanupScope(sessionId, scope);
       }
       preparation.complete(
         preparationCleanupFailed
@@ -431,20 +484,21 @@ export class RuntimeRegistry {
       (this.sessionGenerations.get(sessionId) ?? 0) + 1,
     );
     const binding = this.bindings.get(sessionId);
+    const retainedProvider = this.retainedProvider(sessionId);
     const preparations = [...(this.pendingPreparations.get(sessionId) ?? [])];
     if (binding) this.bindings.delete(sessionId);
     try {
-      const scopes = new Set([
-        ...preparations.map((preparation) => preparation.scope),
-        ...(binding ? [binding.scope] : []),
-      ]);
+      const authorities: RuntimeCleanupAuthority[] = [
+        ...preparations.map((preparation) => ({ scope: preparation.scope, provider: null })),
+        ...(binding ? [{ scope: binding.scope, provider: binding.provider }] : []),
+      ];
       const cleanup = this.cleanupSession(
         sessionId,
-        scopes,
+        authorities,
         preparations.map((preparation) => preparation.completion),
       );
       if (cleanup) await cleanup;
-      return binding?.provider ?? null;
+      return binding?.provider ?? retainedProvider;
     } finally {
       if (!this.pendingPreparations.has(sessionId)) {
         this.sessionGenerations.delete(sessionId);
@@ -459,9 +513,12 @@ export class RuntimeRegistry {
   ): Promise<RuntimeDisposalResult | null> {
     const binding = this.bindings.get(sessionId);
     if (!binding || binding.provider.instanceId !== instanceId) {
+      const provider = this.retainedProvider(sessionId);
       const cleanup = this.cleanupSession(sessionId, []);
       if (cleanup) await cleanup;
-      return null;
+      return provider
+        ? { provider, cleanupFailed: false }
+        : null;
     }
     this.sessionGenerations.set(
       sessionId,
@@ -476,7 +533,10 @@ export class RuntimeRegistry {
       const preparations = [...(this.pendingPreparations.get(sessionId) ?? [])];
       const cleanup = this.cleanupSession(
         sessionId,
-        [binding.scope, ...preparations.map((preparation) => preparation.scope)],
+        [
+          { scope: binding.scope, provider: binding.provider },
+          ...preparations.map((preparation) => ({ scope: preparation.scope, provider: null })),
+        ],
         preparations.map((preparation) => preparation.completion),
       );
       if (cleanup) await cleanup;
@@ -509,6 +569,13 @@ export class RuntimeRegistry {
     // Revoke every provider synchronously before awaiting any disposer. A
     // stalled process cannot leave unrelated sessions registered or unowned.
     this.bindings.clear();
+    const providers = new Map<string, RuntimeProviderSnapshot | null>(
+      [...sessionIds].map((sessionId) => [
+        sessionId,
+        bindings.find((binding) => binding.provider.sessionId === sessionId)?.provider ??
+          this.retainedProvider(sessionId),
+      ]),
+    );
     const cleanupFailures = new Set<string>();
     const cleanupResults = new Map<string, unknown>();
     await Promise.all([...sessionIds].map(async (sessionId) => {
@@ -520,8 +587,8 @@ export class RuntimeRegistry {
       const cleanup = this.cleanupSession(
         sessionId,
         [
-          ...sessionBindings.map((binding) => binding.scope),
-          ...sessionPreparations.map((preparation) => preparation.scope),
+          ...sessionBindings.map((binding) => ({ scope: binding.scope, provider: binding.provider })),
+          ...sessionPreparations.map((preparation) => ({ scope: preparation.scope, provider: null })),
         ],
         sessionPreparations.map((preparation) => preparation.completion),
       );
@@ -534,9 +601,7 @@ export class RuntimeRegistry {
       }
     }));
     return [...sessionIds].map((sessionId) => {
-      const provider = bindings.find(
-        (binding) => binding.provider.sessionId === sessionId,
-      )?.provider ?? null;
+      const provider = providers.get(sessionId) ?? null;
       const error = cleanupResults.get(sessionId);
       const cleanupFailed = cleanupFailures.has(sessionId);
       return {

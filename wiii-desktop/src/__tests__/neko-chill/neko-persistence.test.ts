@@ -2600,9 +2600,71 @@ describe("neko-chill persistence", () => {
       }),
     );
 
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].status = "exited";
+    });
     useNekoSessionStore.getState().setActiveSession(id);
-    await useNekoSessionStore.getState().sendPrompt("không được chạy runtime thứ hai");
+    await useNekoSessionStore.getState().sendPrompt("cleanup vẫn chưa xác định");
     expect(spawned).toHaveLength(1);
     expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+
+    spawned[0].failDispose = false;
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].status = "exited";
+    });
+    await useNekoSessionStore.getState().sendPrompt("thử lại sau khi cleanup được xác nhận");
+
+    const recovered = useNekoSessionStore.getState().sessions[id];
+    expect(spawned).toHaveLength(2);
+    expect(recovered.status).toBe("idle");
+    expect(recovered.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "native-runtime-cleanup-resolved",
+          agentSessionId: `native/${executionId}`,
+          runId: `legacy-local/run/${executionId}`,
+          providerId: "neko",
+        }),
+      }),
+    ]));
+  });
+
+  it("lets close retry a retained cleanup and records its resolution", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const executionId = launches[0].executionId!;
+    spawned[0].failDispose = true;
+    await useNekoSessionStore.getState().closeSession(id);
+
+    spawned[0].failDispose = false;
+    await useNekoSessionStore.getState().closeSession(id);
+
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(spawned[0].disposed).toBe(2);
+    expect(session).toMatchObject({ status: "exited", runtime: null, closePending: false });
+    expect(session.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "native-runtime-cleanup-resolved",
+          agentSessionId: `native/${executionId}`,
+        }),
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "runtime-detached", reason: "close" }),
+      }),
+    ]));
+  });
+
+  it("lets delete retry a retained cleanup before removing durable state", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    spawned[0].failDispose = true;
+    await useNekoSessionStore.getState().closeSession(id);
+
+    spawned[0].failDispose = false;
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(spawned[0].disposed).toBe(2);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
+    expect(storage.has(`neko-chill-native-runtime.json:session:${id}`)).toBe(false);
   });
 });

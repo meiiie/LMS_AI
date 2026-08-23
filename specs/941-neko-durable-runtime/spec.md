@@ -290,6 +290,21 @@ side-effect/committed phases become `unknown_outcome`.
   close, delete, teardown, or replacement MUST serialize behind any active
   attempt, retry only unresolved disposers, and keep replacement fail-closed
   until cleanup succeeds.
+- **FR-052**: Retained live-runtime cleanup MUST preserve the provider/native
+  session identity. A later successful retry MUST append an explicit
+  `native-runtime-cleanup-resolved` fact so an earlier uncertainty tombstone no
+  longer blocks safe close, delete, teardown, or replacement.
+- **FR-053**: A replacement driver MAY be prepared while the previous runtime
+  is live, but MUST NOT become the current binding until prior cleanup is
+  proven. If prior cleanup fails, the prepared replacement MUST be closed and
+  no replacement binding may remain observable.
+- **FR-054**: A driver that becomes owned after its preparation scope was
+  revoked MUST receive a new retryable cleanup scope. A one-shot rejected
+  Promise is not cleanup authority and MUST NOT be discarded.
+- **FR-055**: After graceful shutdown joins all published exit supervisors, it
+  MUST flush terminal facts retained by those supervisors before returning.
+  A provider probe whose leader exited MUST still classify failed descendant
+  cleanup as post-spawn cleanup uncertainty.
 
 ### Non-goals
 
@@ -331,3 +346,6 @@ side-effect/committed phases become `unknown_outcome`.
 - **SC-010**: Tests prove successful sibling disposers are not repeated, failed
   cleanup can be retried, and a replacement provider starts only after the
   retained cleanup reaches a proven result.
+- **SC-011**: Tests prove late-owned cleanup remains retryable, replacement is
+  never published across failed prior cleanup, provider identity survives
+  retry, and close/delete/respawn paths can resolve an uncertainty tombstone.

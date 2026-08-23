@@ -239,6 +239,14 @@ Implemented across the foundation and Phase 2A slices:
   rejection; later lifecycle operations reuse the provider's durable
   cancellation identity, retry only failed disposers, and block replacement
   until cleanup is proven;
+- retained cleanup also keeps provider/native-session identity; close, delete,
+  replacement, and mode-exit retries emit an explicit cleanup-resolution fact,
+  while a prepared replacement stays unpublished and is closed if prior
+  cleanup remains uncertain;
+- drivers owned after preparation teardown receive a new retryable scope;
+  graceful shutdown flushes exact facts retained by joined exit supervisors,
+  and a probe leader exit never downgrades unproven descendant cleanup to a
+  safe discovery rejection;
 - the Unix SQLite parent, database and WAL/SHM sidecars remain owner-only even
   though Windows is currently the only host authorized to probe or launch local
   providers;

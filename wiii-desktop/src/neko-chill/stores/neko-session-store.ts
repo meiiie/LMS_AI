@@ -218,10 +218,24 @@ type RuntimeCleanupOutcome =
   | { failed: false }
   | { failed: true; error: unknown };
 
+type RuntimeDetachOutcome =
+  | { failed: false; provider: RuntimeProviderSnapshot | null }
+  | { failed: true; error: unknown };
+
 async function observeRuntimeCleanup(operation: Promise<unknown>): Promise<RuntimeCleanupOutcome> {
   try {
     await operation;
     return { failed: false };
+  } catch (error) {
+    return { failed: true, error };
+  }
+}
+
+async function observeRuntimeDetach(
+  operation: Promise<RuntimeProviderSnapshot | null>,
+): Promise<RuntimeDetachOutcome> {
+  try {
+    return { failed: false, provider: await operation };
   } catch (error) {
     return { failed: true, error };
   }
@@ -261,6 +275,16 @@ function appendRuntimeCleanupFact(
     session,
     "runtime",
     {
+      type: "native-runtime-cleanup-resolved",
+      ...nativeRuntimeIdentity(provider),
+      providerId: provider.providerId,
+    },
+    at,
+  );
+  appendOwnedSessionEvent(
+    session,
+    "runtime",
+    {
       type: "runtime-detached",
       providerId: provider.providerId,
       instanceId: provider.instanceId,
@@ -287,6 +311,10 @@ function nativeRunBlocksRespawn(session: NekoSession): boolean {
     const data = session.events[index].data;
     if (data.type === "runtime-attached") break;
     if (data.type === "native-runtime-retired") {
+      safelyResolved.add(data.agentSessionId);
+      continue;
+    }
+    if (data.type === "native-runtime-cleanup-resolved") {
       safelyResolved.add(data.agentSessionId);
       continue;
     }
@@ -874,6 +902,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         set((state) => {
           const session = state.sessions[sessionId];
           if (!session) return;
+          if (replacement.previous && !replacement.cleanupFailed) {
+            appendRuntimeCleanupFact(
+              session,
+              replacement.previous,
+              "replacement",
+              { failed: false },
+            );
+          }
           session.runtime = replacement.current;
           session.backendSessionId = replacement.current.backendSessionId;
           appendOwnedSessionEvent(session, "runtime", {
@@ -1005,7 +1041,11 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       ) {
         return;
       }
-      if (!runtimes.get(sessionId) && nativeRunBlocksRespawn(session)) {
+      if (
+        !runtimes.get(sessionId) &&
+        !runtimes.hasRetainedCleanup(sessionId) &&
+        nativeRunBlocksRespawn(session)
+      ) {
         set((state) => {
           const current = state.sessions[sessionId];
           if (!current) return;
@@ -1074,6 +1114,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             set((state) => {
               const s = state.sessions[sessionId];
               if (s) {
+                if (replacement.previous && !replacement.cleanupFailed) {
+                  appendRuntimeCleanupFact(
+                    s,
+                    replacement.previous,
+                    "replacement",
+                    { failed: false },
+                  );
+                }
                 s.runtime = replacement.current;
                 s.backendSessionId = replacement.current.backendSessionId;
                 appendOwnedSessionEvent(s, "runtime", {
@@ -1721,7 +1769,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     closeSession: (sessionId) => {
       const current = get().sessions[sessionId];
       if (!current || current.deletePending) return Promise.resolve();
-      if (!current.runtime && !runtimes.get(sessionId) && nativeRunBlocksRespawn(current)) {
+      if (
+        !current.runtime &&
+        !runtimes.get(sessionId) &&
+        !runtimes.hasRetainedCleanup(sessionId) &&
+        nativeRunBlocksRespawn(current)
+      ) {
         set((state) => {
           const session = state.sessions[sessionId];
           if (!session) return;
@@ -1755,8 +1808,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           return;
         }
         await waitForHolds(dispatchBarriers, sessionId);
-        const provider = runtimes.get(sessionId) ?? get().sessions[sessionId]?.runtime ?? null;
-        const cleanup = await observeRuntimeCleanup(runtimes.detach(sessionId));
+        const expectedProvider = runtimes.get(sessionId) ?? get().sessions[sessionId]?.runtime ?? null;
+        const cleanup = await observeRuntimeDetach(runtimes.detach(sessionId));
+        const provider = cleanup.failed ? expectedProvider : cleanup.provider ?? expectedProvider;
         await waitForHolds(runtimeOperations, sessionId);
         set((state) => {
           const session = state.sessions[sessionId];
@@ -1823,6 +1877,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         refreshed &&
         !refreshed.runtime &&
         !runtimes.get(sessionId) &&
+        !runtimes.hasRetainedCleanup(sessionId) &&
         nativeRunBlocksRespawn(refreshed)
       ) {
         set((state) => {
@@ -1835,10 +1890,11 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         });
         return;
       }
-      const provider = runtimes.get(sessionId) ?? current.runtime;
+      const expectedProvider = runtimes.get(sessionId) ?? current.runtime;
       await closeOperations.get(sessionId)?.catch(() => {});
       await waitForHolds(dispatchBarriers, sessionId);
-      const cleanup = await observeRuntimeCleanup(runtimes.detach(sessionId));
+      const cleanup = await observeRuntimeDetach(runtimes.detach(sessionId));
+      const provider = cleanup.failed ? expectedProvider : cleanup.provider ?? expectedProvider;
       await waitForHolds(runtimeOperations, sessionId);
       if (cleanup.failed) {
         set((state) => {
