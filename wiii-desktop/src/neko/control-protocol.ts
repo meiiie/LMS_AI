@@ -5,11 +5,14 @@ export const NEKO_CONTROL_PROTOCOL_VERSION = 1 as const;
 export type NekoControlMethod =
   | "initialize"
   | "provider/list"
+  | "provider/profiles"
   | "session/list"
   | "session/start"
+  | "session/write"
   | "session/resume"
   | "session/cancel"
-  | "approval/resolve";
+  | "approval/resolve"
+  | "events/read";
 
 export type NekoControlErrorCode =
   | "unsupported_version"
@@ -66,12 +69,14 @@ export type NekoControlEventType = (typeof NEKO_CONTROL_EVENT_TYPES)[number];
 export interface NekoControlEvent {
   v: typeof NEKO_CONTROL_PROTOCOL_VERSION;
   eventId: string;
+  /** Durable run stream identity. Sequence is monotonic only inside this stream. */
+  streamId: string;
   seq: number;
   at: string;
   type: NekoControlEventType;
   projectId?: string;
   taskId?: string;
-  runId?: string;
+  runId: string;
   agentSessionId?: string;
   payload: Record<string, unknown>;
   providerExtensions?: Record<string, string | number | boolean | null>;
@@ -87,8 +92,10 @@ interface BaseRequest<M extends NekoControlMethod, P> {
 export type NekoControlRequest =
   | BaseRequest<"initialize", { clientName: string; clientVersion: string }>
   | BaseRequest<"provider/list", Record<string, never>>
+  | BaseRequest<"provider/profiles", { providerId: string; workspacePath: string }>
   | BaseRequest<"session/list", { projectId?: string; runId?: string }>
   | BaseRequest<"session/start", {
+      agentSessionId: string;
       taskId: string;
       runId: string;
       providerId: string;
@@ -96,6 +103,7 @@ export type NekoControlRequest =
       workspacePath: string;
       profileId?: string;
     }>
+  | BaseRequest<"session/write", { agentSessionId: string; line: string }>
   | BaseRequest<"session/resume", {
       runId: string;
       agentSessionId: string;
@@ -105,7 +113,15 @@ export type NekoControlRequest =
   | BaseRequest<"approval/resolve", {
       approvalId: string;
       decision: "approved" | "rejected" | "cancelled";
-    }>;
+    }>
+  | BaseRequest<"events/read", { streamId: string; afterSeq: number; limit: number }>;
+
+export interface NekoControlReplayPage {
+  streamId: string;
+  events: NekoControlEvent[];
+  nextAfterSeq: number;
+  hasMore: boolean;
+}
 
 export type NekoControlParseResult =
   | { ok: true; request: NekoControlRequest }
@@ -114,11 +130,14 @@ export type NekoControlParseResult =
 const METHODS = new Set<NekoControlMethod>([
   "initialize",
   "provider/list",
+  "provider/profiles",
   "session/list",
   "session/start",
+  "session/write",
   "session/resume",
   "session/cancel",
   "approval/resolve",
+  "events/read",
 ]);
 
 const ERROR_CODES = new Set<NekoControlErrorCode>([
@@ -150,6 +169,12 @@ function validParams(method: NekoControlMethod, params: Record<string, unknown>)
       return string(params.clientName) && string(params.clientVersion);
     case "provider/list":
       return Object.keys(params).length === 0;
+    case "provider/profiles":
+      return (
+        string(params.providerId) &&
+        findProviderDefinition(params.providerId) !== null &&
+        string(params.workspacePath)
+      );
     case "session/list":
       return (
         (params.projectId === undefined || string(params.projectId)) &&
@@ -157,6 +182,7 @@ function validParams(method: NekoControlMethod, params: Record<string, unknown>)
       );
     case "session/start":
       return (
+        string(params.agentSessionId) &&
         string(params.taskId) &&
         string(params.runId) &&
         string(params.providerId) &&
@@ -165,6 +191,8 @@ function validParams(method: NekoControlMethod, params: Record<string, unknown>)
         string(params.workspacePath) &&
         (params.profileId === undefined || string(params.profileId))
       );
+    case "session/write":
+      return string(params.agentSessionId) && string(params.line);
     case "session/resume":
       return string(params.runId) && string(params.agentSessionId) && string(params.providerSessionId);
     case "session/cancel":
@@ -174,7 +202,75 @@ function validParams(method: NekoControlMethod, params: Record<string, unknown>)
         string(params.approvalId) &&
         ["approved", "rejected", "cancelled"].includes(params.decision as string)
       );
+    case "events/read":
+      return (
+        string(params.streamId) &&
+        Number.isSafeInteger(params.afterSeq) &&
+        (params.afterSeq as number) >= 0 &&
+        Number.isSafeInteger(params.limit) &&
+        (params.limit as number) >= 1 &&
+        (params.limit as number) <= 500
+      );
   }
+}
+
+export function isNekoControlEvent(value: unknown): value is NekoControlEvent {
+  const event = record(value);
+  const extensions = event?.providerExtensions;
+  return Boolean(
+    event &&
+    event.v === NEKO_CONTROL_PROTOCOL_VERSION &&
+    string(event.eventId) &&
+    string(event.streamId) &&
+    Number.isSafeInteger(event.seq) &&
+    (event.seq as number) > 0 &&
+    string(event.at) &&
+    typeof event.type === "string" &&
+    NEKO_CONTROL_EVENT_TYPES.includes(event.type as NekoControlEventType) &&
+    (event.projectId === undefined || string(event.projectId)) &&
+    (event.taskId === undefined || string(event.taskId)) &&
+    string(event.runId) &&
+    (event.agentSessionId === undefined || string(event.agentSessionId)) &&
+    record(event.payload) &&
+    (
+      extensions === undefined ||
+      (
+        record(extensions) !== null &&
+        Object.values(extensions as Record<string, unknown>).every((item) =>
+          item === null || ["string", "number", "boolean"].includes(typeof item)
+        )
+      )
+    )
+  );
+}
+
+export function isNekoControlReplayPage(
+  value: unknown,
+  expectedStreamId?: string,
+  afterSeq: number = 0,
+): value is NekoControlReplayPage {
+  const page = record(value);
+  if (
+    !page ||
+    !string(page.streamId) ||
+    (expectedStreamId !== undefined && page.streamId !== expectedStreamId) ||
+    !Array.isArray(page.events) ||
+    !Number.isSafeInteger(page.nextAfterSeq) ||
+    (page.nextAfterSeq as number) < afterSeq ||
+    typeof page.hasMore !== "boolean"
+  ) return false;
+
+  let previous = afterSeq;
+  for (const event of page.events) {
+    if (
+      !isNekoControlEvent(event) ||
+      event.streamId !== page.streamId ||
+      event.seq <= previous
+    ) return false;
+    previous = event.seq;
+  }
+  if (page.hasMore && page.events.length === 0) return false;
+  return page.nextAfterSeq === previous;
 }
 
 export function parseNekoControlRequest(value: unknown): NekoControlParseResult {

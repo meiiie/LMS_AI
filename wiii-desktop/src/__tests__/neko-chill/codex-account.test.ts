@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AcpTransport } from "@/neko-chill/drivers/acp/client";
-import { CodexAccountSession } from "@/neko-chill/drivers/codex/account";
+import {
+  CodexAccountBootstrapOwner,
+  CodexAccountSession,
+} from "@/neko-chill/drivers/codex/account";
 
 class AccountTransport implements AcpTransport {
   readonly sent: Array<Record<string, unknown>> = [];
@@ -9,6 +12,8 @@ class AccountTransport implements AcpTransport {
   account: Record<string, unknown> | null = null;
   failInitialize = false;
   killed = false;
+  killCalls = 0;
+  killFailures = 0;
 
   async send(line: string): Promise<void> {
     const frame = JSON.parse(line) as Record<string, unknown>;
@@ -46,6 +51,11 @@ class AccountTransport implements AcpTransport {
   }
 
   async kill(): Promise<void> {
+    this.killCalls += 1;
+    if (this.killFailures > 0) {
+      this.killFailures -= 1;
+      throw new Error("cleanup failed");
+    }
     this.killed = true;
   }
 
@@ -116,5 +126,44 @@ describe("Codex provider-owned account session", () => {
     await expect(session.start()).rejects.toThrow("bootstrap failed");
     expect(transport.killed).toBe(true);
     await expect(session.dispose()).resolves.toBeUndefined();
+  });
+
+  it("keeps disposal retryable until native cleanup succeeds", async () => {
+    const transport = new AccountTransport();
+    transport.killFailures = 1;
+    const session = new CodexAccountSession(transport);
+
+    await expect(session.dispose()).rejects.toThrow("cleanup failed");
+    expect(transport.killed).toBe(false);
+    await expect(session.dispose()).resolves.toBeUndefined();
+    expect(transport.killCalls).toBe(2);
+    expect(transport.killed).toBe(true);
+  });
+
+  it("does not replace a bootstrap whose cleanup remains unproven", async () => {
+    const owner = new CodexAccountBootstrapOwner();
+    const firstTransport = new AccountTransport();
+    firstTransport.killFailures = 2;
+    const first = new CodexAccountSession(firstTransport);
+    await owner.replace(async () => first);
+
+    await expect(owner.release(first)).rejects.toThrow("cleanup failed");
+    expect(owner.current()).toBe(first);
+    let replacementCreated = false;
+    await expect(owner.replace(async () => {
+      replacementCreated = true;
+      return new CodexAccountSession(new AccountTransport());
+    })).rejects.toThrow("cleanup failed");
+    expect(replacementCreated).toBe(false);
+    expect(owner.current()).toBe(first);
+
+    const replacement = new CodexAccountSession(new AccountTransport());
+    await expect(owner.replace(async () => {
+      replacementCreated = true;
+      return replacement;
+    })).resolves.toBe(replacement);
+    expect(firstTransport.killCalls).toBe(3);
+    expect(owner.current()).toBe(replacement);
+    await owner.release(replacement);
   });
 });

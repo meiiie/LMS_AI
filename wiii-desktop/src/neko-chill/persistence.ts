@@ -5,7 +5,8 @@
  * Layout (versioned for future migration):
  *   neko-chill-sessions.json / "session-ids"  → string[]
  *   neko-chill-sessions.json / "index"        → SessionIndexEntry[] cache
- *   neko-chill-sessions.json / "session:{id}" → self-contained snapshot
+ *   neko-chill-sessions.json / "session:{id}" → rollback-readable conversation snapshot
+ *   neko-chill-native-runtime.json / "session:{id}" → additive runtime facts
  *
  * Writes are debounced per session so token streaming never causes a
  * full-store rewrite per delta (spec edge case: long transcripts).
@@ -22,13 +23,19 @@ import type { NekoMessage, NekoSession } from "./stores/neko-session-store";
 import type { DriverCommand, DriverConfigOption } from "./drivers/types";
 import type { AgentLaunchProfile } from "./stores/neko-agent-store";
 import { isAbsoluteWorkspacePath, type WorkspaceRef } from "./workspace";
-import { isNekoSessionEvent, type NekoSessionEvent } from "./session-events";
+import {
+  isNativeRuntimeSessionEvent,
+  isNekoSessionEvent,
+  type NekoSessionEvent,
+} from "./session-events";
 
 const STORE = "neko-chill-sessions.json";
+const NATIVE_RUNTIME_STORE = "neko-chill-native-runtime.json";
 const INDEX_KEY = "index";
 const SESSION_IDS_KEY = "session-ids";
 const INDEX_SCHEMA_VERSION = 2;
 const SCHEMA_VERSION = 2;
+const NATIVE_RUNTIME_SCHEMA_VERSION = 1;
 const DEBOUNCE_MS = 400;
 
 export interface SessionIndexEntry {
@@ -55,6 +62,11 @@ interface PersistedTranscript {
   eventHighWaterMark?: number;
   /** Authoritative materialized metadata; index is only a discovery cache. */
   entry?: SessionIndexEntry;
+}
+
+interface PersistedNativeRuntimeState {
+  v: typeof NATIVE_RUNTIME_SCHEMA_VERSION;
+  events: NekoSessionEvent[];
 }
 
 export interface LoadedSessionSnapshot {
@@ -265,6 +277,38 @@ function parsePersistedTranscript(
   return transcript as PersistedTranscript;
 }
 
+function parsePersistedNativeRuntimeState(
+  value: unknown,
+  sessionId: string,
+): NekoSessionEvent[] {
+  if (value === undefined) return [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Checkpoint runtime native của phiên ${sessionId} có schema không hợp lệ.`);
+  }
+  const state = value as Partial<PersistedNativeRuntimeState>;
+  if (
+    state.v !== NATIVE_RUNTIME_SCHEMA_VERSION ||
+    !Array.isArray(state.events) ||
+    !state.events.every((event) => isNekoSessionEvent(event) && isNativeRuntimeSessionEvent(event)) ||
+    !state.events.every((event, index, events) => index === 0 || event.seq > events[index - 1].seq)
+  ) {
+    throw new Error(`Checkpoint runtime native của phiên ${sessionId} có schema không hợp lệ.`);
+  }
+  return state.events;
+}
+
+function mergeSessionEvents(
+  sessionId: string,
+  transcriptEvents: NekoSessionEvent[],
+  nativeEvents: NekoSessionEvent[],
+): NekoSessionEvent[] {
+  const merged = [...transcriptEvents, ...nativeEvents].sort((left, right) => left.seq - right.seq);
+  if (!merged.every((event, index, events) => index === 0 || event.seq > events[index - 1].seq)) {
+    throw new Error(`Phiên ${sessionId} có sequence sự kiện bền bị trùng.`);
+  }
+  return merged;
+}
+
 async function writeSession(session: NekoSession, strict: boolean): Promise<void> {
   const entry: SessionIndexEntry = {
     v: INDEX_SCHEMA_VERSION,
@@ -301,13 +345,26 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     publishedIds.add(session.id);
   }
 
-  // This per-session key is the authoritative, self-contained snapshot. A
-  // crash may leave stale index metadata, but hydration reconciles from here.
+  // This per-session key is the authoritative conversation snapshot. A crash
+  // may leave stale index metadata, but hydration reconciles from here and the
+  // additive native companion written first below.
   const write = strict ? saveStoreStrict : saveStore;
+  const nativeEvents = session.events.filter(isNativeRuntimeSessionEvent);
+  const transcriptEvents = session.events.filter((event) => !isNativeRuntimeSessionEvent(event));
+  // Native lifecycle facts are the safety boundary. Publish them before the
+  // backward-compatible transcript so a later transcript failure is detected
+  // as a high-water mismatch instead of silently hiding a native side effect.
+  await write<PersistedNativeRuntimeState>(NATIVE_RUNTIME_STORE, `session:${session.id}`, {
+    v: NATIVE_RUNTIME_SCHEMA_VERSION,
+    events: nativeEvents,
+  });
   await write<PersistedTranscript>(STORE, `session:${session.id}`, {
     v: SCHEMA_VERSION,
     messages: session.messages,
-    events: session.events,
+    // Keep this shared v2 snapshot readable by the previous desktop release.
+    // New native projection discriminators live in an additive companion store
+    // so reverting the application cannot strand the user's conversations.
+    events: transcriptEvents,
     eventHighWaterMark: session.eventHighWaterMark,
     entry,
   });
@@ -433,11 +490,21 @@ export async function loadSessionSnapshot(sessionId: string): Promise<LoadedSess
       needsEventMigration: true,
     };
   }
-  const lastSeq = stored.events![stored.events!.length - 1]?.seq ?? 0;
+  const nativeEvents = parsePersistedNativeRuntimeState(
+    await loadStoreStrict<unknown>(NATIVE_RUNTIME_STORE, `session:${sessionId}`, undefined),
+    sessionId,
+  );
+  const events = mergeSessionEvents(sessionId, stored.events!, nativeEvents);
+  const lastSeq = events[events.length - 1]?.seq ?? 0;
+  // Native facts are written first. A crash before the compatible transcript
+  // write can therefore leave this validated companion one generation ahead.
+  // Repair only the allocator high-water mark from the merged append-only log;
+  // messages and transcript-owned events remain owned by the transcript.
+  const eventHighWaterMark = Math.max(stored.eventHighWaterMark ?? 0, lastSeq);
   return {
     messages: stored.messages,
-    events: stored.events!,
-    eventHighWaterMark: stored.eventHighWaterMark ?? lastSeq,
+    events,
+    eventHighWaterMark,
     needsEventMigration: false,
   };
 }
@@ -455,6 +522,7 @@ async function performDeletePersistedSession(sessionId: string): Promise<void> {
   }
   await writeChains.get(sessionId)?.catch(() => {});
   const snapshotKey = `session:${sessionId}`;
+  const nativeSnapshotKey = `session:${sessionId}`;
   // Hold the catalog chain from validation through metadata commit. A
   // malformed catalog must fail before the destructive snapshot delete.
   const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
@@ -462,12 +530,20 @@ async function performDeletePersistedSession(sessionId: string): Promise<void> {
       await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
     );
     const snapshot = await loadStoreStrict<unknown>(STORE, snapshotKey, undefined);
+    const nativeSnapshot = await loadStoreStrict<unknown>(
+      NATIVE_RUNTIME_STORE,
+      nativeSnapshotKey,
+      undefined,
+    );
     const previousIndex = await loadStoreStrict<unknown>(STORE, INDEX_KEY, undefined);
     const indexBackup = Array.isArray(previousIndex) ? previousIndex : null;
     let snapshotDeleteAttempted = false;
+    let nativeSnapshotDeleteAttempted = false;
     try {
       snapshotDeleteAttempted = true;
       await deleteStoreStrict(STORE, snapshotKey);
+      nativeSnapshotDeleteAttempted = true;
+      await deleteStoreStrict(NATIVE_RUNTIME_STORE, nativeSnapshotKey);
       const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
         let indexAttempted = false;
         let catalogAttempted = false;
@@ -520,15 +596,26 @@ async function performDeletePersistedSession(sessionId: string): Promise<void> {
       indexWriteChain = indexOperation.catch(() => {});
       await indexOperation;
     } catch (error) {
+      const rollbackErrors: unknown[] = [];
       if (snapshotDeleteAttempted && snapshot !== undefined) {
         try {
           await saveStoreStrict(STORE, snapshotKey, snapshot);
         } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            `Không thể xóa hoặc khôi phục snapshot phiên ${sessionId}.`,
-          );
+          rollbackErrors.push(rollbackError);
         }
+      }
+      if (nativeSnapshotDeleteAttempted && nativeSnapshot !== undefined) {
+        try {
+          await saveStoreStrict(NATIVE_RUNTIME_STORE, nativeSnapshotKey, nativeSnapshot);
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          `Không thể xóa hoặc khôi phục snapshot phiên ${sessionId}.`,
+        );
       }
       throw error;
     }

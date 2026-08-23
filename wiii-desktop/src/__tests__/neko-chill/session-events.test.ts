@@ -100,6 +100,41 @@ describe("Neko session event validation", () => {
       providerInstanceId: "provider-1",
       delivery: "staged",
     }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "native-runtime-reconciled",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      state: "unknown_outcome",
+      operationPhase: "unknown_outcome",
+      continuity: "unknown_outcome",
+      replayedFromSeq: 2,
+      replayedThroughSeq: 7,
+      replayedEventCount: 5,
+    }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "native-runtime-retired",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      reason: "projection-pruned",
+    }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "native-runtime-cleanup-uncertain",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      reason: "unknown_outcome: cancellation response was lost",
+    }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "native-runtime-cleanup-resolved",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+    }))).toBe(true);
   });
 
   it.each([
@@ -113,6 +148,49 @@ describe("Neko session event validation", () => {
     { type: "runtime-attached", provider: { instanceId: "provider-1" } },
     { type: "runtime-detached", providerId: "neko", instanceId: "provider-1" },
     { type: "runtime-attach-failed", providerId: "neko" },
+    {
+      type: "native-runtime-reconciled",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      state: "running",
+      operationPhase: "committed",
+      continuity: "active",
+      replayedFromSeq: 5,
+      replayedThroughSeq: 4,
+      replayedEventCount: 1,
+    },
+    {
+      type: "native-runtime-reconciled",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      state: "running",
+      operationPhase: "committed",
+      continuity: "active",
+      replayedFromSeq: 0,
+      replayedThroughSeq: 0,
+      replayedEventCount: -1,
+    },
+    {
+      type: "native-runtime-retired",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      reason: "forgotten",
+    },
+    {
+      type: "native-runtime-cleanup-uncertain",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      reason: "",
+    },
+    {
+      type: "native-runtime-cleanup-resolved",
+      agentSessionId: "native-session-1",
+      runId: "",
+      providerId: "neko",
+    },
   ])("rejects a malformed $type payload", (data) => {
     expect(isNekoSessionEvent({
       v: 1,

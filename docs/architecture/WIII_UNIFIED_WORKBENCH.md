@@ -107,10 +107,12 @@ read an arbitrary local folder.
 The owning checks cover pure host derivation, capability filtering, local-first
 bootstrap, legacy migration, browser fail-closed behavior, Codex protocol
 fixtures, provider-owned login, knowledge schema validation, pre-dispatch
-durability, replay, TypeScript, web/embed builds, Rust detection, and focused
-backend retrieval tests.
+durability, TypeScript, web/embed builds, focused backend retrieval tests, and
+the native Neko contracts for provider-scoped launch, request idempotency,
+SQLite WAL recovery, per-run ordering and bounded cursor replay.
 
-Rollback is additive: retain the new event parser and stored surface key, hide
-new connection entry points, and restore the former surface renderer. Never
-delete session snapshots, provider thread IDs, account records, or the new
-knowledge events during rollback.
+Rollback must revert the complete desktop release so the renderer, native Neko
+commands and capability set remain compatible. Never restore raw process
+permissions as a partial fallback. Preserve the additive Neko journal, session
+snapshots, provider thread IDs and recovery evidence; uncertain operations must
+remain non-replayable after a later upgrade.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, Check, FolderOpen, LoaderCircle, ShieldCheck } from "lucide-react";
 import {
   loadAgentProfiles,
@@ -10,12 +10,17 @@ import { useNekoSessionStore } from "../stores/neko-session-store";
 import { getNekoControlClient } from "@/neko/control-client";
 import {
   CodexAccountSession,
+  getCodexAccountBootstrapOwner,
   type CodexAccountSummary,
 } from "../drivers/codex/account";
 import {
   chooseWorkspaceFolder,
   type WorkspaceRef,
 } from "../workspace";
+import {
+  codexBootstrapIdentity,
+  spawnCodexAccountBootstrap,
+} from "../codex-bootstrap-identity";
 
 function recentWorkspaces(): WorkspaceRef[] {
   const seen = new Set<string>();
@@ -30,7 +35,7 @@ function recentWorkspaces(): WorkspaceRef[] {
 }
 
 export function NewSessionView() {
-  const { agents, isLoading } = useNekoAgentStore();
+  const { agents, isLoading, error: discoveryError, detect } = useNekoAgentStore();
   const createSession = useNekoSessionStore((state) => state.createSession);
   const sessions = useNekoSessionStore((state) => state.sessions);
   const [workspace, setWorkspace] = useState<WorkspaceRef | null>(null);
@@ -45,7 +50,7 @@ export function NewSessionView() {
   >("idle");
   const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
   const [codexBootstrapAttempt, setCodexBootstrapAttempt] = useState(0);
-  const codexAccountSession = useRef<CodexAccountSession | null>(null);
+  const codexAccountOwner = getCodexAccountBootstrapOwner();
   const recent = useMemo(() => recentWorkspaces(), [sessions]);
   const neko = agents.find((agent) => agent.id === "neko" && agent.found);
   const codex = agents.find((agent) => agent.id === "codex" && agent.found);
@@ -55,46 +60,62 @@ export function NewSessionView() {
     if (!workspace || !neko) {
       setProfiles([]);
       setSelectedProfileId("");
+      setProfileLoading(false);
       return;
     }
     setProfileLoading(true);
-    void loadAgentProfiles(neko, workspace.path).then((items) => {
-      if (cancelled) return;
-      setProfiles(items);
-      const active = items.find((item) => item.active) ?? items[0];
-      setSelectedProfileId(active?.id ?? "");
-      setProfileLoading(false);
-    });
+    void loadAgentProfiles(neko, workspace.path)
+      .then((items) => {
+        if (cancelled) return;
+        setProfiles(items);
+        const active = items.find((item) => item.active) ?? items[0];
+        setSelectedProfileId(active?.id ?? "");
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setProfiles([]);
+        setSelectedProfileId("");
+        setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [neko?.binary, workspace?.path]);
+  }, [neko?.found, workspace?.path]);
 
   useEffect(() => {
     let cancelled = false;
     let bootstrapSession: CodexAccountSession | null = null;
-    const previous = codexAccountSession.current;
-    codexAccountSession.current = null;
-    if (previous) void previous.dispose();
     setCodexAccount(null);
     setCodexLoginUrl(null);
-    if (!workspace || !codex?.binary) {
+    if (!workspace || !codex?.found) {
       setCodexAccountState("idle");
+      void codexAccountOwner.release().catch(() => {
+        // Ownership remains in the module-level owner and the next bootstrap
+        // retries cleanup before it can launch another App Server.
+      });
       return;
     }
 
     setCodexAccountState("checking");
-    void getNekoControlClient().spawnProvider({
-      providerId: "codex",
-    })
-      .then(async ({ transport }) => {
-        const session = new CodexAccountSession(transport);
+    const bootstrapIdentity = codexBootstrapIdentity(workspace.path);
+    void codexAccountOwner
+      .replace(async () => {
+        const controlClient = getNekoControlClient();
+        const { transport } = await spawnCodexAccountBootstrap(
+          controlClient,
+          bootstrapIdentity,
+        );
+        return new CodexAccountSession(transport);
+      })
+      .then(async (session) => {
         bootstrapSession = session;
         if (cancelled) {
-          await session.dispose();
+          await codexAccountOwner.release(session);
           return;
         }
-        codexAccountSession.current = session;
         const account = await session.start();
         if (cancelled) return;
         setCodexAccount(account);
@@ -102,22 +123,30 @@ export function NewSessionView() {
       })
       .catch(async (cause) => {
         const failed = bootstrapSession;
-        if (codexAccountSession.current === failed) {
-          codexAccountSession.current = null;
+        let reported = cause;
+        if (failed) {
+          try {
+            await codexAccountOwner.release(failed);
+          } catch (cleanup) {
+            const detail = cleanup instanceof Error ? cleanup.message : String(cleanup);
+            const original = cause instanceof Error ? cause.message : String(cause);
+            reported = new Error(`${original}; cleanup vẫn chưa hoàn tất: ${detail}`);
+          }
         }
-        if (failed) await failed.dispose();
         if (cancelled) return;
         setCodexAccountState("error");
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(reported instanceof Error ? reported.message : String(reported));
       });
 
     return () => {
       cancelled = true;
-      const current = codexAccountSession.current;
-      codexAccountSession.current = null;
-      if (current) void current.dispose();
+      if (bootstrapSession) {
+        void codexAccountOwner.release(bootstrapSession).catch(() => {
+          // A failed cleanup stays owned and is retried before replacement.
+        });
+      }
     };
-  }, [codex?.binary, workspace?.path, codexBootstrapAttempt]);
+  }, [codex?.found, workspace?.path, codexBootstrapAttempt]);
 
   const chooseWorkspace = async () => {
     const selected = await chooseWorkspaceFolder();
@@ -145,7 +174,7 @@ export function NewSessionView() {
   };
 
   const loginCodex = async () => {
-    const session = codexAccountSession.current;
+    const session = codexAccountOwner.current();
     if (!session) return;
     setCodexAccountState("logging-in");
     setError(null);
@@ -247,6 +276,20 @@ export function NewSessionView() {
               Chọn một dự án trước. Neko Chill sẽ chỉ sau đó đọc các agent,
               profile và model thật sự có trên máy bạn.
             </div>
+          ) : discoveryError ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-[var(--nk-danger)]/30 bg-[var(--nk-composer)] p-4 text-[12.5px] leading-5 text-[var(--nk-danger)]"
+            >
+              <p>{discoveryError}</p>
+              <button
+                type="button"
+                className="mt-3 rounded-lg border border-[var(--nk-border-strong)] px-2.5 py-1.5 text-[11.5px] text-[var(--nk-text-2)] hover:bg-[var(--nk-raised)]"
+                onClick={() => void detect()}
+              >
+                Thử dò lại
+              </button>
+            </div>
           ) : isLoading ? (
             <p className="flex items-center gap-2 py-4 text-[13px] text-[var(--nk-text-3)]">
               <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> Đang dò agent…
@@ -269,7 +312,11 @@ export function NewSessionView() {
                           {agent.name}
                         </strong>
                         <span className="block truncate text-[11px] text-[var(--nk-text-3)]">
-                          {agent.found ? agent.version : "Chưa cài trên máy này"}
+                          {agent.found
+                            ? agent.version
+                            : agent.availability === "host_unsupported"
+                              ? "Máy này chưa có cơ chế cô lập process được Wiii chấp thuận"
+                              : "Chưa cài trên máy này"}
                         </span>
                       </div>
                       <button

@@ -51,6 +51,7 @@ describe("Neko Chill shell UI", () => {
     useNekoAgentStore.setState({
       agents: [],
       isLoading: false,
+      error: null,
       detect: vi.fn(async () => {}),
     });
     useNekoSessionStore.setState({
@@ -506,9 +507,10 @@ describe("Neko Chill shell UI", () => {
     const agent = {
       id: "neko",
       name: "Neko Core",
-      binary: "neko",
       version: "0.24.0",
       found: true,
+      availability: "available",
+      supportsProfiles: true,
     };
     useNekoAgentStore.setState({ agents: [agent], isLoading: false });
     useNekoSessionStore.setState({
@@ -537,5 +539,60 @@ describe("Neko Chill shell UI", () => {
         null,
       );
     });
+  });
+
+  it("explains host containment limits instead of claiming the provider is missing", async () => {
+    useNekoAgentStore.setState({
+      agents: [{
+        id: "neko",
+        name: "Neko Core",
+        version: null,
+        found: false,
+        availability: "host_unsupported",
+        supportsProfiles: true,
+      }],
+      isLoading: false,
+    });
+    useNekoSessionStore.setState({
+      sessions: {
+        recent: makeSession("recent", "Lịch sử", {
+          path: "C:/Users/me/project",
+          name: "project",
+        }),
+      },
+      activeSessionId: null,
+    });
+
+    render(<NekoChillApp />);
+    fireEvent.click(screen.getByRole("button", { name: "project" }));
+
+    expect(await screen.findByText(/chưa có cơ chế cô lập process/)).toBeTruthy();
+    expect(screen.queryByText("Chưa cài trên máy này")).toBeNull();
+  });
+
+  it("recovers provider discovery failures without leaving the launcher loading", () => {
+    const detect = vi.fn(async () => {});
+    useNekoAgentStore.setState({
+      agents: [],
+      isLoading: false,
+      error: "Không thể dò agent cục bộ: journal unavailable",
+      detect,
+    });
+    useNekoSessionStore.setState({
+      sessions: {
+        recent: makeSession("recent", "Lịch sử", {
+          path: "C:/Users/me/project",
+          name: "project",
+        }),
+      },
+      activeSessionId: null,
+    });
+
+    render(<NekoChillApp />);
+    fireEvent.click(screen.getByRole("button", { name: "project" }));
+    expect(screen.getByRole("alert").textContent).toContain("journal unavailable");
+    expect(screen.queryByText(/Đang dò agent/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Thử dò lại" }));
+    expect(detect).toHaveBeenCalledTimes(2);
   });
 });

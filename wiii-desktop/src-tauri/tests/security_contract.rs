@@ -76,3 +76,40 @@ fn tauri_config_enables_only_the_reviewed_capability_set() {
         ])
     );
 }
+
+#[test]
+fn main_webview_has_no_raw_agent_process_primitive() {
+    let agents = read_json("capabilities/workbench-agents.json");
+    let windows = agents["windows"]
+        .as_array()
+        .expect("agent capability declares windows");
+    assert_eq!(windows, serde_json::json!(["main"]).as_array().unwrap());
+    let permissions = agents["permissions"]
+        .as_array()
+        .expect("agent capability declares permissions")
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .or_else(|| entry.get("identifier").and_then(serde_json::Value::as_str))
+                .expect("permission is a string or scoped identifier")
+        })
+        .collect::<Vec<_>>();
+
+    let mut granted = permissions;
+    granted.sort_unstable();
+    let mut reviewed = vec![
+        "allow-neko-control-provider-list",
+        "allow-neko-control-provider-profiles",
+        "allow-neko-control-session-list",
+        "allow-neko-control-session-start",
+        "allow-neko-control-session-write",
+        "allow-neko-control-session-cancel",
+        "allow-neko-control-events-read",
+    ];
+    reviewed.sort_unstable();
+    assert_eq!(
+        granted, reviewed,
+        "agent capability grants an unreviewed permission set"
+    );
+}

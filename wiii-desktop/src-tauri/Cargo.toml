@@ -4,6 +4,7 @@ version = "1.2.0"
 description = "Wiii — durable AI workbench by The Wiii Lab"
 authors = ["Meiiie (The Wiii Lab)"]
 edition = "2021"
+rust-version = "1.89"
 license = "AGPL-3.0-only"
 homepage = "https://wiii.holilihu.online"
 repository = "https://github.com/meiiie/wiii"
@@ -22,7 +23,24 @@ tauri-plugin-http = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 tokio = { version = "1", features = ["net"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+uuid = { version = "1.25.0", features = ["v4"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+sha2 = "0.10.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }

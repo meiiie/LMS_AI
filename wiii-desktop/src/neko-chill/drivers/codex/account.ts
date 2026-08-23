@@ -33,6 +33,7 @@ function record(value: unknown): JsonRecord | null {
 export class CodexAccountSession {
   private readonly client: AcpJsonRpcClient;
   private disposed = false;
+  private disposePromise: Promise<void> | null = null;
   private readonly completed = new Map<string, LoginCompletion>();
   private readonly waiters = new Map<
     string,
@@ -124,8 +125,17 @@ export class CodexAccountSession {
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
-    this.disposed = true;
-    await this.client.dispose();
+    if (this.disposePromise) return this.disposePromise;
+    const attempt = this.client.dispose().then(() => {
+      this.disposed = true;
+    });
+    this.disposePromise = attempt;
+    try {
+      await attempt;
+    } catch (error) {
+      if (this.disposePromise === attempt) this.disposePromise = null;
+      throw error;
+    }
   }
 
   private handleNotification(method: string, value: unknown): void {
@@ -145,4 +155,56 @@ export class CodexAccountSession {
       this.completed.set(loginId, result);
     }
   }
+}
+
+/**
+ * Owns the transient Codex account App Server outside React's lifecycle.
+ * Replacement and cleanup are serialized; a rejected cleanup keeps the same
+ * session authoritative so a later retry cannot silently launch beside it.
+ */
+export class CodexAccountBootstrapOwner {
+  private session: CodexAccountSession | null = null;
+  private queue: Promise<void> = Promise.resolve();
+
+  current(): CodexAccountSession | null {
+    return this.session;
+  }
+
+  replace(factory: () => Promise<CodexAccountSession>): Promise<CodexAccountSession> {
+    return this.exclusive(async () => {
+      await this.disposeCurrent();
+      const session = await factory();
+      this.session = session;
+      return session;
+    });
+  }
+
+  release(expected?: CodexAccountSession): Promise<void> {
+    return this.exclusive(async () => {
+      if (expected && this.session !== expected) return;
+      await this.disposeCurrent();
+    });
+  }
+
+  private async disposeCurrent(): Promise<void> {
+    const current = this.session;
+    if (!current) return;
+    await current.dispose();
+    if (this.session === current) this.session = null;
+  }
+
+  private exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(operation, operation);
+    this.queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+}
+
+const codexAccountBootstrapOwner = new CodexAccountBootstrapOwner();
+
+export function getCodexAccountBootstrapOwner(): CodexAccountBootstrapOwner {
+  return codexAccountBootstrapOwner;
 }

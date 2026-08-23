@@ -11,6 +11,8 @@ class FakeCodexTransport implements AcpTransport {
   private lineHandler: ((line: string) => void) | null = null;
   private exitHandler: ((code: number | null) => void) | null = null;
   killed = false;
+  killCalls = 0;
+  killFailures = 0;
   completeSynchronously = false;
   returnTurnId = true;
   modelData: unknown[] = [
@@ -80,6 +82,11 @@ class FakeCodexTransport implements AcpTransport {
   }
 
   async kill(): Promise<void> {
+    this.killCalls += 1;
+    if (this.killFailures > 0) {
+      this.killFailures -= 1;
+      throw new Error("cancel response lost");
+    }
     this.killed = true;
   }
 
@@ -233,6 +240,18 @@ describe("Codex App Server driver", () => {
         error: expect.objectContaining({ code: -32601 }),
       }));
     });
+  });
+
+  it("retries cleanup with the same transport after a lost cancellation response", async () => {
+    const { driver, transport } = await startFixture();
+    transport.killFailures = 1;
+
+    await expect(driver.dispose()).rejects.toThrow("cancel response lost");
+    await expect(driver.dispose()).resolves.toBeUndefined();
+    await expect(driver.dispose()).resolves.toBeUndefined();
+
+    expect(transport.killCalls).toBe(2);
+    expect(transport.killed).toBe(true);
   });
 });
 

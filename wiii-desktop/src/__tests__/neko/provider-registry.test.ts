@@ -5,12 +5,11 @@ import {
 import {
   createProviderCapabilitySnapshot,
   listProviderDefinitions,
-  providerLaunchArgs,
   requireProviderDefinition,
 } from "@/neko/provider-registry";
 
 describe("Neko provider registry", () => {
-  it("is the launch truth for every currently implemented local provider", () => {
+  it("is the product metadata truth without WebView launch arguments", () => {
     expect(listProviderDefinitions().map((provider) => ({
       id: provider.id,
       capabilityId: provider.capabilityId,
@@ -41,18 +40,17 @@ describe("Neko provider registry", () => {
       },
     ]);
 
-    expect(providerLaunchArgs("neko", "research")).toEqual([
-      "acp",
-      "--profile",
-      "research",
-    ]);
-    expect(providerLaunchArgs("gemini")).toEqual(["--experimental-acp"]);
-    expect(providerLaunchArgs("codex")).toEqual(["app-server"]);
+    for (const provider of listProviderDefinitions()) {
+      expect(provider).not.toHaveProperty("launchArgs");
+      expect(provider).not.toHaveProperty("profileArgument");
+      expect(provider).not.toHaveProperty("binary");
+      expect(provider).not.toHaveProperty("executable");
+      expect(provider).not.toHaveProperty("command");
+    }
   });
 
   it("fails closed for an unknown provider", () => {
     expect(() => requireProviderDefinition("unknown")).toThrow(/unknown/i);
-    expect(() => providerLaunchArgs("unknown")).toThrow(/unknown/i);
   });
 
   it("creates a versioned, bounded historical capability snapshot", () => {

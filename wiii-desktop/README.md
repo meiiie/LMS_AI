@@ -28,6 +28,24 @@ ACP runtimes reconnect with `session/resume`; Codex reconnects with
 different session. Interrupted mutations remain `unknown outcome` and are
 never replayed automatically.
 
+For local execution, the in-process Rust Neko runtime is authoritative for the
+approved provider launch contract, child-process ownership, native
+agent-session lifecycle, request idempotency and ordered lifecycle replay.
+React never supplies an executable, argument vector or PID. SQLite stores
+bounded lifecycle facts only; provider frames, prompts and high-volume output
+remain with their existing protocol/session owners. A standalone daemon is a
+later phase and is not implied by this boundary.
+
+Restored local sessions reconcile native state and cursor replay before the UI
+can resume work, then re-read native state after replay so a concurrent exit is
+not left displayed as active. An uncertain or still-active native execution
+without a live renderer channel is shown fail-closed instead of being silently
+started a second time. Unresolved starts retain their original execution and
+early transport buffer across renderer retries. Unix journal data is stored in
+an owner-only directory with owner-only SQLite files. Local provider execution
+is currently authorized on Windows only; Linux/macOS packages fail closed before
+spawn until Wiii has a containment primitive that a same-UID child cannot escape.
+
 Wiii Knowledge is independent from the selected runtime. When enabled, its
 retrieved evidence and citation metadata cross the same durability barrier as
 the user prompt before any model can observe them. A RAG outage degrades that
@@ -160,6 +178,8 @@ installer derivatives.
 - Keep mutating host actions behind preview and explicit approval.
 - Preserve session IDs and recovery state; do not convert resume failure into a
   new invisible conversation.
+- Do not treat an empty native session list as recovery from a journal error;
+  native authority failures must remain visible.
 - Keep Neko motion state-driven, brief, interruptible, and reduced-motion safe.
 
 See the repository [`AGENTS.md`](../AGENTS.md) and desktop

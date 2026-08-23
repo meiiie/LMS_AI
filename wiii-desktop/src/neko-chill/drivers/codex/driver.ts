@@ -256,6 +256,8 @@ export class CodexAppServerDriver implements Driver {
   private readonly completedBeforeWait = new Map<string, TurnStopReason>();
   private finishTurn: ((reason: TurnStopReason) => void) | null = null;
   private disposed = false;
+  private disposalStarted = false;
+  private disposePromise: Promise<void> | null = null;
 
   get backendSessionId(): string | null {
     return this.threadId;
@@ -419,13 +421,23 @@ export class CodexAppServerDriver implements Driver {
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
-    this.disposed = true;
+    if (this.disposePromise) return this.disposePromise;
+    this.disposalStarted = true;
     for (const [, pending] of this.approvals) pending.resolve({ decision: "cancel" });
     this.approvals.clear();
     this.completedBeforeWait.clear();
     this.finishTurn?.("cancelled");
     this.finishTurn = null;
-    await this.client.dispose();
+    const attempt = this.client.dispose().then(() => {
+      this.disposed = true;
+    });
+    this.disposePromise = attempt;
+    try {
+      await attempt;
+    } catch (error) {
+      if (this.disposePromise === attempt) this.disposePromise = null;
+      throw error;
+    }
   }
 
   private controlValue(id: string): string | undefined {
@@ -546,6 +558,6 @@ export class CodexAppServerDriver implements Driver {
   }
 
   private emitEvent(event: DriverEvent): void {
-    if (!this.disposed) this.emit(event);
+    if (!this.disposalStarted) this.emit(event);
   }
 }

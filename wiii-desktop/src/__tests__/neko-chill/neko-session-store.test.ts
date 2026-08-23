@@ -39,9 +39,10 @@ import { useNekoAgentStore } from "@/neko-chill/stores/neko-agent-store";
 const AGENT: DetectedAgent = {
   id: "neko",
   name: "Neko Core",
-  binary: "neko",
   version: "0.24.0",
   found: true,
+  availability: "available",
+  supportsProfiles: true,
 };
 const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
@@ -88,6 +89,7 @@ class FakeDriver implements Driver {
 let driver: FakeDriver;
 let launchConfig: {
   workspace: typeof WORKSPACE;
+  executionId?: string;
   profileId?: string;
   backendSessionId?: string | null;
 } | undefined;
@@ -118,6 +120,8 @@ describe("neko-session-store", () => {
     expect(useNekoSessionStore.getState().activeSessionId).toBe(id);
     expect(session(id).workspace).toEqual(WORKSPACE);
     expect(launchConfig?.workspace).toEqual(WORKSPACE);
+    expect(launchConfig?.executionId).toEqual(expect.any(String));
+    expect(launchConfig?.executionId).not.toBe(id);
     expect(launchConfig?.backendSessionId).toBeNull();
     expect(session(id).backendSessionId).toBe(`backend-${id}`);
 

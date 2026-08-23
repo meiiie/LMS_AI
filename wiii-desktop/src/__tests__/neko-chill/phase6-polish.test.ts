@@ -135,21 +135,31 @@ describe("T601 — idle reap", () => {
 const AGENT: DetectedAgent = {
     id: "neko",
     name: "Neko Core",
-    binary: "neko",
     version: "0.24.0",
     found: true,
+    availability: "available",
+    supportsProfiles: true,
 };
 const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   class FakeDriver implements Driver {
     readonly kind = "acp" as const;
-    readonly runtime: Driver["runtime"] = {
-      capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
-      contextContinuity: "process",
-      workspaceIsolation: "advisory",
-    };
+    readonly runtime: Driver["runtime"];
     disposed = 0;
-    constructor(readonly sessionId: string) {}
+    failDispose = false;
+    failDisposeWithoutReason = false;
+    failDisposeWithoutStringifier = false;
+    constructor(readonly sessionId: string, executionId: string) {
+      this.runtime = {
+        capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
+        contextContinuity: "process",
+        workspaceIsolation: "advisory",
+        providerExtensions: {
+          nativeAgentSessionId: `native/${executionId}`,
+          nativeRunId: `run/${executionId}`,
+        },
+      };
+    }
     async start(): Promise<void> {}
     async prompt(): Promise<void> {}
     async cancel(): Promise<void> {}
@@ -157,10 +167,14 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     async setConfigOption(): Promise<void> {}
     async dispose(): Promise<void> {
       this.disposed += 1;
+      if (this.failDisposeWithoutReason) return Promise.reject(undefined);
+      if (this.failDisposeWithoutStringifier) return Promise.reject(Object.create(null));
+      if (this.failDispose) throw new Error("native cancellation outcome lost");
     }
   }
 
   let driver: FakeDriver;
+  let createdDrivers: number;
 
   beforeEach(() => {
     storage.clear();
@@ -172,8 +186,10 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
       hydrationError: null,
     });
     _clearLiveDriversForTests();
-    _setDriverFactoryForTests(async (_agent, sessionId) => {
-      driver = new FakeDriver(sessionId);
+    createdDrivers = 0;
+    _setDriverFactoryForTests(async (_agent, sessionId, launch) => {
+      createdDrivers += 1;
+      driver = new FakeDriver(sessionId, launch.executionId ?? sessionId);
       return driver;
     });
   });
@@ -220,5 +236,69 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
       type: "runtime-detached",
       reason: "mode-exit",
     });
+  });
+
+  it("keeps an idle-reap cleanup failure uncertain and blocks respawn", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    driver.failDisposeWithoutReason = true;
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].lastActivityAt = Date.now() - 31 * 60 * 1000;
+    });
+
+    await sweepIdleSessions();
+
+    const reaped = useNekoSessionStore.getState().sessions[id];
+    expect(reaped.status).toBe("error");
+    expect(reaped.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-cleanup-uncertain",
+      providerId: "neko",
+      reason: "Unknown native runtime cleanup failure.",
+    });
+    expect(reaped.events.some((event) => (
+      event.data.type === "runtime-detached" && event.data.reason === "idle"
+    ))).toBe(false);
+
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].status = "exited";
+    });
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().sendPrompt("do not respawn after uncertain reap");
+    expect(createdDrivers).toBe(1);
+  });
+
+  it("keeps a mode-exit cleanup failure uncertain instead of recording exit", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    driver.failDisposeWithoutStringifier = true;
+
+    await disposeAllNekoRuntimes();
+
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(session.status).toBe("error");
+    expect(session.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-cleanup-uncertain",
+      providerId: "neko",
+      reason: "Unknown native runtime cleanup failure.",
+    });
+    expect(session.events.some((event) => (
+      event.data.type === "runtime-detached" && event.data.reason === "mode-exit"
+    ))).toBe(false);
+  });
+
+  it("treats a runtime missing from the registry as unobserved cleanup", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    _clearLiveDriversForTests();
+
+    await disposeAllNekoRuntimes();
+
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(session.status).toBe("error");
+    expect(session.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-cleanup-uncertain",
+      providerId: "neko",
+      reason: "Runtime không thuộc registry khi rời Neko Chill; cleanup không được quan sát.",
+    });
+    expect(session.events.some((event) => (
+      event.data.type === "runtime-detached" && event.data.reason === "mode-exit"
+    ))).toBe(false);
   });
 });

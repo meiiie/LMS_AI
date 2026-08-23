@@ -8,6 +8,7 @@ import type { Driver, DriverEvent, PermissionDecision } from "@/neko-chill/drive
 import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 
 const storage = new Map<string, unknown>();
+const writeOrder: string[] = [];
 let failTranscriptWrites = false;
 let failIndexWrites = false;
 let failCatalogWrites = false;
@@ -42,18 +43,20 @@ async function saveToMemory(store: string, key: string, value: unknown): Promise
     if (indexWriteGate) await indexWriteGate;
     if (failIndexWrites) throw new Error("index unavailable");
   }
-  if (key.startsWith("session:")) {
+  if (store === "neko-chill-sessions.json" && key.startsWith("session:")) {
     if (failTranscriptWrites) throw new Error("disk unavailable");
     if (transcriptWritesBeforeFailure !== null) {
       if (transcriptWritesBeforeFailure === 0) throw new Error("commit disk failure");
       transcriptWritesBeforeFailure -= 1;
     }
   }
+  writeOrder.push(`${store}:${key}`);
   storage.set(`${store}:${key}`, JSON.parse(JSON.stringify(value)));
 }
 
 async function saveStrictToMemory(store: string, key: string, value: unknown): Promise<void> {
   const shouldWait =
+    store === "neko-chill-sessions.json" &&
     strictWriteGate &&
     (!strictBlockedKey || key === strictBlockedKey) &&
     (!gateOnlyWhenFailurePending || transcriptWritesBeforeFailure === 0);
@@ -75,14 +78,14 @@ async function loadStrictFromMemory(
   dflt: unknown,
 ): Promise<unknown> {
   if (key === "session-ids" && failCatalogReads) throw new Error("catalog read unavailable");
-  if (key.startsWith("session:") && failTranscriptReads) {
+  if (store === "neko-chill-sessions.json" && key.startsWith("session:") && failTranscriptReads) {
     throw new Error("transcript read unavailable");
   }
   return loadFromMemory(store, key, dflt);
 }
 
 async function deleteStrictFromMemory(store: string, key: string): Promise<void> {
-  if (key.startsWith("session:")) {
+  if (store === "neko-chill-sessions.json" && key.startsWith("session:")) {
     transcriptDeleteAttempts += 1;
     if (transcriptDeleteAttempts === 1 && firstTranscriptDeleteGate) {
       notifyFirstTranscriptDeleteEntered?.();
@@ -112,22 +115,35 @@ import { useNekoAgentStore } from "@/neko-chill/stores/neko-agent-store";
 import {
   useNekoSessionStore,
   _setDriverFactoryForTests,
+  _setNativeControlReaderForTests,
   _clearLiveDriversForTests,
   disposeAllNekoRuntimes,
   sweepIdleSessions,
 } from "@/neko-chill/stores/neko-session-store";
-import { deletePersistedSession, persistSessionNow } from "@/neko-chill/persistence";
+import {
+  deletePersistedSession,
+  loadSessionSnapshot,
+  persistSessionNow,
+} from "@/neko-chill/persistence";
 import { saveStoreStrict } from "@/lib/storage";
 import { useKnowledgeConnectionStore } from "@/workbench/knowledge";
 
 const AGENT: DetectedAgent = {
   id: "neko",
   name: "Neko Core",
-  binary: "neko",
   version: "0.24.0",
   found: true,
+  availability: "available",
+  supportsProfiles: true,
 };
 const WORKSPACE = { path: "C:/tmp/project", name: "project" };
+const nativeControl = {
+  listSessions: vi.fn(),
+  readEvents: vi.fn(),
+  unresolvedStartSessionIds: vi.fn(),
+  reconcilableStartSessionIds: vi.fn(),
+  cancelUnresolvedStarts: vi.fn(),
+};
 
 class FakeDriver implements Driver {
   readonly kind = "acp" as const;
@@ -191,12 +207,16 @@ class FakeDriver implements Driver {
 }
 
 let spawned: FakeDriver[] = [];
-let launches: Array<{ backendSessionId?: string | null }> = [];
+let launches: Array<{ executionId?: string; backendSessionId?: string | null }> = [];
 
 function useFakeFactory(): void {
   _setDriverFactoryForTests(async (agent, sessionId, launch, onEvent) => {
     launches.push(launch);
     const driver = new FakeDriver(sessionId, onEvent);
+    driver.runtime.providerExtensions = {
+      nativeAgentSessionId: `native/${launch.executionId ?? sessionId}`,
+      nativeRunId: `legacy-local/run/${launch.executionId ?? sessionId}`,
+    };
     spawned.push(driver);
     return driver;
   });
@@ -212,6 +232,7 @@ describe("neko-chill persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     storage.clear();
+    writeOrder.length = 0;
     failTranscriptWrites = false;
     failIndexWrites = false;
     failCatalogWrites = false;
@@ -237,6 +258,22 @@ describe("neko-chill persistence", () => {
     driverPromptGate = null;
     spawned = [];
     launches = [];
+    nativeControl.listSessions.mockReset();
+    nativeControl.readEvents.mockReset();
+    nativeControl.unresolvedStartSessionIds.mockReset();
+    nativeControl.reconcilableStartSessionIds.mockReset();
+    nativeControl.cancelUnresolvedStarts.mockReset();
+    nativeControl.listSessions.mockResolvedValue([]);
+    nativeControl.readEvents.mockImplementation(async (streamId: string, afterSeq = 0) => ({
+      streamId,
+      events: [],
+      nextAfterSeq: afterSeq,
+      hasMore: false,
+    }));
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([]);
+    nativeControl.cancelUnresolvedStarts.mockResolvedValue(0);
+    _setNativeControlReaderForTests(() => nativeControl);
     useNekoSessionStore.setState({
       sessions: {},
       activeSessionId: null,
@@ -254,6 +291,7 @@ describe("neko-chill persistence", () => {
   afterEach(() => {
     vi.useRealTimers();
     _setDriverFactoryForTests(undefined);
+    _setNativeControlReaderForTests(undefined);
   });
 
   it("persists a streamed session and restores it after a restart", async () => {
@@ -302,6 +340,385 @@ describe("neko-chill persistence", () => {
     expect(persisted.events.map((event) => event.seq)).toEqual(
       persisted.events.map((_, eventIndex) => eventIndex + 1),
     );
+  });
+
+  it("persists native lifecycle facts before the compatible transcript", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    writeOrder.length = 0;
+
+    await persistSessionNow(useNekoSessionStore.getState().sessions[id]);
+
+    expect(writeOrder.filter((key) => key.endsWith(`:session:${id}`))).toEqual([
+      `neko-chill-native-runtime.json:session:${id}`,
+      `neko-chill-sessions.json:session:${id}`,
+    ]);
+  });
+
+  it("recovers a native-first partial write by advancing the event high-water mark", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await persistSessionNow(useNekoSessionStore.getState().sessions[id]);
+    const transcriptKey = `neko-chill-sessions.json:session:${id}`;
+    const nativeKey = `neko-chill-native-runtime.json:session:${id}`;
+    const transcript = storage.get(transcriptKey) as {
+      eventHighWaterMark: number;
+      messages: unknown[];
+    };
+    const nativeSeq = transcript.eventHighWaterMark + 1;
+    storage.set(nativeKey, {
+      v: 1,
+      events: [{
+        v: 1,
+        eventId: "native-after-transcript",
+        seq: nativeSeq,
+        at: Date.now(),
+        visibility: "runtime",
+        data: {
+          type: "native-runtime-cleanup-uncertain",
+          agentSessionId: "native-session-1",
+          runId: "run-1",
+          providerId: "neko",
+          reason: "renderer interrupted after native commit",
+        },
+      }],
+    });
+
+    const restored = await loadSessionSnapshot(id);
+
+    expect(restored.messages).toEqual(transcript.messages);
+    expect(restored.eventHighWaterMark).toBe(nativeSeq);
+    expect(restored.events.at(-1)).toEqual(expect.objectContaining({ seq: nativeSeq }));
+  });
+
+  it("reconciles native journal state and replay before enabling a restored session", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await useNekoSessionStore.getState().sendPrompt("mutation đang chạy");
+    await flushDebounce();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+
+    const runId = "legacy-local/run/runtime-lost-response";
+    nativeControl.listSessions.mockResolvedValue([{
+      agentSessionId: "native-session-1",
+      taskId: `legacy-local/task/${id}`,
+      runId,
+      environmentId: "legacy-local/environment/runtime-lost-response",
+      providerId: "neko",
+      providerVersion: "0.25.0",
+      workspacePath: WORKSPACE.path,
+      state: "unknown_outcome",
+      operationPhase: "unknown_outcome",
+      continuity: "unknown_outcome",
+      pid: null,
+      createdAt: "2026-08-23T00:00:00.000Z",
+      updatedAt: "2026-08-23T00:01:00.000Z",
+    }]);
+    const replayEvents = [
+      {
+        v: 1,
+        eventId: "native-event-1",
+        streamId: runId,
+        seq: 1,
+        at: "2026-08-23T00:00:00.000Z",
+        type: "session.created",
+        runId,
+        agentSessionId: "native-session-1",
+        payload: { providerId: "neko" },
+      },
+      {
+        v: 1,
+        eventId: "native-event-2",
+        streamId: runId,
+        seq: 2,
+        at: "2026-08-23T00:01:00.000Z",
+        type: "run.state_changed",
+        runId,
+        agentSessionId: "native-session-1",
+        payload: { state: "unknown_outcome" },
+      },
+    ];
+    nativeControl.readEvents.mockImplementation(async (_streamId: string, afterSeq = 0) => ({
+      streamId: runId,
+      events: afterSeq === 0 ? replayEvents : [],
+      nextAfterSeq: afterSeq === 0 ? 2 : afterSeq,
+      hasMore: false,
+    }));
+
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions[id];
+    expect(useNekoSessionStore.getState().hydrated).toBe(true);
+    expect(restored.status).toBe("error");
+    expect(restored.statusDetail).toContain("kết quả chưa xác định");
+    expect(nativeControl.readEvents).toHaveBeenCalledWith(runId, 0, 500);
+    expect(restored.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "native-runtime-reconciled",
+          agentSessionId: "native-session-1",
+          replayedFromSeq: 0,
+          replayedThroughSeq: 2,
+          replayedEventCount: 2,
+        }),
+      }),
+    ]));
+    expect(storage.get(`neko-chill-sessions.json:session:${id}`)).toEqual(
+      expect.objectContaining({
+        events: expect.not.arrayContaining([
+          expect.objectContaining({
+            data: expect.objectContaining({
+              type: "native-runtime-reconciled",
+              replayedThroughSeq: 2,
+            }),
+          }),
+        ]),
+      }),
+    );
+    expect(storage.get(`neko-chill-native-runtime.json:session:${id}`)).toEqual(
+      expect.objectContaining({
+        v: 1,
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            data: expect.objectContaining({
+              type: "native-runtime-reconciled",
+              replayedThroughSeq: 2,
+            }),
+          }),
+        ]),
+      }),
+    );
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().closeSession(id);
+    await useNekoSessionStore.getState().sendPrompt("không được chạy trùng");
+    expect(spawned).toHaveLength(1);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    await useNekoSessionStore.getState().hydrate();
+    expect(nativeControl.readEvents).toHaveBeenLastCalledWith(runId, 2, 500);
+    expect(useNekoSessionStore.getState().sessions[id].events.filter(
+      (event) => event.data.type === "native-runtime-reconciled",
+    )).toHaveLength(1);
+  });
+
+  it("re-reads native state after replay so a concurrent terminal transition unlocks the session", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await flushDebounce();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+
+    const runId = "legacy-local/run/runtime-finishes-during-replay";
+    const running = {
+      agentSessionId: "native-session-race",
+      taskId: `legacy-local/task/${id}`,
+      runId,
+      environmentId: "legacy-local/environment/runtime-finishes-during-replay",
+      providerId: "neko",
+      providerVersion: "0.25.0",
+      workspacePath: WORKSPACE.path,
+      state: "running",
+      operationPhase: "committed",
+      continuity: "active",
+      pid: 123,
+      createdAt: "2026-08-23T00:00:00.000Z",
+      updatedAt: "2026-08-23T00:01:00.000Z",
+    };
+    const completed = {
+      ...running,
+      state: "completed",
+      operationPhase: "completed",
+      pid: null,
+      updatedAt: "2026-08-23T00:02:00.000Z",
+    };
+    nativeControl.listSessions
+      .mockResolvedValueOnce([running])
+      .mockResolvedValueOnce([completed]);
+    nativeControl.readEvents.mockResolvedValue({
+      streamId: runId,
+      events: [{
+        v: 1,
+        eventId: "native-event-terminal",
+        streamId: runId,
+        seq: 3,
+        at: completed.updatedAt,
+        type: "run.state_changed",
+        runId,
+        agentSessionId: completed.agentSessionId,
+        payload: { state: "completed" },
+      }],
+      nextAfterSeq: 3,
+      hasMore: false,
+    });
+
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions[id];
+    expect(restored.status).toBe("exited");
+    expect(restored.statusDetail).toContain("đã hoàn tất");
+    expect(nativeControl.listSessions).toHaveBeenCalledTimes(2);
+    expect(restored.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-reconciled",
+      state: "completed",
+      operationPhase: "completed",
+      replayedThroughSeq: 3,
+    });
+  });
+
+  it("reconciles every native run so a newer terminal run cannot hide an older uncertain process", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await useNekoSessionStore.getState().sendPrompt("tạo lịch sử native");
+    await flushDebounce();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+
+    const completed = {
+      agentSessionId: "native-session-newer",
+      taskId: `legacy-local/task/${id}`,
+      runId: "legacy-local/run/newer-terminal",
+      environmentId: "legacy-local/environment/newer-terminal",
+      providerId: "neko",
+      providerVersion: "0.25.0",
+      workspacePath: WORKSPACE.path,
+      state: "completed",
+      operationPhase: "completed",
+      continuity: "active",
+      pid: null,
+      createdAt: "2026-08-23T00:02:00.000Z",
+      updatedAt: "2026-08-23T00:03:00.000Z",
+    };
+    const uncertain = {
+      ...completed,
+      agentSessionId: "native-session-older",
+      runId: "legacy-local/run/older-uncertain",
+      environmentId: "legacy-local/environment/older-uncertain",
+      state: "unknown_outcome",
+      operationPhase: "unknown_outcome",
+      continuity: "unknown_outcome",
+      createdAt: "2026-08-23T00:00:00.000Z",
+      updatedAt: "2026-08-23T00:01:00.000Z",
+    };
+    const natives = [completed, uncertain];
+    nativeControl.listSessions.mockImplementation(async (runId?: string) => (
+      runId ? natives.filter((candidate) => candidate.runId === runId) : natives
+    ));
+
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions[id];
+    expect(restored.status).toBe("error");
+    expect(restored.statusDetail).toContain("kết quả chưa xác định");
+    expect(restored.events.filter(
+      (event) => event.data.type === "native-runtime-reconciled",
+    )).toHaveLength(2);
+    expect(nativeControl.readEvents).toHaveBeenCalledWith(completed.runId, 0, 500);
+    expect(nativeControl.readEvents).toHaveBeenCalledWith(uncertain.runId, 0, 500);
+
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().sendPrompt("không được chạy process thứ ba");
+    expect(spawned).toHaveLength(1);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+  });
+
+  it("retires a stale native checkpoint after its terminal projection is pruned", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await useNekoSessionStore.getState().sendPrompt("tạo checkpoint đang chạy");
+    await flushDebounce();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+
+    const terminal = {
+      agentSessionId: "native-session-pruned-later",
+      taskId: `legacy-local/task/${id}`,
+      runId: "legacy-local/run/pruned-later",
+      environmentId: "legacy-local/environment/pruned-later",
+      providerId: "neko",
+      providerVersion: "0.25.0",
+      workspacePath: WORKSPACE.path,
+      state: "completed",
+      operationPhase: "completed",
+      continuity: "active",
+      pid: null,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      updatedAt: "2026-05-01T00:01:00.000Z",
+    };
+    nativeControl.listSessions.mockImplementation(async (runId?: string) => (
+      !runId || runId === terminal.runId ? [terminal] : []
+    ));
+
+    await useNekoSessionStore.getState().hydrate();
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("exited");
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    nativeControl.listSessions.mockResolvedValue([]);
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions[id];
+    expect(restored.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-retired",
+      agentSessionId: terminal.agentSessionId,
+      runId: terminal.runId,
+      reason: "projection-pruned",
+    });
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().sendPrompt("được phép tạo runtime mới");
+    expect(spawned).toHaveLength(2);
+  });
+
+  it("keeps an absent unknown-outcome checkpoint blocking respawn", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await flushDebounce();
+    const unknown = {
+      agentSessionId: "native-session-unknown-retained",
+      taskId: `legacy-local/task/${id}`,
+      runId: "legacy-local/run/unknown-retained",
+      environmentId: "legacy-local/environment/unknown-retained",
+      providerId: "neko",
+      providerVersion: "0.25.0",
+      workspacePath: WORKSPACE.path,
+      state: "unknown_outcome",
+      operationPhase: "unknown_outcome",
+      continuity: "unknown_outcome",
+      pid: null,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      updatedAt: "2026-05-01T00:01:00.000Z",
+    };
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    nativeControl.listSessions.mockImplementation(async (runId?: string) => (
+      !runId || runId === unknown.runId ? [unknown] : []
+    ));
+    await useNekoSessionStore.getState().hydrate();
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    nativeControl.listSessions.mockResolvedValue([]);
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions[id];
+    expect(restored.events.some((event) => (
+      event.data.type === "native-runtime-retired" &&
+      event.data.agentSessionId === unknown.agentSessionId
+    ))).toBe(false);
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().sendPrompt("không được respawn unknown");
+    expect(spawned).toHaveLength(1);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+  });
+
+  it("fails hydration closed when the native journal cannot be reconciled", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await flushDebounce();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    nativeControl.listSessions.mockRejectedValue(new Error("native journal unavailable"));
+
+    await useNekoSessionStore.getState().hydrate();
+
+    expect(useNekoSessionStore.getState()).toMatchObject({
+      sessions: {},
+      hydrated: false,
+      hydrating: false,
+      hydrationError: "native journal unavailable",
+    });
+    expect(storage.get(`neko-chill-sessions.json:session:${id}`)).toBeDefined();
   });
 
   it("does not migrate or overwrite a snapshot after a transient read failure", async () => {
@@ -960,6 +1377,107 @@ describe("neko-chill persistence", () => {
     });
   });
 
+  it("fails mode exit closed when a retained native start cannot be cancelled", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([id]);
+    nativeControl.cancelUnresolvedStarts.mockRejectedValueOnce(
+      new Error("retained start cancellation unavailable"),
+    );
+
+    await disposeAllNekoRuntimes();
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "error",
+      closePending: false,
+    });
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
+      "báo lỗi khi thu hồi tài nguyên",
+    );
+  });
+
+  it("cancels a native start retained while mode-exit joins runtime preparation", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([id]);
+
+    await disposeAllNekoRuntimes();
+
+    expect(nativeControl.unresolvedStartSessionIds).toHaveBeenCalledOnce();
+    expect(nativeControl.reconcilableStartSessionIds).toHaveBeenCalledOnce();
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "exited",
+      closePending: false,
+    });
+  });
+
+  it("cancels a durable Codex bootstrap found only after renderer reload", async () => {
+    const bootstrapId = "codex-account-bootstrap-after-reload";
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([bootstrapId]);
+
+    await disposeAllNekoRuntimes();
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(bootstrapId);
+  });
+
+  it("continues known-start cleanup when durable discovery fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const discoveryError = new Error("native catalog unavailable");
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([id]);
+    nativeControl.reconcilableStartSessionIds.mockRejectedValue(discoveryError);
+
+    await expect(disposeAllNekoRuntimes()).rejects.toBe(discoveryError);
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "exited",
+      closePending: false,
+    });
+  });
+
+  it("reports discovery and visible cancellation failures after persisting teardown state", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const discoveryError = new Error("native catalog unavailable");
+    const cancellationError = new Error("known start cancellation unavailable");
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([id]);
+    nativeControl.reconcilableStartSessionIds.mockRejectedValue(discoveryError);
+    nativeControl.cancelUnresolvedStarts.mockRejectedValueOnce(cancellationError);
+
+    const rejection = await disposeAllNekoRuntimes().catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(AggregateError);
+    expect((rejection as AggregateError).errors).toEqual([
+      discoveryError,
+      cancellationError,
+    ]);
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "error",
+      closePending: false,
+    });
+  });
+
+  it("propagates cancellation failure for a catalog-only durable bootstrap", async () => {
+    const bootstrapId = "codex-account-bootstrap-catalog-only";
+    const cancellationError = new Error("durable cancellation unavailable");
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
+    nativeControl.reconcilableStartSessionIds.mockResolvedValue([bootstrapId]);
+    nativeControl.cancelUnresolvedStarts.mockRejectedValueOnce(cancellationError);
+
+    await expect(disposeAllNekoRuntimes()).rejects.toBe(cancellationError);
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(bootstrapId);
+  });
+
   it("removes a staged prompt when the provider exits before invocation", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     let release!: () => void;
@@ -1353,7 +1871,7 @@ describe("neko-chill persistence", () => {
       "runtime đã được thu hồi",
     );
     const strictTranscriptWrites = vi.mocked(saveStoreStrict).mock.calls.filter(
-      ([, key]) => key === `session:${id}`,
+      ([store, key]) => store === "neko-chill-sessions.json" && key === `session:${id}`,
     );
     // Requested barrier, terminal rollback, then one terminal revocation retry.
     expect(strictTranscriptWrites).toHaveLength(3);
@@ -1483,8 +2001,8 @@ describe("neko-chill persistence", () => {
     expect(session.events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         data: expect.objectContaining({
-          type: "runtime-detached",
-          reason: "config-uncertain",
+          type: "native-runtime-cleanup-uncertain",
+          reason: "process kill failed",
         }),
       }),
       expect.objectContaining({
@@ -1775,6 +2293,9 @@ describe("neko-chill persistence", () => {
     await useNekoSessionStore.getState().sendPrompt("còn nhớ mình không?");
     // Fresh process (spec US3-2), prompt delivered, session live again.
     expect(spawned).toHaveLength(2);
+    expect(launches[0].executionId).toEqual(expect.any(String));
+    expect(launches[1].executionId).toEqual(expect.any(String));
+    expect(launches[1].executionId).not.toBe(launches[0].executionId);
     expect(launches[0].backendSessionId).toBeNull();
     expect(launches[1].backendSessionId).toBe(`backend-${id}`);
     expect(spawned[1].prompts).toEqual(["còn nhớ mình không?"]);
@@ -1794,6 +2315,30 @@ describe("neko-chill persistence", () => {
     expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
   });
 
+  it("fails deletion closed until a retained unresolved native start is cancelled", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await flushDebounce();
+    nativeControl.cancelUnresolvedStarts.mockRejectedValueOnce(
+      new Error("native cancellation unavailable"),
+    );
+
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      status: "error",
+      deletePending: false,
+    });
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
+      "native cancellation unavailable",
+    );
+    expect(storage.get(`neko-chill-sessions.json:session:${id}`)).toBeDefined();
+
+    nativeControl.cancelUnresolvedStarts.mockResolvedValueOnce(1);
+    await useNekoSessionStore.getState().deleteSession(id);
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+  });
+
   it("keeps a session durable when runtime cleanup fails before deletion", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     spawned[0].failDispose = true;
@@ -1810,10 +2355,16 @@ describe("neko-chill persistence", () => {
     expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
     expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
 
-    // A process restart clears live ownership; deletion can then be retried.
+    // Losing live ownership is not proof that the process stopped. The durable
+    // uncertainty tombstone must survive restart and keep deletion blocked.
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().deleteSession(id);
-    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      deletePending: false,
+      status: "error",
+    });
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
   });
 
   it("rolls back an unpersisted workspace attachment so it can be retried", async () => {
@@ -2075,5 +2626,111 @@ describe("neko-chill persistence", () => {
     expect(session.messages).toHaveLength(1);
     // persistSessionNow does not wait for the debounce window.
     expect(storage.get("neko-chill-sessions.json:index")).toHaveLength(1);
+  });
+
+  it("keeps an uncertain live close durable and blocks a replacement runtime", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const executionId = launches[0].executionId!;
+    spawned[0].failDispose = true;
+
+    await useNekoSessionStore.getState().closeSession(id);
+
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(session).toMatchObject({ status: "error", runtime: null, closePending: false });
+    expect(session.statusDetail).toContain("chưa thể xác nhận runtime đã dừng");
+    expect(session.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-cleanup-uncertain",
+      agentSessionId: `native/${executionId}`,
+      runId: `legacy-local/run/${executionId}`,
+      providerId: "neko",
+    });
+    expect(session.events.some((event) => (
+      event.data.type === "runtime-detached" && event.data.reason === "close"
+    ))).toBe(false);
+    expect(storage.get(`neko-chill-sessions.json:session:${id}`)).toEqual(
+      expect.objectContaining({
+        events: expect.not.arrayContaining([
+          expect.objectContaining({
+            data: expect.objectContaining({ type: "native-runtime-cleanup-uncertain" }),
+          }),
+        ]),
+      }),
+    );
+    expect(storage.get(`neko-chill-native-runtime.json:session:${id}`)).toEqual(
+      expect.objectContaining({
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            data: expect.objectContaining({ type: "native-runtime-cleanup-uncertain" }),
+          }),
+        ]),
+      }),
+    );
+
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].status = "exited";
+    });
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().sendPrompt("cleanup vẫn chưa xác định");
+    expect(spawned).toHaveLength(1);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+
+    spawned[0].failDispose = false;
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].status = "exited";
+    });
+    await useNekoSessionStore.getState().sendPrompt("thử lại sau khi cleanup được xác nhận");
+
+    const recovered = useNekoSessionStore.getState().sessions[id];
+    expect(spawned).toHaveLength(2);
+    expect(recovered.status).toBe("idle");
+    expect(recovered.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "native-runtime-cleanup-resolved",
+          agentSessionId: `native/${executionId}`,
+          runId: `legacy-local/run/${executionId}`,
+          providerId: "neko",
+        }),
+      }),
+    ]));
+  });
+
+  it("lets close retry a retained cleanup and records its resolution", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const executionId = launches[0].executionId!;
+    spawned[0].failDispose = true;
+    await useNekoSessionStore.getState().closeSession(id);
+
+    spawned[0].failDispose = false;
+    await useNekoSessionStore.getState().closeSession(id);
+
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(spawned[0].disposed).toBe(2);
+    expect(session).toMatchObject({ status: "exited", runtime: null, closePending: false });
+    expect(session.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "native-runtime-cleanup-resolved",
+          agentSessionId: `native/${executionId}`,
+        }),
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "runtime-detached", reason: "close" }),
+      }),
+    ]));
+  });
+
+  it("lets delete retry a retained cleanup before removing durable state", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    spawned[0].failDispose = true;
+    await useNekoSessionStore.getState().closeSession(id);
+
+    spawned[0].failDispose = false;
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(spawned[0].disposed).toBe(2);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
+    expect(storage.has(`neko-chill-native-runtime.json:session:${id}`)).toBe(false);
   });
 });

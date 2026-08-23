@@ -28,6 +28,7 @@ const RUNTIME_DETACH_REASONS = [
   "workspace-change",
   "config-uncertain",
   "durability-failure",
+  "replacement",
 ] as const;
 
 type RuntimeDetachReason = (typeof RUNTIME_DETACH_REASONS)[number];
@@ -107,6 +108,41 @@ export type NekoSessionEventData =
       type: "runtime-attach-failed";
       providerId: string;
       reason: string;
+    }
+  | {
+      /** Durable read-model checkpoint derived from Neko's native journal. */
+      type: "native-runtime-reconciled";
+      agentSessionId: string;
+      runId: string;
+      providerId: string;
+      state: string;
+      operationPhase: string;
+      continuity: string;
+      replayedFromSeq: number;
+      replayedThroughSeq: number;
+      replayedEventCount: number;
+    }
+  | {
+      /** The complete native catalog no longer contains this checkpoint. */
+      type: "native-runtime-retired";
+      agentSessionId: string;
+      runId: string;
+      reason: "projection-pruned";
+    }
+  | {
+      /** Native cancellation returned without a provably terminal outcome. */
+      type: "native-runtime-cleanup-uncertain";
+      agentSessionId: string;
+      runId: string;
+      providerId: string;
+      reason: string;
+    }
+  | {
+      /** A retained cleanup authority later proved that native execution stopped. */
+      type: "native-runtime-cleanup-resolved";
+      agentSessionId: string;
+      runId: string;
+      providerId: string;
     }
   | {
       type: "workspace-activity";
@@ -270,6 +306,56 @@ function isValidEventData(data: Record<string, unknown>): boolean {
       );
     case "runtime-attach-failed":
       return typeof data.providerId === "string" && typeof data.reason === "string";
+    case "native-runtime-reconciled":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        typeof data.providerId === "string" &&
+        data.providerId.length > 0 &&
+        typeof data.state === "string" &&
+        data.state.length > 0 &&
+        typeof data.operationPhase === "string" &&
+        data.operationPhase.length > 0 &&
+        typeof data.continuity === "string" &&
+        data.continuity.length > 0 &&
+        Number.isSafeInteger(data.replayedFromSeq) &&
+        (data.replayedFromSeq as number) >= 0 &&
+        Number.isSafeInteger(data.replayedThroughSeq) &&
+        (data.replayedThroughSeq as number) >= (data.replayedFromSeq as number) &&
+        Number.isSafeInteger(data.replayedEventCount) &&
+        (data.replayedEventCount as number) >= 0
+      );
+    case "native-runtime-retired":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        data.reason === "projection-pruned"
+      );
+    case "native-runtime-cleanup-uncertain":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        typeof data.providerId === "string" &&
+        data.providerId.length > 0 &&
+        typeof data.reason === "string" &&
+        data.reason.length > 0 &&
+        data.reason.length <= 4_096
+      );
+    case "native-runtime-cleanup-resolved":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        typeof data.providerId === "string" &&
+        data.providerId.length > 0
+      );
     case "workspace-activity":
       return (
         typeof data.activityId === "string" &&
@@ -316,5 +402,14 @@ export function isNekoSessionEvent(value: unknown): value is NekoSessionEvent {
     typeof data === "object" &&
     !Array.isArray(data) &&
     isValidEventData(data)
+  );
+}
+
+export function isNativeRuntimeSessionEvent(event: NekoSessionEvent): boolean {
+  return (
+    event.data.type === "native-runtime-reconciled" ||
+    event.data.type === "native-runtime-retired" ||
+    event.data.type === "native-runtime-cleanup-uncertain" ||
+    event.data.type === "native-runtime-cleanup-resolved"
   );
 }

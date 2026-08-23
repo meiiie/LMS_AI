@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-neko-control-session-write"
+description = "Enables the neko_control_session_write command without any pre-configured scope."
+commands.allow = ["neko_control_session_write"]
+
+[[permission]]
+identifier = "deny-neko-control-session-write"
+description = "Denies the neko_control_session_write command without any pre-configured scope."
+commands.deny = ["neko_control_session_write"]

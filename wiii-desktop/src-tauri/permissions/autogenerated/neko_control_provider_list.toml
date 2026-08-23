@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-neko-control-provider-list"
+description = "Enables the neko_control_provider_list command without any pre-configured scope."
+commands.allow = ["neko_control_provider_list"]
+
+[[permission]]
+identifier = "deny-neko-control-provider-list"
+description = "Denies the neko_control_provider_list command without any pre-configured scope."
+commands.deny = ["neko_control_provider_list"]
