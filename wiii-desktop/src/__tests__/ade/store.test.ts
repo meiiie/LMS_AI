@@ -107,6 +107,10 @@ describe("Wiii ADE work store", () => {
     expect(saved).toHaveLength(2);
     expect(useAdeWorkStore.getState().graph.runs[0].state).toBe("running");
 
+    const staleProjection = structuredClone(useAdeWorkStore.getState().graph);
+    staleProjection.tasks[0].state = "blocked";
+    staleProjection.environments[0].state = "stopped";
+    useAdeWorkStore.setState({ graph: staleProjection });
     await useAdeWorkStore.getState().attachAgentSession({
       id: "native-agent-session",
       runId: created.runId,
@@ -117,6 +121,12 @@ describe("Wiii ADE work store", () => {
     expect(useAdeWorkStore.getState().graph.agentSessions[0]).toMatchObject({
       providerId: "codex",
       providerSessionId: "thread-2",
+    });
+    expect(useAdeWorkStore.getState().graph.tasks[0].state).toBe("running");
+    expect(useAdeWorkStore.getState().graph.environments[0].state).toBe("busy");
+    expect(saved[2]).toMatchObject({
+      tasks: [{ state: "running" }],
+      environments: [{ state: "busy" }],
     });
     await expect(
       useAdeWorkStore.getState().transitionRun(created.runId, "completed"),
