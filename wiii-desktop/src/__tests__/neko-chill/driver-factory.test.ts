@@ -410,6 +410,32 @@ describe("Neko driver factory resource ownership", () => {
     });
   });
 
+  it("releases a retained start whose recorded result cannot be decoded", async () => {
+    tauri.listen.mockResolvedValue(vi.fn());
+    let starts = 0;
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "neko_control_session_start") {
+        starts += 1;
+        if (starts <= 2) throw new Error("both start responses were lost");
+        throw "decode recorded session start failed: invalid result payload";
+      }
+      if (command === "neko_control_session_list") return [];
+      return undefined;
+    });
+
+    await expect(getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-undecodable-start",
+      workspacePath: "C:/tmp/project",
+    })).rejects.toThrow("both start responses were lost");
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts("session-undecodable-start"),
+    ).resolves.toBe(1);
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts("session-undecodable-start"),
+    ).resolves.toBe(0);
+  });
+
   it("recovers a lost start through real RuntimeRegistry retries without losing transport events", async () => {
     let onLine: ((event: { payload: string }) => void) | null = null;
     let onExit: ((event: { payload: ExitNotice }) => void) | null = null;
@@ -632,6 +658,44 @@ describe("Neko driver factory resource ownership", () => {
       writeCalls[0][1].request.requestId,
       writeCalls[0][1].request.requestId,
     ]);
+  });
+
+  it("uses independent identities for overlapping identical frames", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    const writeResolvers: Array<() => void> = [];
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command === "neko_control_session_start") {
+        return {
+          agentSessionId: payload?.request.agentSessionId,
+          runId: payload?.request.runId,
+          provider: PROVIDER,
+        };
+      }
+      if (command === "neko_control_session_write") {
+        return new Promise<void>((resolve) => writeResolvers.push(resolve));
+      }
+      return undefined;
+    });
+
+    const { transport } = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-overlapping-writes",
+      workspacePath: "C:/tmp/project",
+    });
+    const frame = JSON.stringify({ jsonrpc: "2.0", method: "session/cancel" });
+    const first = transport.send(frame);
+    const second = transport.send(frame);
+    await Promise.resolve();
+
+    const writeCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_write",
+    );
+    expect(writeCalls).toHaveLength(2);
+    expect(writeCalls[0][1].request.requestId).not.toBe(
+      writeCalls[1][1].request.requestId,
+    );
+    writeResolvers.forEach((resolve) => resolve());
+    await Promise.all([first, second]);
   });
 
   it("uses a fresh write identity after a proven queue rejection", async () => {

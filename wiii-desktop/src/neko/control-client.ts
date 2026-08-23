@@ -81,7 +81,7 @@ interface StartTransportState {
   killed: boolean;
   killPromise: Promise<void> | null;
   cancelRequestId: string;
-  unresolvedWriteIds: Map<string, string>;
+  unresolvedWriteIds: Map<string, string[]>;
   unlistenLine: (() => void) | null;
   unlistenExit: (() => void) | null;
   listenerSetup: Promise<void> | null;
@@ -475,8 +475,9 @@ class TauriNekoControlClient implements NekoControlClient {
         // Keep the logical write identity after an unresolved native response.
         // A caller retrying the same provider frame must reach Rust with the
         // same request ID so it cannot repeat a committed side effect.
-        const requestId = transportState.unresolvedWriteIds.get(line) ?? uuidv4();
-        transportState.unresolvedWriteIds.set(line, requestId);
+        const retained = transportState.unresolvedWriteIds.get(line);
+        const requestId = retained?.shift() ?? uuidv4();
+        if (retained?.length === 0) transportState.unresolvedWriteIds.delete(line);
         try {
           await invokeIdempotently(invoke, "neko_control_session_write", {
             request: {
@@ -485,18 +486,14 @@ class TauriNekoControlClient implements NekoControlClient {
               line,
             },
           });
-          if (transportState.unresolvedWriteIds.get(line) === requestId) {
-            transportState.unresolvedWriteIds.delete(line);
-          }
         } catch (error) {
           // A full bounded writer queue proves Rust did not enqueue this
           // frame. Only that explicit rejection may mint a fresh identity on
           // retry; all uncertain outcomes retain the original request ID.
-          if (
-            isProviderBusy(error) &&
-            transportState.unresolvedWriteIds.get(line) === requestId
-          ) {
-            transportState.unresolvedWriteIds.delete(line);
+          if (!isProviderBusy(error)) {
+            const unresolved = transportState.unresolvedWriteIds.get(line) ?? [];
+            unresolved.unshift(requestId);
+            transportState.unresolvedWriteIds.set(line, unresolved);
           }
           throw error;
         }
@@ -683,7 +680,10 @@ function isUnknownStartOutcome(error: string): boolean {
 }
 
 function isRecordedStartFailure(error: unknown): boolean {
-  return typeof error === "string" && error.startsWith("recorded session start failed:");
+  return typeof error === "string" && (
+    error.startsWith("recorded session start failed:") ||
+    error.startsWith("decode recorded session start failed:")
+  );
 }
 
 function isDetectedProvider(value: unknown): value is NekoDetectedProvider {

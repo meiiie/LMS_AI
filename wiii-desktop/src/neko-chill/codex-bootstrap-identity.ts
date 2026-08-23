@@ -32,9 +32,11 @@ export function codexBootstrapIdentity(workspacePath: string): CodexBootstrapIde
 export function canonicalWorkspaceIdentity(workspacePath: string): string {
   const nfc = workspacePath.normalize("NFC");
   const hadUncPrefix = /^[\\/]{2}[^\\/]/.test(nfc);
-  let normalized = nfc.replaceAll("\\", "/").replace(/\/{2,}/g, "/");
+  const isWindowsNamespace = hadUncPrefix || /^[A-Za-z]:[\\/]/.test(nfc);
+  let normalized = isWindowsNamespace
+    ? nfc.replaceAll("\\", "/").replace(/\/{2,}/g, "/")
+    : nfc.replace(/\/{2,}/g, "/");
   if (hadUncPrefix) normalized = `/${normalized}`;
-  const isWindowsNamespace = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
   if (normalized !== "/" && !/^[A-Za-z]:\/$/.test(normalized)) {
     normalized = normalized.replace(/\/+$/, "");
   }

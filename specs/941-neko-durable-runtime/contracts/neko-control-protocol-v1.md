@@ -28,6 +28,9 @@ method and logical target before dispatch.
   failure proves there is no process to cancel.
 - `provider_busy` proves a bounded writer queue rejected the frame before it
   was enqueued. A caller may retry that frame only with a new request ID.
+- Byte-identical frames are not the same logical write. Concurrent send calls
+  receive independent request IDs. Only the bounded IPC retry and an explicit
+  caller retry of one unresolved send reuse that send's retained identity.
 - Native start errors prefixed with `unknown_outcome:` are authoritative but
   unresolved. The control client retains the original request, agent-session,
   Run/Environment binding and listeners; it must not downgrade that result to

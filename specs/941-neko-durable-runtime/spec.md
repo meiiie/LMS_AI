@@ -188,10 +188,14 @@ side-effect/committed phases become `unknown_outcome`.
   MUST persist in an additive companion store. The shared Workbench v2 session
   snapshot MUST contain only event discriminators understood by the previous
   desktop release so a full-release rollback can still hydrate conversations.
+  The native companion MUST commit before the compatible transcript so a later
+  transcript failure cannot silently hide a native lifecycle fact.
 - **FR-030**: A live runtime cleanup that does not prove cancellation reached a
   safe terminal state MUST leave a durable blocking tombstone, render the
   visible session as an error, and prevent replacement execution until native
   reconciliation establishes `completed`, `failed`, or `cancelled`. Cleanup
+  that has no result from the live runtime registry is unobserved and therefore
+  MUST be treated as uncertain, not as a successful detach. Cleanup
   success/failure MUST use a tagged outcome and MUST NOT depend on truthiness of
   the rejection reason. Formatting an arbitrary rejection value MUST be
   non-throwing and bounded so the durable tombstone cannot be skipped.
@@ -223,7 +227,8 @@ side-effect/committed phases become `unknown_outcome`.
 - **FR-037**: Workspace-scoped bootstrap identities MUST normalize aliases that
   the host treats as the same path. In particular, Windows drive and UNC paths
   MUST normalize separator and casing differences without collapsing distinct
-  case-sensitive POSIX paths.
+  case-sensitive POSIX paths or backslashes that are legal POSIX filename
+  characters.
 - **FR-038**: A native cancellation response with `cancelled: false` MUST be
   reconciled against the durable session projection. A remaining active or
   uncertain record MUST fail closed and MUST NOT release renderer ownership.
@@ -235,6 +240,10 @@ side-effect/committed phases become `unknown_outcome`.
   fails MUST remain pending inside the runtime authority. The renderer MUST be
   told that terminal persistence is unproven, and cancellation MUST retry that
   exact terminal fact before it may return a safe no-op result.
+- **FR-041**: Each concurrent logical `session/write` invocation MUST receive
+  its own request identity even when serialized frames are byte-identical. A
+  bounded IPC retry of one invocation MUST reuse that invocation's identity;
+  a proven pre-enqueue `provider_busy` rejection MUST permit a fresh identity.
 
 ### Non-goals
 

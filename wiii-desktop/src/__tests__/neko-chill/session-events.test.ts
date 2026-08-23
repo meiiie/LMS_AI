@@ -151,7 +151,7 @@ describe("Neko session event validation", () => {
       continuity: "active",
       replayedFromSeq: 5,
       replayedThroughSeq: 4,
-      replayedEventCount: 0,
+      replayedEventCount: 1,
     },
     {
       type: "native-runtime-retired",

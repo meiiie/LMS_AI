@@ -6,7 +6,7 @@ From repository root:
 cargo test --manifest-path wiii-desktop/src-tauri/Cargo.toml
 
 Set-Location wiii-desktop
-npx vitest run src/__tests__/neko/control-protocol.test.ts src/__tests__/neko/provider-registry.test.ts src/__tests__/neko-chill/driver-factory.test.ts src/__tests__/neko-chill/runtime-manager.test.ts src/__tests__/neko-chill/neko-persistence.test.ts src/__tests__/neko-chill/session-events.test.ts
+npx vitest run src/__tests__/neko/control-protocol.test.ts src/__tests__/neko/provider-registry.test.ts src/__tests__/neko-chill/driver-factory.test.ts src/__tests__/neko-chill/runtime-manager.test.ts src/__tests__/neko-chill/neko-persistence.test.ts src/__tests__/neko-chill/session-events.test.ts src/__tests__/neko-chill/codex-bootstrap-identity.test.ts src/__tests__/neko-chill/phase6-polish.test.ts
 npx tsc --noEmit
 npm run build:embed
 ```
@@ -30,6 +30,8 @@ Expected invariants:
 - completed/failed request IDs have a 90-day replay window, while uncertain
   identities are never pruned automatically;
 - a proven `provider_busy` rejection retries only with a fresh request ID;
+- overlapping identical provider frames receive distinct request IDs, while a
+  bounded IPC retry of one logical frame reuses that frame's original ID;
 - event sequence is monotonic within a run stream and replay is cursor-based;
 - lifecycle state and its matching durable event commit or roll back together;
 - start request identity, `Starting/Accepted` projection and creation event
@@ -44,7 +46,11 @@ Expected invariants:
 - live exit delivery cannot mark cleanup complete without
   `terminationProven: true` and `terminalStatePersisted: true`;
 - Windows drive/UNC casing aliases derive one bootstrap identity while POSIX
-  case distinctions remain intact;
+  case and legal backslash distinctions remain intact;
+- native lifecycle checkpoints commit before the compatible transcript, so a
+  transcript failure cannot silently hide a native side effect;
+- a runtime missing from the live registry is unobserved cleanup and therefore
+  produces a blocking uncertainty fact rather than a successful detach;
 - replacing a local runtime preserves Task identity but creates a fresh Run;
 - uncertain recovery becomes `unknown_outcome`, never automatic retry;
 - restored UI sessions reconcile native session state and replay cursor before

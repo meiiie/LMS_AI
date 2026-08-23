@@ -2294,13 +2294,21 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         if (!session || session.deletePending) continue;
         const result = resultsBySession.get(sessionId);
         const provider = result?.provider ?? session.runtime;
+        const cleanup = result
+          ? runtimeDisposalOutcome(result)
+          : {
+              failed: true,
+              error: new Error(
+                "Runtime không thuộc registry khi rời Neko Chill; cleanup không được quan sát.",
+              ),
+            };
         session.runtime = null;
-        session.status = result?.cleanupFailed ? "error" : "exited";
+        session.status = cleanup.failed ? "error" : "exited";
         session.pendingPermission = null;
         session.resolvingPermissionId = null;
         session.cancelPending = false;
         session.updatedAt = Date.now();
-        session.statusDetail = result?.cleanupFailed
+        session.statusDetail = cleanup.failed
           ? "Đã rời Neko Chill nhưng runtime báo lỗi khi thu hồi tài nguyên."
           : "Runtime đã dừng khi rời Neko Chill.";
         if (provider) {
@@ -2308,9 +2316,7 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
             session,
             provider,
             "mode-exit",
-            result
-              ? runtimeDisposalOutcome(result)
-              : { failed: false },
+            cleanup,
           );
         }
         sessionIdsToPersist.push(sessionId);
@@ -2318,7 +2324,8 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     });
     await Promise.all(
       sessionIdsToPersist.map(async (sessionId) => {
-        const failed = Boolean(resultsBySession.get(sessionId)?.cleanupFailed);
+        const result = resultsBySession.get(sessionId);
+        const failed = result ? result.cleanupFailed : true;
         await persistSessionNowOrReport(sessionId, "trạng thái rời Neko Chill", {
           fatal: failed,
           strict: failed,

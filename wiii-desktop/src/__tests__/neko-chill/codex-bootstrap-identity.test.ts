@@ -34,4 +34,10 @@ describe("Codex account bootstrap identity", () => {
       codexBootstrapIdentity("/srv/wiii").clientSessionId,
     );
   });
+
+  it("preserves backslashes that are legal POSIX filename characters", () => {
+    expect(codexBootstrapIdentity("/srv/a\\b").clientSessionId).not.toBe(
+      codexBootstrapIdentity("/srv/a/b").clientSessionId,
+    );
+  });
 });

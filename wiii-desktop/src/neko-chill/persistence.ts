@@ -283,7 +283,7 @@ function parsePersistedNativeRuntimeState(
 ): NekoSessionEvent[] {
   if (value === undefined) return [];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Native runtime checkpoint for session ${sessionId} has an invalid schema.`);
+    throw new Error(`Checkpoint runtime native của phiên ${sessionId} có schema không hợp lệ.`);
   }
   const state = value as Partial<PersistedNativeRuntimeState>;
   if (
@@ -292,7 +292,7 @@ function parsePersistedNativeRuntimeState(
     !state.events.every((event) => isNekoSessionEvent(event) && isNativeRuntimeSessionEvent(event)) ||
     !state.events.every((event, index, events) => index === 0 || event.seq > events[index - 1].seq)
   ) {
-    throw new Error(`Native runtime checkpoint for session ${sessionId} has an invalid schema.`);
+    throw new Error(`Checkpoint runtime native của phiên ${sessionId} có schema không hợp lệ.`);
   }
   return state.events;
 }
@@ -304,7 +304,7 @@ function mergeSessionEvents(
 ): NekoSessionEvent[] {
   const merged = [...transcriptEvents, ...nativeEvents].sort((left, right) => left.seq - right.seq);
   if (!merged.every((event, index, events) => index === 0 || event.seq > events[index - 1].seq)) {
-    throw new Error(`Session ${sessionId} has conflicting durable event sequences.`);
+    throw new Error(`Phiên ${sessionId} có sequence sự kiện bền bị trùng.`);
   }
   return merged;
 }
@@ -347,10 +347,17 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
 
   // This per-session key is the authoritative conversation snapshot. A crash
   // may leave stale index metadata, but hydration reconciles from here and the
-  // additive native companion below.
+  // additive native companion written first below.
   const write = strict ? saveStoreStrict : saveStore;
   const nativeEvents = session.events.filter(isNativeRuntimeSessionEvent);
   const transcriptEvents = session.events.filter((event) => !isNativeRuntimeSessionEvent(event));
+  // Native lifecycle facts are the safety boundary. Publish them before the
+  // backward-compatible transcript so a later transcript failure is detected
+  // as a high-water mismatch instead of silently hiding a native side effect.
+  await write<PersistedNativeRuntimeState>(NATIVE_RUNTIME_STORE, `session:${session.id}`, {
+    v: NATIVE_RUNTIME_SCHEMA_VERSION,
+    events: nativeEvents,
+  });
   await write<PersistedTranscript>(STORE, `session:${session.id}`, {
     v: SCHEMA_VERSION,
     messages: session.messages,
@@ -360,10 +367,6 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     events: transcriptEvents,
     eventHighWaterMark: session.eventHighWaterMark,
     entry,
-  });
-  await write<PersistedNativeRuntimeState>(NATIVE_RUNTIME_STORE, `session:${session.id}`, {
-    v: NATIVE_RUNTIME_SCHEMA_VERSION,
-    events: nativeEvents,
   });
   // The shared index is only a cache. Queue it to prevent lost updates, but do
   // not make a durable model boundary wait for unrelated cache I/O.
@@ -494,7 +497,7 @@ export async function loadSessionSnapshot(sessionId: string): Promise<LoadedSess
   const events = mergeSessionEvents(sessionId, stored.events!, nativeEvents);
   const lastSeq = events[events.length - 1]?.seq ?? 0;
   if ((stored.eventHighWaterMark ?? lastSeq) < lastSeq) {
-    throw new Error(`Session ${sessionId} has an invalid durable event high-water mark.`);
+    throw new Error(`Bộ đếm sự kiện bền của phiên ${sessionId} không hợp lệ.`);
   }
   return {
     messages: stored.messages,
@@ -609,7 +612,7 @@ async function performDeletePersistedSession(sessionId: string): Promise<void> {
       if (rollbackErrors.length > 0) {
         throw new AggregateError(
           [error, ...rollbackErrors],
-          `Could not delete or restore session ${sessionId} snapshots.`,
+          `Không thể xóa hoặc khôi phục snapshot phiên ${sessionId}.`,
         );
       }
       throw error;

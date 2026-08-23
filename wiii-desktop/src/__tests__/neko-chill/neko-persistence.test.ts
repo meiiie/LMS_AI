@@ -8,6 +8,7 @@ import type { Driver, DriverEvent, PermissionDecision } from "@/neko-chill/drive
 import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 
 const storage = new Map<string, unknown>();
+const writeOrder: string[] = [];
 let failTranscriptWrites = false;
 let failIndexWrites = false;
 let failCatalogWrites = false;
@@ -49,6 +50,7 @@ async function saveToMemory(store: string, key: string, value: unknown): Promise
       transcriptWritesBeforeFailure -= 1;
     }
   }
+  writeOrder.push(`${store}:${key}`);
   storage.set(`${store}:${key}`, JSON.parse(JSON.stringify(value)));
 }
 
@@ -223,6 +225,7 @@ describe("neko-chill persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     storage.clear();
+    writeOrder.length = 0;
     failTranscriptWrites = false;
     failIndexWrites = false;
     failCatalogWrites = false;
@@ -326,6 +329,18 @@ describe("neko-chill persistence", () => {
     expect(persisted.events.map((event) => event.seq)).toEqual(
       persisted.events.map((_, eventIndex) => eventIndex + 1),
     );
+  });
+
+  it("persists native lifecycle facts before the compatible transcript", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    writeOrder.length = 0;
+
+    await persistSessionNow(useNekoSessionStore.getState().sessions[id]);
+
+    expect(writeOrder.filter((key) => key.endsWith(`:session:${id}`))).toEqual([
+      `neko-chill-native-runtime.json:session:${id}`,
+      `neko-chill-sessions.json:session:${id}`,
+    ]);
   });
 
   it("reconciles native journal state and replay before enabling a restored session", async () => {

@@ -96,18 +96,9 @@ fn main_webview_has_no_raw_agent_process_primitive() {
         })
         .collect::<Vec<_>>();
 
-    for forbidden in [
-        "allow-neko-spawn-agent",
-        "allow-neko-write-stdin",
-        "allow-neko-kill-agent",
-        "allow-neko-kill-all-agents",
-    ] {
-        assert!(
-            !permissions.contains(&forbidden),
-            "raw primitive remains: {forbidden}"
-        );
-    }
-    for required in [
+    let mut granted = permissions;
+    granted.sort_unstable();
+    let mut reviewed = vec![
         "allow-neko-control-provider-list",
         "allow-neko-control-provider-profiles",
         "allow-neko-control-session-list",
@@ -115,10 +106,10 @@ fn main_webview_has_no_raw_agent_process_primitive() {
         "allow-neko-control-session-write",
         "allow-neko-control-session-cancel",
         "allow-neko-control-events-read",
-    ] {
-        assert!(
-            permissions.contains(&required),
-            "missing scoped command: {required}"
-        );
-    }
+    ];
+    reviewed.sort_unstable();
+    assert_eq!(
+        granted, reviewed,
+        "agent capability grants an unreviewed permission set"
+    );
 }

@@ -282,4 +282,22 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
       event.data.type === "runtime-detached" && event.data.reason === "mode-exit"
     ))).toBe(false);
   });
+
+  it("treats a runtime missing from the registry as unobserved cleanup", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    _clearLiveDriversForTests();
+
+    await disposeAllNekoRuntimes();
+
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(session.status).toBe("error");
+    expect(session.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-cleanup-uncertain",
+      providerId: "neko",
+      reason: "Runtime không thuộc registry khi rời Neko Chill; cleanup không được quan sát.",
+    });
+    expect(session.events.some((event) => (
+      event.data.type === "runtime-detached" && event.data.reason === "mode-exit"
+    ))).toBe(false);
+  });
 });
