@@ -330,6 +330,9 @@ side-effect/committed phases become `unknown_outcome`.
   propagate both post-spawn outcomes instead of misreporting them as
   `not_installed`, including delayed reader failure, drain timeout, or output
   overflow observed after process-tree termination was proven.
+- **FR-060**: Provider-list error presentation MUST preserve cleanup proof: a
+  proven post-spawn probe failure MUST NOT be labelled as unproven cleanup,
+  while genuinely uncertain termination MUST remain explicit and fail closed.
 
 ### Non-goals
 
@@ -389,3 +392,5 @@ side-effect/committed phases become `unknown_outcome`.
   observable, Codex handoff cancels renderer-known identities even when native
   discovery fails, post-spawn cleanup classification is machine-readable, and
   provider discovery propagates every post-spawn failure disposition.
+- **SC-016**: Tests prove provider discovery messages distinguish proven
+  process-tree cleanup from cleanup whose outcome remains uncertain.

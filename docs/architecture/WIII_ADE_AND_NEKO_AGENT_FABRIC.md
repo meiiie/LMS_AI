@@ -235,7 +235,8 @@ Implemented across the foundation and Phase 2A slices:
   and session fact; only pre-spawn rejection uses the ordinary rejection path.
   Discovery propagates either post-spawn outcome instead of reporting the
   provider as not installed, including delayed reader failures after proven
-  probe termination;
+  probe termination, and provider-list diagnostics distinguish that proof from
+  genuinely uncertain cleanup;
 - Codex account bootstrap cleanup is serialized by a module-level owner outside
   React; failed cleanup remains retryable and blocks replacement launch. A
   workspace handoff reconciles both control-client identities and durable

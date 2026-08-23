@@ -156,6 +156,8 @@
   from renderer-retained identities before durable discovery, and route proven
   post-spawn cleanup through the retained terminal-fact path without degrading
   post-spawn probe failures to `not_installed`.
+- [x] T533 Preserve proven versus unproven process-tree cleanup in provider
+  discovery errors so presentation cannot manufacture false uncertainty.
 
 ## Dependencies
 

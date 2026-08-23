@@ -674,6 +674,18 @@ fn host_supports_provider_containment() -> bool {
     cfg!(windows)
 }
 
+fn format_discovery_failure(provider_name: &str, error: &SpawnOwnedError) -> String {
+    if error.cleanup_unproven() {
+        format!("provider discovery cleanup could not be proven for '{provider_name}': {error}")
+    } else if error.post_spawn_cleanup_proven() {
+        format!(
+            "provider discovery failed after process-tree cleanup was proven for '{provider_name}': {error}"
+        )
+    } else {
+        format!("provider discovery failed before spawn for '{provider_name}': {error}")
+    }
+}
+
 pub fn resolve(provider_id: &str) -> Result<ResolvedProvider, SpawnOwnedError> {
     let provider = definition(provider_id).ok_or_else(|| {
         SpawnOwnedError::safe(io::Error::new(
@@ -702,12 +714,8 @@ pub fn list() -> Result<Vec<AgentInfo>, String> {
         .copied()
         .map(|provider| {
             let resolved = if host_supports_provider_containment() {
-                probe_definition(provider).map_err(|error| {
-                    format!(
-                        "provider discovery cleanup could not be proven for '{}': {error}",
-                        provider.name
-                    )
-                })?
+                probe_definition(provider)
+                    .map_err(|error| format_discovery_failure(provider.name, &error))?
             } else {
                 None
             };
@@ -936,6 +944,18 @@ mod tests {
         assert!(!(pre_spawn.cleanup_unproven() || pre_spawn.post_spawn_cleanup_proven()));
         assert!(proven.cleanup_unproven() || proven.post_spawn_cleanup_proven());
         assert!(uncertain.cleanup_unproven() || uncertain.post_spawn_cleanup_proven());
+    }
+
+    #[test]
+    fn discovery_error_reports_cleanup_proof_without_false_uncertainty() {
+        let proven = SpawnOwnedError::after_proven_cleanup(io::Error::other("reader failed"));
+        let uncertain =
+            SpawnOwnedError::after_unproven_cleanup(io::Error::other("termination failed"));
+
+        let proven_message = format_discovery_failure("Codex", &proven);
+        assert!(proven_message.contains("cleanup was proven"));
+        assert!(!proven_message.contains("could not be proven"));
+        assert!(format_discovery_failure("Codex", &uncertain).contains("could not be proven"));
     }
 
     #[cfg(unix)]
