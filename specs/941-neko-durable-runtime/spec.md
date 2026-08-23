@@ -165,7 +165,9 @@ side-effect/committed phases become `unknown_outcome`.
   and `unknown_outcome` identities MUST NOT be pruned automatically.
 - **FR-025**: Runtime shutdown MUST close admission before draining owned
   processes. A provider probe already in flight MUST re-check admission before
-  session creation or spawn.
+  spawn. A fresh start MUST publish its `Starting/Accepted` session projection
+  before the lifecycle lock is released for provider discovery, so reconnect
+  cannot mistake an accepted operation for an idle Task.
 - **FR-026**: If both bounded IPC attempts lose a `session/start` response,
   the TypeScript client MUST retain the same request, agent-session, Run,
   Environment, listener and early transport buffer for a caller-level retry,
@@ -190,6 +192,13 @@ side-effect/committed phases become `unknown_outcome`.
   success/failure MUST use a tagged outcome and MUST NOT depend on truthiness of
   the rejection reason. Formatting an arbitrary rejection value MUST be
   non-throwing and bounded so the durable tombstone cannot be skipped.
+- **FR-031**: Native cancellation MUST verify complete process-tree termination.
+  An OS termination failure or missing owner for a side-effecting live session
+  MUST transition the request and native session to `unknown_outcome`; it MUST
+  NOT commit `cancelled`, `failed`, or another respawn-permitting terminal fact.
+- **FR-032**: The Codex account bootstrap UI MUST keep a stable logical caller
+  identity across retry attempts in one workspace. A lost native response MUST
+  therefore recover the retained start rather than mint another App Server.
 
 ### Non-goals
 

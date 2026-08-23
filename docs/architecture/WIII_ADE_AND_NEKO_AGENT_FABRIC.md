@@ -94,6 +94,13 @@ read-model reconciliation, not a second authority: native `unknown_outcome`
 and active sessions without a live renderer transport stay locked against
 automatic respawn.
 
+For a fresh start, Rust publishes the durable `Starting/Accepted` session
+projection before releasing its lifecycle lock for provider discovery. A UI
+reload during a slow probe therefore sees the accepted owner and cannot infer
+that the Task is idle. Cancellation is terminal only after process-tree
+termination succeeds; an unavailable process owner or failed OS tree kill is
+recorded as `unknown_outcome`, never as permission to launch a replacement.
+
 The compatibility client also bounds bootstrap output before a provider
 adapter attaches: at most 256 frames and 8 MiB are retained. Overflow detaches
 the renderer listeners and asks the native authority to cancel the same
@@ -165,9 +172,12 @@ Implemented across the foundation and Phase 2A slices:
 - an in-process Rust runtime with one-writer file lease and SQLite WAL;
 - Rust-owned provider resolution, approved arguments and process/session maps;
 - request-id idempotency for start, provider-frame write and cancellation;
+- pre-probe `Starting/Accepted` projection visibility and verified process-tree
+  cancellation, with unproven termination converted to `unknown_outcome`;
 - caller-level start retry retains the same logical identity after unresolved
   IPC delivery, including its original Run/Environment binding and buffered
-  bootstrap/exit events across a fresh RuntimeRegistry preparation;
+  bootstrap/exit events across a fresh RuntimeRegistry preparation; the Codex
+  account probe also retains one caller identity across its retry UI;
   completed/failed identities have a 90-day replay window while uncertain
   identities are not automatically pruned;
 - conservative recovery phases: `accepted`, `dispatched`,

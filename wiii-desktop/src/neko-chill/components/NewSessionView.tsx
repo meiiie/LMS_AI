@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Check, FolderOpen, LoaderCircle, ShieldCheck } from "lucide-react";
-import { v4 as uuidv4 } from "uuid";
 import {
   loadAgentProfiles,
   useNekoAgentStore,
@@ -17,6 +16,10 @@ import {
   chooseWorkspaceFolder,
   type WorkspaceRef,
 } from "../workspace";
+import {
+  codexBootstrapIdentity,
+  type CodexBootstrapIdentity,
+} from "../codex-bootstrap-identity";
 
 function recentWorkspaces(): WorkspaceRef[] {
   const seen = new Set<string>();
@@ -47,6 +50,7 @@ export function NewSessionView() {
   const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
   const [codexBootstrapAttempt, setCodexBootstrapAttempt] = useState(0);
   const codexAccountSession = useRef<CodexAccountSession | null>(null);
+  const codexBootstrap = useRef<CodexBootstrapIdentity | null>(null);
   const recent = useMemo(() => recentWorkspaces(), [sessions]);
   const neko = agents.find((agent) => agent.id === "neko" && agent.found);
   const codex = agents.find((agent) => agent.id === "codex" && agent.found);
@@ -95,11 +99,13 @@ export function NewSessionView() {
     }
 
     setCodexAccountState("checking");
+    const bootstrapIdentity = codexBootstrapIdentity(codexBootstrap.current, workspace.path);
+    codexBootstrap.current = bootstrapIdentity;
     void getNekoControlClient().spawnProvider({
       providerId: "codex",
-      // A finished bootstrap run is terminal. Every account probe therefore
-      // gets a new execution identity instead of attempting to reopen it.
-      clientSessionId: `codex-account-bootstrap-${uuidv4()}`,
+      // Retry the same logical caller identity until Neko proves the previous
+      // start terminal. The control client owns fresh native Run/session IDs.
+      clientSessionId: bootstrapIdentity.clientSessionId,
       workspacePath: workspace.path,
     })
       .then(async ({ transport }) => {

@@ -223,23 +223,65 @@ impl NekoRuntime {
             };
         }
 
-        // Version/profile discovery can invoke a slow or broken provider shim.
-        // The request identity is durable first, but this read-only probe must
-        // not block lifecycle traffic for live agents.
-        let resolved = match provider::resolve(&request.provider_id) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                let _operation = lock(&self.inner.operations);
+        // Publish the accepted native projection before releasing the
+        // lifecycle lock for provider discovery. A renderer that reconnects
+        // during a slow probe must see this Starting/Accepted owner and keep
+        // the visible Task blocked; otherwise it could restore the Task as
+        // exited and launch a second provider while this start is still live.
+        {
+            let _operation = lock(&self.inner.operations);
+            if let Err(error) = self.ensure_accepting_starts() {
                 return match self
                     .inner
                     .journal
-                    .fail_request(&request.request_id, "provider_unavailable")
+                    .fail_request(&request.request_id, "runtime_shutting_down")
                 {
                     Ok(()) => Err(error),
                     Err(recording_error) => Err(format!(
                         "{error}; additionally failed to persist rejected start: {recording_error}"
                     )),
                 };
+            }
+            let created = self.inner.journal.insert_session_with_event(
+                NewSession {
+                    agent_session_id: &request.agent_session_id,
+                    task_id: &request.task_id,
+                    run_id: &request.run_id,
+                    environment_id: &request.environment_id,
+                    provider_id: &request.provider_id,
+                    workspace_path: &request.workspace_path,
+                },
+                "session.created",
+                json!({ "providerId": request.provider_id }),
+            );
+            match created {
+                Ok(event) => {
+                    let _ = app.emit("neko-control://event", event);
+                }
+                Err(error) => {
+                    let _ = self
+                        .inner
+                        .journal
+                        .fail_request(&request.request_id, "invalid_state");
+                    return Err(error);
+                }
+            }
+        }
+
+        // Version/profile discovery can invoke a slow or broken provider shim.
+        // The request and its Starting projection are durable first, but this
+        // read-only probe must not block lifecycle traffic for live agents.
+        let resolved = match provider::resolve(&request.provider_id) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                let _operation = lock(&self.inner.operations);
+                return Err(self.reject_start_error(
+                    &app,
+                    &request,
+                    "provider_unavailable",
+                    None,
+                    error,
+                ));
             }
         };
         let args = match resolved
@@ -249,55 +291,44 @@ impl NekoRuntime {
             Ok(args) => args,
             Err(error) => {
                 let _operation = lock(&self.inner.operations);
-                return match self
-                    .inner
-                    .journal
-                    .fail_request(&request.request_id, "invalid_request")
-                {
-                    Ok(()) => Err(error),
-                    Err(recording_error) => Err(format!(
-                        "{error}; additionally failed to persist rejected start: {recording_error}"
-                    )),
-                };
+                return Err(self.reject_start_error(
+                    &app,
+                    &request,
+                    "invalid_request",
+                    resolved.version.as_deref(),
+                    error,
+                ));
             }
         };
         let _operation = lock(&self.inner.operations);
         if let Err(error) = self.ensure_accepting_starts() {
+            return Err(self.reject_start_error(
+                &app,
+                &request,
+                "runtime_shutting_down",
+                resolved.version.as_deref(),
+                error,
+            ));
+        }
+        let current = self
+            .inner
+            .journal
+            .session(&request.agent_session_id)?
+            .ok_or_else(|| "accepted Neko session projection disappeared".to_string())?;
+        if current.state != RunState::Starting
+            || current.operation_phase != OperationPhase::Accepted
+        {
+            let error = "Neko session start was superseded before provider dispatch".to_string();
             return match self
                 .inner
                 .journal
-                .fail_request(&request.request_id, "runtime_shutting_down")
+                .fail_request(&request.request_id, "start_superseded")
             {
                 Ok(()) => Err(error),
                 Err(recording_error) => Err(format!(
                     "{error}; additionally failed to persist rejected start: {recording_error}"
                 )),
             };
-        }
-
-        let created = self.inner.journal.insert_session_with_event(
-            NewSession {
-                agent_session_id: &request.agent_session_id,
-                task_id: &request.task_id,
-                run_id: &request.run_id,
-                environment_id: &request.environment_id,
-                provider_id: &request.provider_id,
-                workspace_path: &request.workspace_path,
-            },
-            "session.created",
-            json!({ "providerId": request.provider_id }),
-        );
-        match created {
-            Ok(event) => {
-                let _ = app.emit("neko-control://event", event);
-            }
-            Err(error) => {
-                let _ = self
-                    .inner
-                    .journal
-                    .fail_request(&request.request_id, "invalid_state");
-                return Err(error);
-            }
         }
 
         if let Err(error) = self.advance_start_phase(&request, OperationPhase::Dispatched) {
@@ -340,7 +371,7 @@ impl NekoRuntime {
         let (stdin, stdout) = match (stdin, stdout) {
             (Some(stdin), Some(stdout)) => (stdin, stdout),
             _ => {
-                terminate_child_tree(&mut child);
+                let _ = terminate_child_tree(&mut child);
                 let _ = self.inner.journal.mark_request_unknown(&request.request_id);
                 let _ = self.transition_session_event(
                     &app,
@@ -362,7 +393,7 @@ impl NekoRuntime {
         let writer = match spawn_writer(stdin) {
             Ok(writer) => writer,
             Err(error) => {
-                terminate_child_tree(&mut child);
+                let _ = terminate_child_tree(&mut child);
                 let _ = self.inner.journal.mark_request_unknown(&request.request_id);
                 let _ = self.transition_session_event(
                     &app,
@@ -390,9 +421,10 @@ impl NekoRuntime {
         let reader = match spawn_reader(runtime, app.clone(), session_id, stdout) {
             Ok(reader) => reader,
             Err(error) => {
-                if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id)
+                if let Some(mut process) =
+                    lock(&self.inner.processes).remove(&request.agent_session_id)
                 {
-                    kill_proc(process);
+                    let _ = kill_proc(&mut process);
                 }
                 let _ = self.inner.journal.mark_request_unknown(&request.request_id);
                 let _ = self.transition_session_event(
@@ -417,9 +449,10 @@ impl NekoRuntime {
             Ok(monitor_start) => monitor_start,
             Err(error) => {
                 drop(reader.start);
-                if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id)
+                if let Some(mut process) =
+                    lock(&self.inner.processes).remove(&request.agent_session_id)
                 {
-                    kill_proc(process);
+                    let _ = kill_proc(&mut process);
                 }
                 let _ = self.inner.journal.mark_request_unknown(&request.request_id);
                 let _ = self.transition_session_event(
@@ -482,8 +515,9 @@ impl NekoRuntime {
         if let Err(error) = ownership_commit {
             drop(reader.start);
             drop(monitor_start);
-            if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id) {
-                kill_proc(process);
+            if let Some(mut process) = lock(&self.inner.processes).remove(&request.agent_session_id)
+            {
+                let _ = kill_proc(&mut process);
             }
             let _ = self.inner.journal.mark_request_unknown(&request.request_id);
             let _ = self.transition_session_event(
@@ -663,8 +697,25 @@ impl NekoRuntime {
             .journal
             .set_request_phase(&request.request_id, OperationPhase::SideEffectStarted)?;
         let process = lock(&self.inner.processes).remove(&request.agent_session_id);
-        if let Some(process) = process {
-            kill_proc(process);
+        let accepted_without_process = process.is_none()
+            && session.state == RunState::Starting
+            && session.operation_phase == OperationPhase::Accepted;
+        let termination_error = match process {
+            Some(mut process) => kill_proc(&mut process).err(),
+            None if !session.state.is_terminal() && !accepted_without_process => Some(
+                "native process ownership disappeared before cancellation could prove termination"
+                    .to_string(),
+            ),
+            None => None,
+        };
+        if let Some(error) = termination_error {
+            return Err(self.mark_termination_unknown(
+                app,
+                &request.request_id,
+                &request.agent_session_id,
+                "cancel_termination_unproven",
+                error,
+            ));
         }
         self.inner
             .journal
@@ -704,21 +755,42 @@ impl NekoRuntime {
             let mut processes = lock(&self.inner.processes);
             processes.drain().collect::<Vec<_>>()
         };
-        for (agent_session_id, process) in processes {
-            kill_proc(process);
+        for (agent_session_id, mut process) in processes {
+            let termination = kill_proc(&mut process);
             if let Ok(Some(session)) = self.inner.journal.session(&agent_session_id) {
                 if !session.state.is_terminal() {
-                    let _ = self.transition_session_event(
-                        app,
-                        &agent_session_id,
-                        RunState::Cancelled,
-                        OperationPhase::Completed,
-                        "active",
-                        None,
-                        None,
-                        "run.state_changed",
-                        json!({ "state": "cancelled", "reason": "application_exit" }),
-                    );
+                    match termination {
+                        Ok(()) => {
+                            let _ = self.transition_session_event(
+                                app,
+                                &agent_session_id,
+                                RunState::Cancelled,
+                                OperationPhase::Completed,
+                                "active",
+                                None,
+                                None,
+                                "run.state_changed",
+                                json!({ "state": "cancelled", "reason": "application_exit" }),
+                            );
+                        }
+                        Err(error) => {
+                            let _ = self.transition_session_event(
+                                app,
+                                &agent_session_id,
+                                RunState::UnknownOutcome,
+                                OperationPhase::UnknownOutcome,
+                                "unknown_outcome",
+                                None,
+                                None,
+                                "run.state_changed",
+                                json!({
+                                    "state": "unknown_outcome",
+                                    "reason": "shutdown_termination_unproven",
+                                    "detail": bounded_error(&error),
+                                }),
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -826,6 +898,47 @@ impl NekoRuntime {
         }
     }
 
+    fn mark_termination_unknown(
+        &self,
+        app: &AppHandle,
+        request_id: &str,
+        agent_session_id: &str,
+        reason: &str,
+        error: String,
+    ) -> String {
+        let detail = bounded_error(&error);
+        let mut recording_failures = Vec::new();
+        if let Err(recording_error) = self.inner.journal.mark_request_unknown(request_id) {
+            recording_failures.push(recording_error);
+        }
+        if let Err(recording_error) = self.transition_session_event(
+            app,
+            agent_session_id,
+            RunState::UnknownOutcome,
+            OperationPhase::UnknownOutcome,
+            "unknown_outcome",
+            None,
+            None,
+            "run.state_changed",
+            json!({
+                "state": "unknown_outcome",
+                "reason": reason,
+                "detail": detail,
+            }),
+        ) {
+            recording_failures.push(recording_error);
+        }
+        let mut message = format!(
+            "provider process tree termination could not be proven: {}",
+            bounded_error(&error)
+        );
+        if !recording_failures.is_empty() {
+            message.push_str("; additionally failed to persist part of the unknown outcome: ");
+            message.push_str(&recording_failures.join("; "));
+        }
+        unknown_outcome_error(message)
+    }
+
     fn advance_start_phase(
         &self,
         request: &SessionStartRequest,
@@ -864,7 +977,8 @@ impl NekoRuntime {
         // The provider leader may exit while a descendant retains inherited
         // stdio. Tear down the isolated process tree so the reader cannot be
         // stranded and no orphan survives after lifecycle ownership ends.
-        terminate_child_tree(&mut process.child);
+        let termination =
+            terminate_child_tree(&mut process.child).map_err(|error| bounded_error(&error));
         // Preserve the provider's final bounded frames before notifying the
         // renderer of exit. A broken descendant may still retain the pipe, so
         // draining is bounded and happens without the global lifecycle lock.
@@ -874,24 +988,41 @@ impl NekoRuntime {
             return ProcessPoll::Exited(code);
         };
         if !session.state.is_terminal() {
-            let _ = self.transition_session_event(
-                app,
-                agent_session_id,
-                RunState::Failed,
-                OperationPhase::Failed,
-                "continuity_lost",
-                None,
-                None,
-                "run.state_changed",
-                json!({ "state": "failed", "reason": reason }),
-            );
+            let _ = match &termination {
+                Ok(()) => self.transition_session_event(
+                    app,
+                    agent_session_id,
+                    RunState::Failed,
+                    OperationPhase::Failed,
+                    "continuity_lost",
+                    None,
+                    None,
+                    "run.state_changed",
+                    json!({ "state": "failed", "reason": reason }),
+                ),
+                Err(error) => self.transition_session_event(
+                    app,
+                    agent_session_id,
+                    RunState::UnknownOutcome,
+                    OperationPhase::UnknownOutcome,
+                    "unknown_outcome",
+                    None,
+                    None,
+                    "run.state_changed",
+                    json!({
+                        "state": "unknown_outcome",
+                        "reason": "exit_termination_unproven",
+                        "detail": error,
+                    }),
+                ),
+            };
         }
         let _ = self.emit_control_event(
             app,
             &session.run_id,
             "process.exited",
             agent_session_id,
-            json!({ "exitCode": code }),
+            json!({ "exitCode": code, "terminationProven": termination.is_ok() }),
         );
         ProcessPoll::Exited(code)
     }
@@ -899,10 +1030,10 @@ impl NekoRuntime {
     fn fail_provider_protocol(&self, app: &AppHandle, agent_session_id: &str) {
         let _operation = lock(&self.inner.operations);
         let process = lock(&self.inner.processes).remove(agent_session_id);
-        let Some(process) = process else {
+        let Some(mut process) = process else {
             return;
         };
-        kill_proc(process);
+        let termination = kill_proc(&mut process);
         let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
             let _ = app.emit(
                 &format!("neko-session://exit/{agent_session_id}"),
@@ -911,24 +1042,45 @@ impl NekoRuntime {
             return;
         };
         if !session.state.is_terminal() {
-            let _ = self.transition_session_event(
-                app,
-                agent_session_id,
-                RunState::Failed,
-                OperationPhase::Failed,
-                "continuity_lost",
-                None,
-                None,
-                "run.state_changed",
-                json!({ "state": "failed", "reason": "provider_protocol_failure" }),
-            );
+            let _ = match &termination {
+                Ok(()) => self.transition_session_event(
+                    app,
+                    agent_session_id,
+                    RunState::Failed,
+                    OperationPhase::Failed,
+                    "continuity_lost",
+                    None,
+                    None,
+                    "run.state_changed",
+                    json!({ "state": "failed", "reason": "provider_protocol_failure" }),
+                ),
+                Err(error) => self.transition_session_event(
+                    app,
+                    agent_session_id,
+                    RunState::UnknownOutcome,
+                    OperationPhase::UnknownOutcome,
+                    "unknown_outcome",
+                    None,
+                    None,
+                    "run.state_changed",
+                    json!({
+                        "state": "unknown_outcome",
+                        "reason": "protocol_failure_termination_unproven",
+                        "detail": error,
+                    }),
+                ),
+            };
         }
         let _ = self.emit_control_event(
             app,
             &session.run_id,
             "process.exited",
             agent_session_id,
-            json!({ "exitCode": null, "reason": "provider_protocol_failure" }),
+            json!({
+                "exitCode": null,
+                "reason": "provider_protocol_failure",
+                "terminationProven": termination.is_ok(),
+            }),
         );
         let _ = app.emit(
             &format!("neko-session://exit/{agent_session_id}"),
@@ -1128,8 +1280,17 @@ fn read_bounded_frame<R: BufRead>(
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
-fn kill_proc(mut process: AgentProc) {
-    terminate_child_tree(&mut process.child);
+fn kill_proc(process: &mut AgentProc) -> Result<(), String> {
+    terminate_child_tree(&mut process.child).map_err(|error| {
+        format!(
+            "terminate provider process tree failed: {}",
+            bounded_error(&error)
+        )
+    })
+}
+
+fn bounded_error(error: &impl std::fmt::Display) -> String {
+    error.to_string().chars().take(4_096).collect()
 }
 
 #[cfg(test)]

@@ -40,6 +40,10 @@ method and logical target before dispatch.
   availability is checked only for a new execution. A recorded or unresolved
   start therefore remains replayable if its workspace was renamed or is
   temporarily unavailable.
+- A new start publishes a listable `Starting/Accepted` session and its creation
+  event before provider discovery releases the lifecycle lock. Account-probe
+  retries keep one workspace-scoped caller identity, allowing the compatibility
+  client to recover the retained native operation after lost IPC responses.
 
 Completed and failed request identities are replayable for 90 days. Startup
 maintenance may prune them after that window. Requests in `accepted`,
@@ -78,14 +82,17 @@ Environment, even when the adapter resumes the same provider-owned
 conversation ID. A terminal Run is never reopened to represent a new process.
 
 Provider discovery is read-only and occurs outside the global lifecycle lock
-after request identity is durably accepted. Completed request replay is
+after request identity and its `Starting/Accepted` session projection are
+durably accepted. Completed request replay is
 resolved before discovery, so a later provider upgrade or removal cannot
 invalidate a recorded start result. Provider stdout EOF does not prove process
 exit; a dedicated monitor polls the owned child independently of stdout reads.
 If the leader exits while a descendant retains inherited stdio, Neko closes the
-isolated process tree and commits the exit without waiting for pipe EOF. Runtime
+isolated process tree without waiting for pipe EOF. Cancellation or exit may
+commit a respawn-permitting terminal state only when the OS termination result
+proves that tree stopped; otherwise Neko records `unknown_outcome`. Runtime
 shutdown closes start admission before draining children; a probe already in
-flight re-checks that gate before creating a session or spawning a process.
+flight re-checks that gate before spawning a process.
 
 Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution

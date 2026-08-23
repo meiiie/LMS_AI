@@ -1404,6 +1404,41 @@ mod tests {
     }
 
     #[test]
+    fn accepted_start_projection_is_listable_before_dispatch() {
+        let journal = Journal::in_memory();
+        let event = journal
+            .insert_session_with_event(
+                session("session-a", "run-a"),
+                "session.created",
+                json!({ "providerId": "codex" }),
+            )
+            .unwrap();
+
+        let record = journal.sessions(Some("run-a")).unwrap().pop().unwrap();
+        assert_eq!(record.state, RunState::Starting);
+        assert_eq!(record.operation_phase, OperationPhase::Accepted);
+        assert_eq!(record.continuity, "active");
+        assert_eq!(event.seq, 1);
+
+        journal
+            .update_session_with_event(
+                "session-a",
+                RunState::Cancelled,
+                OperationPhase::Completed,
+                "active",
+                None,
+                None,
+                "run.state_changed",
+                json!({ "state": "cancelled", "reason": "cancelled_before_dispatch" }),
+            )
+            .unwrap();
+        assert_eq!(
+            journal.session("session-a").unwrap().unwrap().state,
+            RunState::Cancelled
+        );
+    }
+
+    #[test]
     fn session_creation_and_event_commit_or_roll_back_together() {
         let journal = Journal::in_memory();
         lock(&journal.connection)

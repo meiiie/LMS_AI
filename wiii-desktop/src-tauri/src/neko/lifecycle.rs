@@ -149,7 +149,7 @@ pub fn can_advance_operation(from: OperationPhase, to: OperationPhase) -> bool {
         (from, to),
         (
             OperationPhase::Accepted,
-            OperationPhase::Dispatched | OperationPhase::Failed
+            OperationPhase::Dispatched | OperationPhase::Completed | OperationPhase::Failed
         ) | (
             OperationPhase::Dispatched,
             OperationPhase::SideEffectStarted | OperationPhase::Failed
@@ -228,5 +228,13 @@ mod tests {
             recovery_disposition(OperationPhase::Committed),
             RecoveryDisposition::UnknownOutcome
         );
+    }
+
+    #[test]
+    fn accepted_operation_can_complete_without_dispatching_a_side_effect() {
+        assert!(can_advance_operation(
+            OperationPhase::Accepted,
+            OperationPhase::Completed
+        ));
     }
 }

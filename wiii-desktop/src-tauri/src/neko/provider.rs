@@ -123,12 +123,12 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
         let capture_len = match capture.len() {
             Ok(capture_len) => capture_len,
             Err(error) => {
-                terminate_child_tree(&mut child);
+                let _ = terminate_child_tree(&mut child);
                 return Err(error);
             }
         };
         if capture_len > MAX_PROBE_OUTPUT_BYTES as u64 {
-            terminate_child_tree(&mut child);
+            let _ = terminate_child_tree(&mut child);
             capture.truncate_to_limit();
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -138,7 +138,7 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
         let child_status = match child.try_wait() {
             Ok(child_status) => child_status,
             Err(error) => {
-                terminate_child_tree(&mut child);
+                let _ = terminate_child_tree(&mut child);
                 return Err(error);
             }
         };
@@ -146,11 +146,11 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
             // A probe is not allowed to leave descendants behind. On Unix the
             // dedicated process group remains addressable after its leader
             // exits; Windows uses taskkill's tree mode on a best-effort basis.
-            terminate_child_tree(&mut child);
+            let _ = terminate_child_tree(&mut child);
             break status;
         }
         if Instant::now() >= deadline {
-            terminate_child_tree(&mut child);
+            let _ = terminate_child_tree(&mut child);
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "provider probe timed out",
@@ -219,27 +219,45 @@ pub(crate) fn hidden(command: &mut Command) -> &mut Command {
     command
 }
 
-pub(crate) fn terminate_child_tree(child: &mut Child) {
-    #[cfg(windows)]
-    {
-        let pid = child.id();
-        let mut command = Command::new("taskkill");
-        command
-            .args(["/T", "/F", "/PID", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-        let _ = command.status();
+#[cfg(windows)]
+pub(crate) fn terminate_child_tree(child: &mut Child) -> io::Result<()> {
+    let pid = child.id();
+    let mut command = Command::new("taskkill");
+    command
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW);
+    let status = command.status()?;
+    if !status.success() {
+        // Do not convert a best-effort leader kill into proof that descendants
+        // lost workspace access. The runtime records unknown_outcome and keeps
+        // the visible Task blocked whenever /T cannot prove the tree stopped.
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::other(format!(
+            "taskkill could not terminate provider process tree {pid}: {status}"
+        )));
     }
-    #[cfg(unix)]
-    unsafe {
-        // All approved provider commands are placed in a dedicated process
-        // group by hidden(). A negative PID targets that complete group.
-        let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
+    child.wait().map(|_| ())
+}
+
+#[cfg(unix)]
+pub(crate) fn terminate_child_tree(child: &mut Child) -> io::Result<()> {
+    // All approved provider commands are placed in a dedicated process group
+    // by hidden(). A negative PID targets that complete group. ESRCH is the
+    // only safe non-success result: it proves the isolated group is absent.
+    let result = unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+    if result != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    child.wait().map(|_| ())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -552,6 +570,33 @@ mod tests {
             Ok(output) => assert!(output.stdout.len() <= MAX_PROBE_OUTPUT_BYTES),
             Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
         }
+    }
+
+    #[test]
+    fn process_tree_termination_returns_a_verified_result() {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("powershell.exe");
+            command.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ]);
+            command
+        };
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 30"]);
+            command
+        };
+        hidden(&mut command);
+        let mut child = command.spawn().unwrap();
+
+        terminate_child_tree(&mut child).unwrap();
+        assert!(child.try_wait().unwrap().is_some());
     }
 
     #[cfg(unix)]
