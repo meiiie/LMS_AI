@@ -30,9 +30,10 @@ async function observeCleanup(operation: Promise<unknown>): Promise<CleanupOutco
 export class RuntimeScope {
   private readonly disposers: Disposer[] = [];
   private disposePromise: Promise<void> | null = null;
+  private disposalStarted = false;
 
   add(disposer: Disposer): void {
-    if (this.disposePromise) {
+    if (this.disposalStarted) {
       throw new Error("Không thể thêm tài nguyên vào runtime đã đóng.");
     }
     this.disposers.push(disposer);
@@ -40,23 +41,39 @@ export class RuntimeScope {
 
   dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
-    this.disposePromise = (async () => {
+    this.disposalStarted = true;
+    if (this.disposers.length === 0) return Promise.resolve();
+    const attempt = (async () => {
       let failed = false;
       let firstError: unknown;
+      const failedDisposers: Disposer[] = [];
       for (const disposer of [...this.disposers].reverse()) {
         try {
           await disposer();
         } catch (error) {
+          failedDisposers.push(disposer);
           if (!failed) {
             failed = true;
             firstError = error;
           }
         }
       }
-      this.disposers.length = 0;
+      // Successful siblings are permanently released. Failed idempotent
+      // cleanup authorities remain in registration order for an explicit
+      // later retry with the same provider cancellation identity.
+      this.disposers.splice(0, this.disposers.length, ...failedDisposers.reverse());
       if (failed) throw firstError;
     })();
-    return this.disposePromise;
+    this.disposePromise = attempt;
+    void attempt.then(
+      () => {
+        if (this.disposePromise === attempt) this.disposePromise = null;
+      },
+      () => {
+        if (this.disposePromise === attempt) this.disposePromise = null;
+      },
+    );
+    return attempt;
   }
 }
 
@@ -126,6 +143,7 @@ export class RuntimeRegistry {
   private readonly sessionGenerations = new Map<string, number>();
   private readonly pendingPreparations = new Map<string, Set<RuntimePreparation>>();
   private readonly inFlightDisposals = new Map<string, Promise<void>>();
+  private readonly retainedCleanupScopes = new Map<string, Set<RuntimeScope>>();
   private generation = 0;
 
   get(sessionId: string): RuntimeProviderSnapshot | null {
@@ -143,21 +161,23 @@ export class RuntimeRegistry {
         ...this.bindings.keys(),
         ...this.pendingPreparations.keys(),
         ...this.inFlightDisposals.keys(),
+        ...this.retainedCleanupScopes.keys(),
       ]),
     ];
   }
 
-  private joinDisposal(sessionId: string, work?: Promise<void>): Promise<void> | null {
+  private joinDisposal(
+    sessionId: string,
+    work?: () => Promise<void>,
+  ): Promise<void> | null {
     const previous = this.inFlightDisposals.get(sessionId);
     if (!work) return previous ?? null;
+    // A later cleanup request joins the active attempt, then gets one chance
+    // to retry any authority retained by that attempt. Prior rejection is not
+    // itself permanent state; the retained scope is.
     const combined = previous
-      ? Promise.allSettled([previous, work]).then((results) => {
-          const failed = results.find(
-            (result): result is PromiseRejectedResult => result.status === "rejected",
-          );
-          if (failed) throw failed.reason;
-        })
-      : work;
+      ? previous.then(work, work)
+      : Promise.resolve().then(work);
     let tracked!: Promise<void>;
     tracked = combined.then(
       () => {
@@ -166,9 +186,9 @@ export class RuntimeRegistry {
         }
       },
       (error) => {
-        // Retain failed ownership. Later delete, replacement, or mode teardown
-        // must keep observing the cleanup failure instead of forgetting a
-        // child process that may still be alive.
+        if (this.inFlightDisposals.get(sessionId) === tracked) {
+          this.inFlightDisposals.delete(sessionId);
+        }
         throw error;
       },
     );
@@ -181,27 +201,40 @@ export class RuntimeRegistry {
     scopes: Iterable<RuntimeScope>,
     completions: Iterable<Promise<void>> = [],
   ): Promise<void> | null {
-    const tasks = [
-      ...new Set([
-        ...[...scopes].map((scope) => scope.dispose()),
-        ...completions,
-      ]),
-    ];
-    if (tasks.length === 0) return this.joinDisposal(sessionId);
-    const work = Promise.allSettled(tasks).then((results) => {
+    const suppliedScopes = [...new Set(scopes)];
+    if (suppliedScopes.length > 0) {
+      const retained = this.retainedCleanupScopes.get(sessionId) ?? new Set<RuntimeScope>();
+      for (const scope of suppliedScopes) retained.add(scope);
+      this.retainedCleanupScopes.set(sessionId, retained);
+    }
+    const completionList = [...new Set(completions)];
+    if (!this.retainedCleanupScopes.has(sessionId) && completionList.length === 0) {
+      return this.joinDisposal(sessionId);
+    }
+    return this.joinDisposal(sessionId, async () => {
+      const retained = [
+        ...(this.retainedCleanupScopes.get(sessionId) ?? new Set<RuntimeScope>()),
+      ];
+      const results = await Promise.allSettled([
+        ...retained.map((scope) => scope.dispose()),
+        ...completionList,
+      ]);
+      const retainedSet = this.retainedCleanupScopes.get(sessionId);
+      retained.forEach((scope, index) => {
+        if (results[index]?.status === "fulfilled") retainedSet?.delete(scope);
+      });
+      if (retainedSet?.size === 0) this.retainedCleanupScopes.delete(sessionId);
       const failed = results.find(
         (result): result is PromiseRejectedResult => result.status === "rejected",
       );
       if (failed) throw failed.reason;
     });
-    return this.joinDisposal(sessionId, work);
   }
 
-  private retainDisposalFailure(sessionId: string, error: unknown): void {
-    const retained = this.joinDisposal(sessionId, Promise.reject(error));
-    // Ownership is retained by inFlightDisposals; this observer only prevents
-    // an unhandled rejection when no teardown is concurrently joining it.
-    void retained?.catch(() => {});
+  private retainCleanupScope(sessionId: string, scope: RuntimeScope): void {
+    const retained = this.retainedCleanupScopes.get(sessionId) ?? new Set<RuntimeScope>();
+    retained.add(scope);
+    this.retainedCleanupScopes.set(sessionId, retained);
   }
 
   requireInstance(
@@ -224,7 +257,7 @@ export class RuntimeRegistry {
     providerId: string,
     create: (instanceId: string, own: (driver: Driver) => void) => Promise<Driver>,
   ): Promise<RuntimeReplacement> {
-    const priorCleanup = this.joinDisposal(sessionId);
+    const priorCleanup = this.cleanupSession(sessionId, []);
     if (priorCleanup) await priorCleanup;
     let completePreparation!: () => void;
     let rejectPreparation!: (error: unknown) => void;
@@ -357,7 +390,7 @@ export class RuntimeRegistry {
       let cleanupError: unknown;
       if (previous) {
         try {
-          await this.joinDisposal(sessionId, previous.scope.dispose());
+          await this.cleanupSession(sessionId, [previous.scope]);
         } catch (error) {
           cleanupFailed = true;
           cleanupError = error;
@@ -376,7 +409,7 @@ export class RuntimeRegistry {
       };
     } finally {
       if (preparationCleanupFailed) {
-        this.retainDisposalFailure(sessionId, preparationCleanupError);
+        this.retainCleanupScope(sessionId, preparation.scope);
       }
       preparation.complete(
         preparationCleanupFailed
@@ -426,7 +459,7 @@ export class RuntimeRegistry {
   ): Promise<RuntimeDisposalResult | null> {
     const binding = this.bindings.get(sessionId);
     if (!binding || binding.provider.instanceId !== instanceId) {
-      const cleanup = this.joinDisposal(sessionId);
+      const cleanup = this.cleanupSession(sessionId, []);
       if (cleanup) await cleanup;
       return null;
     }
@@ -471,6 +504,7 @@ export class RuntimeRegistry {
       ...bindings.map((binding) => binding.provider.sessionId),
       ...this.pendingPreparations.keys(),
       ...this.inFlightDisposals.keys(),
+      ...this.retainedCleanupScopes.keys(),
     ]);
     // Revoke every provider synchronously before awaiting any disposer. A
     // stalled process cannot leave unrelated sessions registered or unowned.
@@ -520,6 +554,7 @@ export class RuntimeRegistry {
     this.sessionGenerations.clear();
     this.pendingPreparations.clear();
     this.inFlightDisposals.clear();
+    this.retainedCleanupScopes.clear();
     this.bindings.clear();
   }
 }

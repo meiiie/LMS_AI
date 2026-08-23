@@ -235,6 +235,10 @@ Implemented across the foundation and Phase 2A slices:
 - leaving Neko Chill enumerates retained control-client starts, refreshes that
   set after runtime preparation settles, and requires authoritative
   cancellation before recording a clean mode exit;
+- failed renderer runtime cleanup retains a retryable scope instead of a cached
+  rejection; later lifecycle operations reuse the provider's durable
+  cancellation identity, retry only failed disposers, and block replacement
+  until cleanup is proven;
 - the Unix SQLite parent, database and WAL/SHM sidecars remain owner-only even
   though Windows is currently the only host authorized to probe or launch local
   providers;

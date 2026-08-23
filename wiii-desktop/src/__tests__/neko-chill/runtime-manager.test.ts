@@ -61,6 +61,20 @@ class BlockingFailingDisposeDriver extends FakeDriver {
   }
 }
 
+class FlakyDisposeDriver extends FakeDriver {
+  constructor(sessionId: string, private failuresRemaining = 1) {
+    super(sessionId);
+  }
+
+  override async dispose(): Promise<void> {
+    this.disposed += 1;
+    if (this.failuresRemaining > 0) {
+      this.failuresRemaining -= 1;
+      throw new Error("process kill response was lost");
+    }
+  }
+}
+
 describe("RuntimeScope", () => {
   it("disposes owned resources once in reverse order", async () => {
     const calls: string[] = [];
@@ -83,6 +97,24 @@ describe("RuntimeScope", () => {
 
     await expect(scope.dispose()).rejects.toThrow("driver cleanup failed");
     expect(calls).toEqual(["driver", "transport"]);
+  });
+
+  it("retries only the disposer whose cleanup outcome was not proven", async () => {
+    const calls: string[] = [];
+    let driverAttempts = 0;
+    const scope = new RuntimeScope();
+    scope.add(() => calls.push("transport"));
+    scope.add(() => {
+      calls.push("driver");
+      driverAttempts += 1;
+      if (driverAttempts === 1) throw new Error("kill response lost");
+    });
+
+    await expect(scope.dispose()).rejects.toThrow("kill response lost");
+    await expect(scope.dispose()).resolves.toBeUndefined();
+    await expect(scope.dispose()).resolves.toBeUndefined();
+
+    expect(calls).toEqual(["driver", "transport", "driver"]);
   });
 
   it.each([undefined, null, false, 0, ""])(
@@ -177,6 +209,26 @@ describe("RuntimeRegistry", () => {
     })).rejects.toThrow("process kill failed");
     expect(replacementAttempted).toBe(false);
     await expect(registry.detach("s1")).rejects.toThrow("process kill failed");
+  });
+
+  it("retries retained cleanup before allowing a replacement provider", async () => {
+    const registry = new RuntimeRegistry();
+    const failed = new FlakyDisposeDriver("s1");
+    await registry.replace("s1", "neko", async () => failed);
+
+    await expect(registry.detach("s1")).rejects.toThrow("kill response was lost");
+    expect(registry.ownedSessionIds()).toEqual(["s1"]);
+
+    let replacementAttempted = false;
+    const replacement = new FakeDriver("s1");
+    await expect(registry.replace("s1", "neko", async () => {
+      replacementAttempted = true;
+      return replacement;
+    })).resolves.toMatchObject({ current: { sessionId: "s1" } });
+
+    expect(failed.disposed).toBe(2);
+    expect(replacementAttempted).toBe(true);
+    expect(registry.get("s1")).not.toBeNull();
   });
 
   it("changes provider identity atomically and disposes each driver once", async () => {

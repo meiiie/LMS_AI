@@ -285,6 +285,11 @@ side-effect/committed phases become `unknown_outcome`.
   refresh that enumeration after in-flight runtime preparation settles, request
   authoritative cancellation before recording exit, and persist cleanup
   uncertainty when cancellation cannot be proven.
+- **FR-051**: A failed live-runtime disposer MUST retain its cleanup authority
+  and MUST be retryable with the same provider cancellation identity. A later
+  close, delete, teardown, or replacement MUST serialize behind any active
+  attempt, retry only unresolved disposers, and keep replacement fail-closed
+  until cleanup succeeds.
 
 ### Non-goals
 
@@ -323,3 +328,6 @@ side-effect/committed phases become `unknown_outcome`.
 - **SC-009**: Tests prove post-spawn cleanup uncertainty remains structured,
   shutdown waits for published exit supervision, and mode exit fails closed
   when a retained native start cannot be cancelled.
+- **SC-010**: Tests prove successful sibling disposers are not repeated, failed
+  cleanup can be retried, and a replacement provider starts only after the
+  retained cleanup reaches a proven result.

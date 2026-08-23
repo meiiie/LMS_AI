@@ -170,6 +170,12 @@ client, refreshes that set after in-flight preparations settle, and requires
 their authoritative cancellation before it may persist a clean exit; a
 cancellation failure remains a blocking cleanup uncertainty.
 
+Renderer runtime cleanup is serialized per visible session. A failed disposer
+retains its callable authority and provider cancellation identity; later close,
+delete, teardown, or replacement operations retry only unresolved disposers.
+Successful siblings are not repeated, and replacement remains blocked until
+the retained cleanup succeeds.
+
 ## Event ordering
 
 ```json
