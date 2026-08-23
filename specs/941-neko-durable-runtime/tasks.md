@@ -47,9 +47,9 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 41 Rust/security
-  tests and the latest 207-test review regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,920 Vitest
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 42 Rust/security
+  tests and the latest 208-test review regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,921 Vitest
   across 173 files,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
@@ -119,6 +119,10 @@
   termination and persistence are both proven, flush retained terminal facts on
   session hydration, retain facts across projection-read errors, and mint a
   fresh Codex bootstrap Run for each proven new attempt.
+- [x] T523 Recover a validated native-first partial snapshot by repairing only
+  its sequence high-water mark, scope write identities to one invocation and
+  its bounded IPC retry, and publish exit-supervision ownership so cancellation
+  cannot mistake the monitor hand-off for a missing process.
 
 ## Dependencies
 

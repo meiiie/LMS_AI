@@ -496,13 +496,15 @@ export async function loadSessionSnapshot(sessionId: string): Promise<LoadedSess
   );
   const events = mergeSessionEvents(sessionId, stored.events!, nativeEvents);
   const lastSeq = events[events.length - 1]?.seq ?? 0;
-  if ((stored.eventHighWaterMark ?? lastSeq) < lastSeq) {
-    throw new Error(`Bộ đếm sự kiện bền của phiên ${sessionId} không hợp lệ.`);
-  }
+  // Native facts are written first. A crash before the compatible transcript
+  // write can therefore leave this validated companion one generation ahead.
+  // Repair only the allocator high-water mark from the merged append-only log;
+  // messages and transcript-owned events remain owned by the transcript.
+  const eventHighWaterMark = Math.max(stored.eventHighWaterMark ?? 0, lastSeq);
   return {
     messages: stored.messages,
     events,
-    eventHighWaterMark: stored.eventHighWaterMark ?? lastSeq,
+    eventHighWaterMark,
     needsEventMigration: false,
   };
 }

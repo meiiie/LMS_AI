@@ -208,7 +208,11 @@ Implemented across the foundation and Phase 2A slices:
   deletion, explicit stale-checkpoint retirement, and strict newline-delimited
   provider frames even at EOF;
 - rollback-readable v2 conversation snapshots plus an additive native runtime
-  checkpoint companion; uncertain close cleanup remains a durable respawn lock;
+  checkpoint companion; a validated native-first partial generation repairs
+  only its sequence high-water mark, and uncertain close cleanup remains a
+  durable respawn lock;
+- exit supervision is published before the process-map hand-off, so hydration
+  and cancellation fail closed instead of inventing missing ownership;
 - shutdown admission closes before process drain; Unix provider probes use
   bounded owner-only capture files, while Windows probes use a producer-bounded
   pipe; checked tree cleanup and bounded reaping gate successful discovery; the

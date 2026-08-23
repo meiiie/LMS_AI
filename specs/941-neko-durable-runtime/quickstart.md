@@ -32,6 +32,8 @@ Expected invariants:
 - a proven `provider_busy` rejection retries only with a fresh request ID;
 - overlapping identical provider frames receive distinct request IDs, while a
   bounded IPC retry of one logical frame reuses that frame's original ID;
+- a later caller invocation with identical bytes receives a fresh ID; unresolved
+  caller-level retry is never inferred from frame content;
 - event sequence is monotonic within a run stream and replay is cursor-based;
 - lifecycle state and its matching durable event commit or roll back together;
 - start request identity, `Starting/Accepted` projection and creation event
@@ -53,6 +55,10 @@ Expected invariants:
   case and legal backslash distinctions remain intact;
 - native lifecycle checkpoints commit before the compatible transcript, so a
   transcript failure cannot silently hide a native side effect;
+- hydration repairs the sequence high-water mark when a validated native-first
+  checkpoint is one generation ahead of the compatible transcript;
+- cancellation and session hydration fail closed during the process monitor's
+  explicit exit-supervision hand-off;
 - a runtime missing from the live registry is unobserved cleanup and therefore
   produces a blocking uncertainty fact rather than a successful detach;
 - replacing a local runtime preserves Task identity but creates a fresh Run;

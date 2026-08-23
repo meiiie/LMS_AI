@@ -623,7 +623,7 @@ describe("Neko driver factory resource ownership", () => {
     expect(tauri.listen).toHaveBeenCalledTimes(2);
   });
 
-  it("retains a write identity when the caller retries an unresolved frame", async () => {
+  it("scopes write identity to one invocation and its bounded IPC retry", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     let writes = 0;
     tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
@@ -655,11 +655,8 @@ describe("Neko driver factory resource ownership", () => {
       ([command]) => command === "neko_control_session_write",
     );
     expect(writeCalls).toHaveLength(3);
-    expect(writeCalls.map(([, payload]) => payload.request.requestId)).toEqual([
-      writeCalls[0][1].request.requestId,
-      writeCalls[0][1].request.requestId,
-      writeCalls[0][1].request.requestId,
-    ]);
+    expect(writeCalls[1][1].request.requestId).toBe(writeCalls[0][1].request.requestId);
+    expect(writeCalls[2][1].request.requestId).not.toBe(writeCalls[0][1].request.requestId);
   });
 
   it("uses independent identities for overlapping identical frames", async () => {

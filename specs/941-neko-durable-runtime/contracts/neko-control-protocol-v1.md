@@ -29,8 +29,10 @@ method and logical target before dispatch.
 - `provider_busy` proves a bounded writer queue rejected the frame before it
   was enqueued. A caller may retry that frame only with a new request ID.
 - Byte-identical frames are not the same logical write. Concurrent send calls
-  receive independent request IDs. Only the bounded IPC retry and an explicit
-  caller retry of one unresolved send reuse that send's retained identity.
+  receive independent request IDs. Only the bounded IPC retry inside one send
+  invocation reuses its ID. A later caller invocation always receives a fresh
+  ID; retry after an unresolved outcome requires an explicit future operation
+  token and is not inferred from frame bytes.
 - Native start errors prefixed with `unknown_outcome:` are authoritative but
   unresolved. The control client retains the original request, agent-session,
   Run/Environment binding and listeners; it must not downgrade that result to
@@ -128,6 +130,17 @@ fact and stops treating that historical checkpoint as a live respawn barrier.
 An absent active/unknown checkpoint remains blocking. Reconciliation and
 uncertain-cleanup facts live in an additive companion store; the shared v2
 Workbench transcript keeps its previous-release event vocabulary.
+
+If the native companion commits and the following compatible transcript write
+does not, hydration validates and merges the append-only companion, then repairs
+only the sequence allocator high-water mark from the merged log. It does not
+invent transcript messages or model-visible events.
+
+When the process monitor has removed an owned process to prove and commit its
+exit, it publishes an in-flight supervision fact under lifecycle serialization.
+Matching cancellation and session hydration fail closed until that exact
+supervision finishes; a temporarily empty process map is never interpreted as
+lost ownership.
 
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).

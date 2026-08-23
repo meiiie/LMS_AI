@@ -80,7 +80,6 @@ interface StartTransportState {
   killed: boolean;
   killPromise: Promise<void> | null;
   cancelRequestId: string;
-  unresolvedWriteIds: Map<string, string[]>;
   unlistenLine: (() => void) | null;
   unlistenExit: (() => void) | null;
   listenerSetup: Promise<void> | null;
@@ -267,7 +266,6 @@ class TauriNekoControlClient implements NekoControlClient {
       identity.transport.killed = true;
       identity.transport.pendingLines.length = 0;
       identity.transport.pendingLineBytes = 0;
-      identity.transport.unresolvedWriteIds.clear();
       detachStartListeners(identity.transport);
       if (this.unresolvedStarts.get(startKey) === identity) {
         this.unresolvedStarts.delete(startKey);
@@ -418,7 +416,6 @@ class TauriNekoControlClient implements NekoControlClient {
           try {
             await this.cancelStartIdentity(invoke, startIdentity);
             transportState.killed = true;
-            transportState.unresolvedWriteIds.clear();
             return true;
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -477,12 +474,10 @@ class TauriNekoControlClient implements NekoControlClient {
     const requireSafeCancellation = this.requireSafeCancellation.bind(this);
     const transport: AcpTransport = {
       async send(line: string): Promise<void> {
-        // Keep the logical write identity after an unresolved native response.
-        // A caller retrying the same provider frame must reach Rust with the
-        // same request ID so it cannot repeat a committed side effect.
-        const retained = transportState.unresolvedWriteIds.get(line);
-        const requestId = retained?.shift() ?? uuidv4();
-        if (retained?.length === 0) transportState.unresolvedWriteIds.delete(line);
+        // One invocation is one logical write. invokeIdempotently retains this
+        // ID for its bounded IPC retry; a later caller invocation, even with a
+        // byte-identical frame, is a distinct operation and receives a new ID.
+        const requestId = uuidv4();
         try {
           await invokeIdempotently(invoke, "neko_control_session_write", {
             request: {
@@ -492,14 +487,8 @@ class TauriNekoControlClient implements NekoControlClient {
             },
           });
         } catch (error) {
-          // A full bounded writer queue proves Rust did not enqueue this
-          // frame. Only that explicit rejection may mint a fresh identity on
-          // retry; all uncertain outcomes retain the original request ID.
-          if (!isProviderBusy(error)) {
-            const unresolved = transportState.unresolvedWriteIds.get(line) ?? [];
-            unresolved.unshift(requestId);
-            transportState.unresolvedWriteIds.set(line, unresolved);
-          }
+          // Unknown outcomes are deliberately not converted into an implicit
+          // caller-level retry: that would require an explicit operation token.
           throw error;
         }
       },
@@ -540,7 +529,6 @@ class TauriNekoControlClient implements NekoControlClient {
               "native session cancellation",
             );
             transportState.killed = true;
-            transportState.unresolvedWriteIds.clear();
             notifyProvenExit(transportState);
             detachStartListeners(transportState);
           })();
@@ -577,7 +565,6 @@ function createStartTransportState(): StartTransportState {
     killed: false,
     killPromise: null,
     cancelRequestId: uuidv4(),
-    unresolvedWriteIds: new Map(),
     unlistenLine: null,
     unlistenExit: null,
     listenerSetup: null,
@@ -663,7 +650,6 @@ async function ensureStartListeners(
           // durably recorded the terminal lifecycle fact.
           state.killed = notice.terminationProven && notice.terminalStatePersisted;
           if (state.killed) {
-            state.unresolvedWriteIds.clear();
             notifyProvenExit(state);
             queueMicrotask(() => detachStartListeners(state));
           }
@@ -681,11 +667,6 @@ async function ensureStartListeners(
 
 function hasNativeAuthority(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-function isProviderBusy(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.startsWith("provider_busy:");
 }
 
 function isUnknownStartOutcome(error: string): boolean {

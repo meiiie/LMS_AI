@@ -120,7 +120,11 @@ import {
   disposeAllNekoRuntimes,
   sweepIdleSessions,
 } from "@/neko-chill/stores/neko-session-store";
-import { deletePersistedSession, persistSessionNow } from "@/neko-chill/persistence";
+import {
+  deletePersistedSession,
+  loadSessionSnapshot,
+  persistSessionNow,
+} from "@/neko-chill/persistence";
 import { saveStoreStrict } from "@/lib/storage";
 import { useKnowledgeConnectionStore } from "@/workbench/knowledge";
 
@@ -341,6 +345,41 @@ describe("neko-chill persistence", () => {
       `neko-chill-native-runtime.json:session:${id}`,
       `neko-chill-sessions.json:session:${id}`,
     ]);
+  });
+
+  it("recovers a native-first partial write by advancing the event high-water mark", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await persistSessionNow(useNekoSessionStore.getState().sessions[id]);
+    const transcriptKey = `neko-chill-sessions.json:session:${id}`;
+    const nativeKey = `neko-chill-native-runtime.json:session:${id}`;
+    const transcript = storage.get(transcriptKey) as {
+      eventHighWaterMark: number;
+      messages: unknown[];
+    };
+    const nativeSeq = transcript.eventHighWaterMark + 1;
+    storage.set(nativeKey, {
+      v: 1,
+      events: [{
+        v: 1,
+        eventId: "native-after-transcript",
+        seq: nativeSeq,
+        at: Date.now(),
+        visibility: "runtime",
+        data: {
+          type: "native-runtime-cleanup-uncertain",
+          agentSessionId: "native-session-1",
+          runId: "run-1",
+          providerId: "neko",
+          reason: "renderer interrupted after native commit",
+        },
+      }],
+    });
+
+    const restored = await loadSessionSnapshot(id);
+
+    expect(restored.messages).toEqual(transcript.messages);
+    expect(restored.eventHighWaterMark).toBe(nativeSeq);
+    expect(restored.events.at(-1)).toEqual(expect.objectContaining({ seq: nativeSeq }));
   });
 
   it("reconciles native journal state and replay before enabling a restored session", async () => {

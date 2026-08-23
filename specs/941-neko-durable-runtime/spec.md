@@ -189,7 +189,9 @@ side-effect/committed phases become `unknown_outcome`.
   snapshot MUST contain only event discriminators understood by the previous
   desktop release so a full-release rollback can still hydrate conversations.
   The native companion MUST commit before the compatible transcript so a later
-  transcript failure cannot silently hide a native lifecycle fact.
+  transcript failure cannot silently hide a native lifecycle fact. Hydration
+  MUST recover this expected partial-write generation by advancing only the
+  allocator high-water mark from the validated merged event log.
 - **FR-030**: A live runtime cleanup that does not prove cancellation reached a
   safe terminal state MUST leave a durable blocking tombstone, render the
   visible session as an error, and prevent replacement execution until native
@@ -246,7 +248,13 @@ side-effect/committed phases become `unknown_outcome`.
 - **FR-041**: Each concurrent logical `session/write` invocation MUST receive
   its own request identity even when serialized frames are byte-identical. A
   bounded IPC retry of one invocation MUST reuse that invocation's identity;
-  a proven pre-enqueue `provider_busy` rejection MUST permit a fresh identity.
+  a later caller invocation MUST receive a fresh identity. Caller-level retry
+  after an unresolved outcome MUST NOT be inferred from frame contents.
+- **FR-042**: Native process exit supervision MUST publish its in-flight
+  ownership before removing the process from the live map. Matching
+  cancellation and `session/list` hydration MUST fail closed until the exact
+  terminal fact is committed; they MUST NOT convert this hand-off into missing
+  ownership or a provisional `unknown_outcome` session transition.
 
 ### Non-goals
 

@@ -8,7 +8,7 @@ use super::provider::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
@@ -72,6 +72,7 @@ struct PendingTerminalFact {
 struct RuntimeInner {
     journal: Journal,
     processes: Mutex<HashMap<String, AgentProc>>,
+    exit_supervisions: Mutex<HashSet<String>>,
     pending_terminal_facts: Mutex<HashMap<String, PendingTerminalFact>>,
     operations: Mutex<()>,
     shutting_down: AtomicBool,
@@ -148,6 +149,7 @@ impl NekoRuntime {
             inner: Arc::new(RuntimeInner {
                 journal: Journal::open(path)?,
                 processes: Mutex::new(HashMap::new()),
+                exit_supervisions: Mutex::new(HashSet::new()),
                 pending_terminal_facts: Mutex::new(HashMap::new()),
                 operations: Mutex::new(()),
                 shutting_down: AtomicBool::new(false),
@@ -182,6 +184,7 @@ impl NekoRuntime {
                     ))
                 })?;
         }
+        self.ensure_exit_supervision_complete(None, "session hydration")?;
         self.inner.journal.sessions(run_id)
     }
 
@@ -619,6 +622,10 @@ impl NekoRuntime {
                 "verified process exit is awaiting durable lifecycle commit; cancellation is blocked: {error}"
             )));
         }
+        self.ensure_exit_supervision_complete(
+            Some(&request.agent_session_id),
+            "session cancellation",
+        )?;
         let target = digest_target(&[&request.run_id, &request.agent_session_id]);
         match self
             .inner
@@ -764,6 +771,23 @@ impl NekoRuntime {
     fn ensure_accepting_starts(&self) -> Result<(), String> {
         if self.inner.shutting_down.load(Ordering::Acquire) {
             return Err("Neko runtime is shutting down; new sessions are rejected".to_string());
+        }
+        Ok(())
+    }
+
+    fn ensure_exit_supervision_complete(
+        &self,
+        agent_session_id: Option<&str>,
+        operation: &str,
+    ) -> Result<(), String> {
+        let supervisions = lock(&self.inner.exit_supervisions);
+        let blocked = agent_session_id
+            .map(|id| supervisions.contains(id))
+            .unwrap_or_else(|| !supervisions.is_empty());
+        if blocked {
+            return Err(unknown_outcome_error(format!(
+                "native process exit supervision is still committing terminal state; retry {operation} after reconciliation"
+            )));
         }
         Ok(())
     }
@@ -1016,6 +1040,11 @@ impl NekoRuntime {
                 Ok(None) => return ProcessPoll::Running,
                 Err(_) => (None, "provider_process_status_unavailable"),
             };
+            // Publish the hand-off before releasing lifecycle serialization.
+            // Cancellation/listing must never interpret the temporarily empty
+            // process map as missing ownership while the exact exit fact is
+            // still being proven and committed.
+            lock(&self.inner.exit_supervisions).insert(agent_session_id.to_string());
             let process = processes
                 .remove(agent_session_id)
                 .expect("process existed while polling its exit");
@@ -1058,6 +1087,7 @@ impl NekoRuntime {
                 }),
             );
         }
+        lock(&self.inner.exit_supervisions).remove(agent_session_id);
         ProcessPoll::Exited(ProcessExitNotice {
             exit_code: code,
             termination_proven: termination.is_ok(),
@@ -1474,6 +1504,31 @@ mod tests {
                 .ensure_accepting_starts()
                 .unwrap_err()
                 .contains("shutting down"));
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3.lock"));
+    }
+
+    #[test]
+    fn in_flight_exit_supervision_blocks_hydration_and_matching_cancellation() {
+        let path =
+            std::env::temp_dir().join(format!("wiii-runtime-{}.sqlite3", uuid::Uuid::new_v4()));
+        {
+            let runtime = NekoRuntime::open(&path).unwrap();
+            lock(&runtime.inner.exit_supervisions).insert("session-1".into());
+            assert!(runtime
+                .ensure_exit_supervision_complete(None, "session hydration")
+                .unwrap_err()
+                .starts_with(UNKNOWN_OUTCOME_PREFIX));
+            assert!(runtime
+                .ensure_exit_supervision_complete(Some("session-1"), "session cancellation")
+                .unwrap_err()
+                .starts_with(UNKNOWN_OUTCOME_PREFIX));
+            assert!(runtime
+                .ensure_exit_supervision_complete(Some("session-2"), "session cancellation")
+                .is_ok());
         }
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
