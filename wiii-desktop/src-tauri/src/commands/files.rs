@@ -96,8 +96,21 @@ fn canonical_workspace(workspace: &str) -> Result<PathBuf, String> {
 
 fn safe_relative(path: &str) -> Result<PathBuf, String> {
     let candidate = Path::new(path);
-    if candidate.is_absolute()
+    let portable = path.replace('\\', "/");
+    let portable_candidate = Path::new(&portable);
+    let bytes = path.as_bytes();
+    let has_windows_prefix = path.starts_with('\\')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':');
+    if has_windows_prefix
+        || candidate.is_absolute()
+        || portable_candidate.is_absolute()
         || candidate.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+        || portable_candidate.components().any(|component| {
             matches!(
                 component,
                 Component::ParentDir | Component::RootDir | Component::Prefix(_)
@@ -440,7 +453,9 @@ mod tests {
     #[test]
     fn rejects_workspace_escape_paths() {
         assert!(safe_relative("../secret.txt").is_err());
+        assert!(safe_relative("..\\secret.txt").is_err());
         assert!(safe_relative("C:\\secret.txt").is_err());
+        assert!(safe_relative("\\\\server\\share\\secret.txt").is_err());
         assert!(safe_relative("src/app.ts").is_ok());
     }
 

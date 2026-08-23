@@ -73,6 +73,7 @@ impl SpawnOwnedError {
         }
     }
 
+    #[cfg(any(windows, test))]
     fn after_proven_cleanup(error: io::Error) -> Self {
         Self {
             error,
@@ -80,6 +81,7 @@ impl SpawnOwnedError {
         }
     }
 
+    #[cfg(any(windows, test))]
     fn after_unproven_cleanup(error: io::Error) -> Self {
         Self {
             error,
@@ -695,6 +697,7 @@ pub fn resolve(provider_id: &str) -> Result<ResolvedProvider, SpawnOwnedError> {
     })?;
     #[cfg(unix)]
     {
+        let _ = provider;
         return Err(SpawnOwnedError::safe(unix_containment_unavailable()));
     }
     #[cfg(windows)]
