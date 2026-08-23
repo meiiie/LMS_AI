@@ -52,6 +52,12 @@ that inserts the event. Session creation and every lifecycle state transition
 commit atomically with their matching durable event, so neither half can
 become authoritative alone.
 
+Fresh start admission is a three-part atomic fact: request identity,
+`Starting/Accepted` session projection, and `session.created`. A list reader can
+therefore never observe the request without the native owner. The same
+transaction checks prior request identity first, so shutdown rejects only new
+work and cannot make a completed replay unavailable.
+
 On Unix the application data directory is restricted to `0700`; the main
 journal and existing WAL/SHM sidecars are enforced as `0600`. The database is
 pre-created privately before SQLite opens it, closing the first-create window.
@@ -97,7 +103,11 @@ drains children. Starts re-check that admission gate after an unlocked probe,
 so an in-flight discovery cannot spawn after graceful cleanup returns. Probe
 capture is bounded and owner-only (`0600`) on Unix. Windows uses a bounded
 anonymous pipe instead of a periodically-polled capture file. Every probe path
-checks tree cleanup, and OS process reaping is deadline-bounded.
+checks tree cleanup, and OS process reaping is deadline-bounded. Windows creates
+a kill-on-close Job Object before spawning a suspended provider, assigns the
+leader, and only then resumes its primary thread. This preserves authoritative
+membership when an intermediate process exits before a grandchild and removes
+PID ancestry from the cleanup proof.
 
 ## Decision 7: Runtime replacement is a new Run
 

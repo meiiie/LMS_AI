@@ -94,12 +94,18 @@ read-model reconciliation, not a second authority: native `unknown_outcome`
 and active sessions without a live renderer transport stay locked against
 automatic respawn.
 
-For a fresh start, Rust publishes the durable `Starting/Accepted` session
-projection before any unlocked workspace or provider-discovery I/O. A UI
+For a fresh start, Rust atomically commits the request identity, durable
+`Starting/Accepted` session projection and `session.created` before any unlocked
+workspace or provider-discovery I/O. A UI
 reload during a slow filesystem lookup or probe therefore sees the accepted
 owner and cannot infer that the Task is idle. Cancellation is terminal only after process-tree
 termination succeeds; an unavailable process owner or failed OS tree kill is
 recorded as `unknown_outcome`, never as permission to launch a replacement.
+Windows launches are assigned to a kill-on-close Job Object while the leader is
+still suspended; only then is execution resumed. This keeps indirect
+descendants under authority after intermediate processes exit. Live exit IPC
+also carries `terminationProven`, so the renderer cannot mistake leader exit
+for complete tree cleanup.
 
 The compatibility client also bounds bootstrap output before a provider
 adapter attaches: at most 256 frames and 8 MiB are retained. Overflow detaches
@@ -172,13 +178,15 @@ Implemented across the foundation and Phase 2A slices:
 - an in-process Rust runtime with one-writer file lease and SQLite WAL;
 - Rust-owned provider resolution, approved arguments and process/session maps;
 - request-id idempotency for start, provider-frame write and cancellation;
-- pre-probe `Starting/Accepted` projection visibility and verified process-tree
-  cancellation, with unproven termination converted to `unknown_outcome`;
+- atomic request/`Starting/Accepted`/creation-event admission and verified
+  process-tree cancellation, with unproven termination converted to
+  `unknown_outcome`;
 - caller-level start retry retains the same logical identity after unresolved
   IPC delivery, including its original Run/Environment binding and buffered
   bootstrap/exit events across a fresh RuntimeRegistry preparation; the Codex
-  account probe derives one workspace identity across retry, remount and
-  WebView reload, and a durable non-terminal Run blocks duplicate bootstrap;
+  account probe derives one host-aware workspace identity across retry,
+  remount and WebView reload, including Windows drive/UNC separator and casing
+  aliases, and a durable non-terminal Run blocks duplicate bootstrap;
   completed/failed identities have a 90-day replay window while uncertain
   identities are not automatically pruned;
 - conservative recovery phases: `accepted`, `dispatched`,

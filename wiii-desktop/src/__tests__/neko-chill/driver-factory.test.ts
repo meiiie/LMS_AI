@@ -406,7 +406,7 @@ describe("Neko driver factory resource ownership", () => {
 
   it("recovers a lost start through real RuntimeRegistry retries without losing transport events", async () => {
     let onLine: ((event: { payload: string }) => void) | null = null;
-    let onExit: ((event: { payload: number | null }) => void) | null = null;
+    let onExit: ((event: { payload: { exitCode: number | null; terminationProven: boolean } }) => void) | null = null;
     const unlistenLine = vi.fn();
     const unlistenExit = vi.fn();
     tauri.listen.mockImplementation(async (event: string, handler: any) => {
@@ -423,7 +423,7 @@ describe("Neko driver factory resource ownership", () => {
       starts += 1;
       if (starts === 1) onLine?.({ payload: "bootstrap-before-lost-response" });
       if (starts === 2) {
-        onExit?.({ payload: 17 });
+        onExit?.({ payload: { exitCode: 17, terminationProven: true } });
         throw new Error("both IPC responses were lost");
       }
       if (starts === 1) throw new Error("both IPC responses were lost");
@@ -667,7 +667,7 @@ describe("Neko driver factory resource ownership", () => {
 
   it("replays bootstrap output and exit observed before transport handlers attach", async () => {
     let onLine: ((event: { payload: string }) => void) | null = null;
-    let onExit: ((event: { payload: number | null }) => void) | null = null;
+    let onExit: ((event: { payload: { exitCode: number | null; terminationProven: boolean } }) => void) | null = null;
     tauri.listen.mockImplementation(async (event: string, handler: any) => {
       if (event.includes("/line/")) onLine = handler;
       if (event.includes("/exit/")) onExit = handler;
@@ -676,7 +676,7 @@ describe("Neko driver factory resource ownership", () => {
     tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
       if (command === "neko_control_session_start") {
         onLine?.({ payload: "bootstrap-ready" });
-        onExit?.({ payload: 17 });
+        onExit?.({ payload: { exitCode: 17, terminationProven: true } });
         return {
           agentSessionId: payload?.request.agentSessionId,
           runId: payload?.request.runId,
@@ -699,6 +699,31 @@ describe("Neko driver factory resource ownership", () => {
 
     expect(lines).toEqual(["bootstrap-ready"]);
     expect(exits).toEqual([17]);
+  });
+
+  it("does not treat an unproven process-tree exit as completed cleanup", async () => {
+    let onExit: ((event: { payload: { exitCode: number | null; terminationProven: boolean } }) => void) | null = null;
+    tauri.listen.mockImplementation(async (event: string, handler: any) => {
+      if (event.includes("/exit/")) onExit = handler;
+      return vi.fn();
+    });
+    const { transport } = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-unproven-exit",
+      workspacePath: "C:/tmp/project",
+    });
+    onExit?.({ payload: { exitCode: null, terminationProven: false } });
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "neko_control_session_cancel") {
+        throw "unknown_outcome: provider process-tree termination is unproven";
+      }
+      return undefined;
+    });
+
+    await expect(transport.kill()).rejects.toContain("unknown_outcome:");
+    expect(tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_cancel",
+    )).toHaveLength(1);
   });
 
   it("exposes ownership before ACP initialization completes", async () => {

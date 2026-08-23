@@ -1,6 +1,10 @@
-use super::journal::{Journal, NewSession, ReplayPage, RequestDecision, SessionRecord};
+use super::journal::{
+    Journal, NewSession, ReplayPage, RequestDecision, SessionRecord, StartRequestDecision,
+};
 use super::lifecycle::{OperationPhase, RunState};
-use super::provider::{self, hidden, terminate_child_tree, AgentInfo, AgentProfile};
+use super::provider::{
+    self, spawn_owned, terminate_child_tree, AgentInfo, AgentProfile, OwnedChild,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -8,7 +12,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -33,7 +37,7 @@ struct WriteJob {
 }
 
 struct AgentProc {
-    child: Child,
+    child: OwnedChild,
     writer: SyncSender<WriteJob>,
 }
 
@@ -45,7 +49,14 @@ struct ReaderWorker {
 enum ProcessPoll {
     Running,
     Released,
-    Exited(Option<i32>),
+    Exited(ProcessExitNotice),
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessExitNotice {
+    exit_code: Option<i32>,
+    termination_proven: bool,
 }
 
 struct RuntimeInner {
@@ -179,57 +190,15 @@ impl NekoRuntime {
             &request.workspace_path,
             request.profile_id.as_deref().unwrap_or(""),
         ]);
+        // Admit the request identity, listable projection, and creation event
+        // in one transaction before any unlocked host I/O. A reconnect can
+        // therefore never observe an Accepted start without its native owner.
         {
             let _operation = lock(&self.inner.operations);
-            match self
-                .inner
-                .journal
-                .begin_request(&request.request_id, "session/start", &target)?
-            {
-                RequestDecision::Replay(value) => {
-                    return serde_json::from_value(value)
-                        .map_err(|error| format!("decode recorded session start failed: {error}"));
-                }
-                RequestDecision::RecordedError(code) => {
-                    return Err(format!("recorded session start failed: {code}"));
-                }
-                RequestDecision::UnknownOutcome => {
-                    return Err(unknown_outcome_error(
-                        "session start cannot be replayed automatically",
-                    ));
-                }
-                RequestDecision::Execute => {
-                    if let Err(error) = self.ensure_accepting_starts() {
-                        self.inner
-                            .journal
-                            .fail_request(&request.request_id, "runtime_shutting_down")?;
-                        return Err(error);
-                    }
-                }
-            }
-        }
-
-        // Publish the accepted native projection before *any* unlocked host
-        // I/O. Both workspace metadata and provider discovery can block on a
-        // removable or network filesystem. A renderer that reconnects during
-        // either operation must see this Starting/Accepted owner and keep the
-        // visible Task blocked; otherwise it could infer that no native owner
-        // exists and launch a second provider.
-        {
-            let _operation = lock(&self.inner.operations);
-            if let Err(error) = self.ensure_accepting_starts() {
-                return match self
-                    .inner
-                    .journal
-                    .fail_request(&request.request_id, "runtime_shutting_down")
-                {
-                    Ok(()) => Err(error),
-                    Err(recording_error) => Err(format!(
-                        "{error}; additionally failed to persist rejected start: {recording_error}"
-                    )),
-                };
-            }
-            let created = self.inner.journal.insert_session_with_event(
+            let accepting_new = !self.inner.shutting_down.load(Ordering::Acquire);
+            match self.inner.journal.begin_start_request(
+                &request.request_id,
+                &target,
                 NewSession {
                     agent_session_id: &request.agent_session_id,
                     task_id: &request.task_id,
@@ -238,19 +207,27 @@ impl NekoRuntime {
                     provider_id: &request.provider_id,
                     workspace_path: &request.workspace_path,
                 },
+                accepting_new,
                 "session.created",
                 json!({ "providerId": request.provider_id }),
-            );
-            match created {
-                Ok(event) => {
+            )? {
+                StartRequestDecision::Execute(event) => {
                     let _ = app.emit("neko-control://event", event);
                 }
-                Err(error) => {
-                    let _ = self
-                        .inner
-                        .journal
-                        .fail_request(&request.request_id, "invalid_state");
-                    return Err(error);
+                StartRequestDecision::Replay(value) => {
+                    return serde_json::from_value(value)
+                        .map_err(|error| format!("decode recorded session start failed: {error}"));
+                }
+                StartRequestDecision::RecordedError(code) => {
+                    return Err(format!("recorded session start failed: {code}"));
+                }
+                StartRequestDecision::UnknownOutcome => {
+                    return Err(unknown_outcome_error(
+                        "session start cannot be replayed automatically",
+                    ));
+                }
+                StartRequestDecision::AdmissionClosed => {
+                    return Err("Neko runtime is shutting down; new sessions are rejected".into());
                 }
             }
         }
@@ -338,15 +315,13 @@ impl NekoRuntime {
         }
 
         let mut command = Command::new(&resolved.program);
-        hidden(
-            command
-                .args(&args)
-                .current_dir(&request.workspace_path)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null()),
-        );
-        let mut child = match command.spawn() {
+        command
+            .args(&args)
+            .current_dir(&request.workspace_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = match spawn_owned(&mut command) {
             Ok(child) => child,
             Err(error) => {
                 return Err(self.reject_start_error(
@@ -358,49 +333,45 @@ impl NekoRuntime {
                 ));
             }
         };
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take();
+        let stdin = child.child.stdin.take();
+        let stdout = child.child.stdout.take();
         let (stdin, stdout) = match (stdin, stdout) {
             (Some(stdin), Some(stdout)) => (stdin, stdout),
             _ => {
-                let _ = terminate_child_tree(&mut child);
-                let _ = self.inner.journal.mark_request_unknown(&request.request_id);
-                let _ = self.transition_session_event(
+                let termination = terminate_child_tree(&mut child).map_err(|error| {
+                    format!(
+                        "terminate provider process tree failed: {}",
+                        bounded_error(&error)
+                    )
+                });
+                return Err(self.classify_spawn_failure(
                     &app,
-                    &request.agent_session_id,
-                    RunState::UnknownOutcome,
-                    OperationPhase::UnknownOutcome,
-                    "unknown_outcome",
-                    None,
+                    &request,
+                    "provider_stdio_unavailable",
                     resolved.version.as_deref(),
-                    "run.state_changed",
-                    json!({ "state": "unknown_outcome", "reason": "provider_stdio_unavailable" }),
-                );
-                return Err(unknown_outcome_error(
                     "provider stdio became unavailable after spawn",
+                    termination,
                 ));
             }
         };
-        let pid = child.id();
+        let pid = child.child.id();
         let writer = match spawn_writer(stdin) {
             Ok(writer) => writer,
             Err(error) => {
-                let _ = terminate_child_tree(&mut child);
-                let _ = self.inner.journal.mark_request_unknown(&request.request_id);
-                let _ = self.transition_session_event(
+                let termination = terminate_child_tree(&mut child).map_err(|cleanup| {
+                    format!(
+                        "terminate provider process tree failed: {}",
+                        bounded_error(&cleanup)
+                    )
+                });
+                return Err(self.classify_spawn_failure(
                     &app,
-                    &request.agent_session_id,
-                    RunState::UnknownOutcome,
-                    OperationPhase::UnknownOutcome,
-                    "unknown_outcome",
-                    None,
+                    &request,
+                    "provider_writer_unavailable",
                     resolved.version.as_deref(),
-                    "run.state_changed",
-                    json!({ "state": "unknown_outcome", "reason": "provider_writer_unavailable" }),
-                );
-                return Err(unknown_outcome_error(format!(
-                    "provider writer thread could not start: {error}"
-                )));
+                    format!("provider writer thread could not start: {error}"),
+                    termination,
+                ));
             }
         };
         lock(&self.inner.processes).insert(
@@ -413,26 +384,15 @@ impl NekoRuntime {
         let reader = match spawn_reader(runtime, app.clone(), session_id, stdout) {
             Ok(reader) => reader,
             Err(error) => {
-                if let Some(mut process) =
-                    lock(&self.inner.processes).remove(&request.agent_session_id)
-                {
-                    let _ = kill_proc(&mut process);
-                }
-                let _ = self.inner.journal.mark_request_unknown(&request.request_id);
-                let _ = self.transition_session_event(
+                let termination = self.terminate_owned_process(&request.agent_session_id);
+                return Err(self.classify_spawn_failure(
                     &app,
-                    &request.agent_session_id,
-                    RunState::UnknownOutcome,
-                    OperationPhase::UnknownOutcome,
-                    "unknown_outcome",
-                    None,
+                    &request,
+                    "provider_reader_unavailable",
                     resolved.version.as_deref(),
-                    "run.state_changed",
-                    json!({ "state": "unknown_outcome", "reason": "provider_reader_unavailable" }),
-                );
-                return Err(unknown_outcome_error(format!(
-                    "provider reader thread could not start: {error}"
-                )));
+                    format!("provider reader thread could not start: {error}"),
+                    termination,
+                ));
             }
         };
         let runtime = self.clone();
@@ -441,26 +401,15 @@ impl NekoRuntime {
             Ok(monitor_start) => monitor_start,
             Err(error) => {
                 drop(reader.start);
-                if let Some(mut process) =
-                    lock(&self.inner.processes).remove(&request.agent_session_id)
-                {
-                    let _ = kill_proc(&mut process);
-                }
-                let _ = self.inner.journal.mark_request_unknown(&request.request_id);
-                let _ = self.transition_session_event(
+                let termination = self.terminate_owned_process(&request.agent_session_id);
+                return Err(self.classify_spawn_failure(
                     &app,
-                    &request.agent_session_id,
-                    RunState::UnknownOutcome,
-                    OperationPhase::UnknownOutcome,
-                    "unknown_outcome",
-                    None,
+                    &request,
+                    "provider_monitor_unavailable",
                     resolved.version.as_deref(),
-                    "run.state_changed",
-                    json!({ "state": "unknown_outcome", "reason": "provider_monitor_unavailable" }),
-                );
-                return Err(unknown_outcome_error(format!(
-                    "provider monitor thread could not start: {error}"
-                )));
+                    format!("provider monitor thread could not start: {error}"),
+                    termination,
+                ));
             }
         };
 
@@ -507,25 +456,15 @@ impl NekoRuntime {
         if let Err(error) = ownership_commit {
             drop(reader.start);
             drop(monitor_start);
-            if let Some(mut process) = lock(&self.inner.processes).remove(&request.agent_session_id)
-            {
-                let _ = kill_proc(&mut process);
-            }
-            let _ = self.inner.journal.mark_request_unknown(&request.request_id);
-            let _ = self.transition_session_event(
+            let termination = self.terminate_owned_process(&request.agent_session_id);
+            return Err(self.classify_spawn_failure(
                 &app,
-                &request.agent_session_id,
-                RunState::UnknownOutcome,
-                OperationPhase::UnknownOutcome,
-                "unknown_outcome",
-                None,
+                &request,
+                "ownership_commit_failed",
                 resolved.version.as_deref(),
-                "run.state_changed",
-                json!({ "state": "unknown_outcome", "reason": "ownership_commit_failed" }),
-            );
-            return Err(unknown_outcome_error(format!(
-                "provider spawned but ownership commit failed: {error}"
-            )));
+                format!("provider spawned but ownership commit failed: {error}"),
+                termination,
+            ));
         }
         // Reader and monitor exist before ownership becomes committed, but are
         // gated until the transaction succeeds so neither can race a starting
@@ -890,6 +829,35 @@ impl NekoRuntime {
         }
     }
 
+    fn classify_spawn_failure(
+        &self,
+        app: &AppHandle,
+        request: &SessionStartRequest,
+        reason: &str,
+        provider_version: Option<&str>,
+        original: impl Into<String>,
+        termination: Result<(), String>,
+    ) -> String {
+        let original = original.into();
+        match termination {
+            Ok(()) => self.reject_start_error(app, request, reason, provider_version, original),
+            Err(error) => self.mark_termination_unknown(
+                app,
+                &request.request_id,
+                &request.agent_session_id,
+                reason,
+                format!("{original}; {error}"),
+            ),
+        }
+    }
+
+    fn terminate_owned_process(&self, agent_session_id: &str) -> Result<(), String> {
+        let process = { lock(&self.inner.processes).remove(agent_session_id) };
+        let mut process = process
+            .ok_or_else(|| "provider process ownership disappeared during cleanup".to_string())?;
+        kill_proc(&mut process)
+    }
+
     fn mark_termination_unknown(
         &self,
         app: &AppHandle,
@@ -956,7 +924,7 @@ impl NekoRuntime {
             let Some(process) = processes.get_mut(agent_session_id) else {
                 return ProcessPoll::Released;
             };
-            let (code, reason) = match process.child.try_wait() {
+            let (code, reason) = match process.child.child.try_wait() {
                 Ok(Some(status)) => (status.code(), "provider_process_exited"),
                 Ok(None) => return ProcessPoll::Running,
                 Err(_) => (None, "provider_process_status_unavailable"),
@@ -977,7 +945,10 @@ impl NekoRuntime {
         let _ = reader_finished.recv_timeout(PROVIDER_READER_DRAIN_TIMEOUT);
         let _operation = lock(&self.inner.operations);
         let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
-            return ProcessPoll::Exited(code);
+            return ProcessPoll::Exited(ProcessExitNotice {
+                exit_code: code,
+                termination_proven: termination.is_ok(),
+            });
         };
         if !session.state.is_terminal() {
             let _ = match &termination {
@@ -1016,7 +987,10 @@ impl NekoRuntime {
             agent_session_id,
             json!({ "exitCode": code, "terminationProven": termination.is_ok() }),
         );
-        ProcessPoll::Exited(code)
+        ProcessPoll::Exited(ProcessExitNotice {
+            exit_code: code,
+            termination_proven: termination.is_ok(),
+        })
     }
 
     fn fail_provider_protocol(&self, app: &AppHandle, agent_session_id: &str) {
@@ -1029,7 +1003,10 @@ impl NekoRuntime {
         let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
             let _ = app.emit(
                 &format!("neko-session://exit/{agent_session_id}"),
-                Option::<i32>::None,
+                ProcessExitNotice {
+                    exit_code: None,
+                    termination_proven: termination.is_ok(),
+                },
             );
             return;
         };
@@ -1076,7 +1053,10 @@ impl NekoRuntime {
         );
         let _ = app.emit(
             &format!("neko-session://exit/{agent_session_id}"),
-            Option::<i32>::None,
+            ProcessExitNotice {
+                exit_code: None,
+                termination_proven: termination.is_ok(),
+            },
         );
     }
 }
@@ -1219,8 +1199,8 @@ fn spawn_monitor(
                 match runtime.poll_process_exit(&app, &session_id, &reader_finished) {
                     ProcessPoll::Running => std::thread::sleep(PROCESS_EXIT_POLL_INTERVAL),
                     ProcessPoll::Released => break,
-                    ProcessPoll::Exited(code) => {
-                        let _ = app.emit(&format!("neko-session://exit/{session_id}"), code);
+                    ProcessPoll::Exited(notice) => {
+                        let _ = app.emit(&format!("neko-session://exit/{session_id}"), notice);
                         break;
                     }
                 }

@@ -47,9 +47,9 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 38 Rust/security
-  tests and the latest 57-test review regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,910 Vitest
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 40 Rust/security
+  tests and the latest 162-test review regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,913 Vitest
   across 173 files,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
@@ -100,6 +100,11 @@
 - [x] T518 Publish accepted ownership before volatile workspace I/O, derive the
   Codex bootstrap identity across remount/reload, enforce a producer-side
   Windows probe quota, check every probe cleanup, and bound process reaping.
+- [x] T519 Atomically commit start request/projection/event admission, replace
+  Windows PID ancestry with pre-execution Job Object ownership, preserve
+  `terminationProven` through live exit IPC, classify verified post-spawn
+  cleanup as failed rather than unknown, and normalize Windows workspace
+  casing aliases without collapsing POSIX identity.
 
 ## Dependencies
 

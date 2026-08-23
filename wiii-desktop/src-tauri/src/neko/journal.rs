@@ -171,6 +171,15 @@ pub enum RequestDecision {
     UnknownOutcome,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum StartRequestDecision {
+    Execute(ControlEvent),
+    Replay(Value),
+    RecordedError(String),
+    UnknownOutcome,
+    AdmissionClosed,
+}
+
 impl Journal {
     pub fn open(path: &Path) -> Result<Self, String> {
         prepare_private_journal_path(path)?;
@@ -386,6 +395,148 @@ impl Journal {
         Ok(RequestDecision::Execute)
     }
 
+    /// Atomically admit a new start, publish its listable Starting projection,
+    /// and append `session.created`. Existing idempotency identities are read
+    /// in the same IMMEDIATE transaction and remain replayable while shutdown
+    /// rejects only genuinely new work.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_start_request(
+        &self,
+        request_id: &str,
+        target_id: &str,
+        session: NewSession<'_>,
+        accepting_new: bool,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<StartRequestDecision, String> {
+        validate_payload(&payload)?;
+        let encoded = serde_json::to_string(&payload)
+            .map_err(|error| format!("encode Neko control event failed: {error}"))?;
+        let mut connection = lock(&self.connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("begin Neko start-admission transaction failed: {error}"))?;
+        let existing = transaction
+            .query_row(
+                "SELECT method, target_id, phase, result_json, error_code
+                   FROM control_requests WHERE request_id = ?1",
+                [request_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| format!("read Neko request identity failed: {error}"))?;
+
+        if let Some((stored_method, stored_target, phase, result, error_code)) = existing {
+            if stored_method != "session/start" || stored_target != target_id {
+                return Err("request identity was already used for another operation".to_string());
+            }
+            return match OperationPhase::parse(&phase) {
+                Some(OperationPhase::Completed) => {
+                    let value = result
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()
+                        .map_err(|error| format!("decode recorded Neko result failed: {error}"))?
+                        .unwrap_or(Value::Null);
+                    Ok(StartRequestDecision::Replay(value))
+                }
+                Some(OperationPhase::Failed) => Ok(StartRequestDecision::RecordedError(
+                    error_code.unwrap_or_else(|| "internal_error".to_string()),
+                )),
+                Some(OperationPhase::Accepted)
+                | Some(OperationPhase::Dispatched)
+                | Some(OperationPhase::SideEffectStarted)
+                | Some(OperationPhase::Committed)
+                | Some(OperationPhase::UnknownOutcome) => Ok(StartRequestDecision::UnknownOutcome),
+                None => Err("recorded Neko request has an invalid phase".to_string()),
+            };
+        }
+        if !accepting_new {
+            return Ok(StartRequestDecision::AdmissionClosed);
+        }
+
+        let timestamp = now();
+        transaction
+            .execute(
+                "INSERT INTO control_requests
+                   (request_id, method, target_id, phase, created_at, updated_at)
+                 VALUES (?1, 'session/start', ?2, ?3, ?4, ?4)",
+                params![
+                    request_id,
+                    target_id,
+                    OperationPhase::Accepted.as_str(),
+                    timestamp
+                ],
+            )
+            .map_err(|error| format!("record Neko start request identity failed: {error}"))?;
+        transaction
+            .execute(
+                "INSERT INTO runtime_sessions
+                   (agent_session_id, task_id, run_id, environment_id, provider_id,
+                    workspace_path, state, operation_phase, continuity, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', ?9, ?9)",
+                params![
+                    session.agent_session_id,
+                    session.task_id,
+                    session.run_id,
+                    session.environment_id,
+                    session.provider_id,
+                    session.workspace_path,
+                    RunState::Starting.as_str(),
+                    OperationPhase::Accepted.as_str(),
+                    timestamp
+                ],
+            )
+            .map_err(|error| format!("record Neko session failed: {error}"))?;
+        let next: i64 = transaction
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM control_events WHERE stream_id = ?1",
+                [session.run_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("allocate Neko event sequence failed: {error}"))?;
+        let event = ControlEvent {
+            v: 1,
+            event_id: Uuid::new_v4().to_string(),
+            stream_id: session.run_id.to_string(),
+            seq: next as u64,
+            at: timestamp,
+            event_type: event_type.to_string(),
+            run_id: session.run_id.to_string(),
+            agent_session_id: Some(session.agent_session_id.to_string()),
+            payload,
+        };
+        transaction
+            .execute(
+                "INSERT INTO control_events
+                   (event_id, stream_id, seq, at, event_type, run_id, agent_session_id, payload_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    event.event_id,
+                    event.stream_id,
+                    next,
+                    event.at,
+                    event.event_type,
+                    event.run_id,
+                    event.agent_session_id,
+                    encoded
+                ],
+            )
+            .map_err(|error| format!("append Neko session creation event failed: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit Neko start-admission transaction failed: {error}"))?;
+        Ok(StartRequestDecision::Execute(event))
+    }
+
     pub fn set_request_phase(&self, request_id: &str, next: OperationPhase) -> Result<(), String> {
         let connection = lock(&self.connection);
         let current: String = connection
@@ -544,83 +695,6 @@ impl Journal {
             )
             .map_err(|error| format!("record Neko session failed: {error}"))?;
         Ok(())
-    }
-
-    /// Create the initial session fact and its matching durable event in one
-    /// transaction. A session can never become visible without its creation
-    /// event (or vice versa).
-    pub fn insert_session_with_event(
-        &self,
-        session: NewSession<'_>,
-        event_type: &str,
-        payload: Value,
-    ) -> Result<ControlEvent, String> {
-        validate_payload(&payload)?;
-        let encoded = serde_json::to_string(&payload)
-            .map_err(|error| format!("encode Neko control event failed: {error}"))?;
-        let mut connection = lock(&self.connection);
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| format!("begin Neko session transaction failed: {error}"))?;
-        let timestamp = now();
-        transaction
-            .execute(
-                "INSERT INTO runtime_sessions
-                   (agent_session_id, task_id, run_id, environment_id, provider_id,
-                    workspace_path, state, operation_phase, continuity, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', ?9, ?9)",
-                params![
-                    session.agent_session_id,
-                    session.task_id,
-                    session.run_id,
-                    session.environment_id,
-                    session.provider_id,
-                    session.workspace_path,
-                    RunState::Starting.as_str(),
-                    OperationPhase::Accepted.as_str(),
-                    timestamp
-                ],
-            )
-            .map_err(|error| format!("record Neko session failed: {error}"))?;
-        let next: i64 = transaction
-            .query_row(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM control_events WHERE stream_id = ?1",
-                [session.run_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| format!("allocate Neko event sequence failed: {error}"))?;
-        let event = ControlEvent {
-            v: 1,
-            event_id: Uuid::new_v4().to_string(),
-            stream_id: session.run_id.to_string(),
-            seq: next as u64,
-            at: timestamp,
-            event_type: event_type.to_string(),
-            run_id: session.run_id.to_string(),
-            agent_session_id: Some(session.agent_session_id.to_string()),
-            payload,
-        };
-        transaction
-            .execute(
-                "INSERT INTO control_events
-                   (event_id, stream_id, seq, at, event_type, run_id, agent_session_id, payload_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    event.event_id,
-                    event.stream_id,
-                    next,
-                    event.at,
-                    event.event_type,
-                    event.run_id,
-                    event.agent_session_id,
-                    encoded
-                ],
-            )
-            .map_err(|error| format!("append Neko session creation event failed: {error}"))?;
-        transaction
-            .commit()
-            .map_err(|error| format!("commit Neko session transaction failed: {error}"))?;
-        Ok(event)
     }
 
     pub fn set_session_phase(
@@ -1406,13 +1480,20 @@ mod tests {
     #[test]
     fn accepted_start_projection_is_listable_before_dispatch() {
         let journal = Journal::in_memory();
-        let event = journal
-            .insert_session_with_event(
+        let event = match journal
+            .begin_start_request(
+                "request-a",
+                "target-a",
                 session("session-a", "run-a"),
+                true,
                 "session.created",
                 json!({ "providerId": "codex" }),
             )
-            .unwrap();
+            .unwrap()
+        {
+            StartRequestDecision::Execute(event) => event,
+            other => panic!("unexpected start decision: {other:?}"),
+        };
 
         let record = journal.sessions(Some("run-a")).unwrap().pop().unwrap();
         assert_eq!(record.state, RunState::Starting);
@@ -1439,7 +1520,7 @@ mod tests {
     }
 
     #[test]
-    fn session_creation_and_event_commit_or_roll_back_together() {
+    fn start_request_session_and_event_commit_or_roll_back_together() {
         let journal = Journal::in_memory();
         lock(&journal.connection)
             .execute_batch(
@@ -1449,14 +1530,79 @@ mod tests {
             )
             .unwrap();
         assert!(journal
-            .insert_session_with_event(
+            .begin_start_request(
+                "request-a",
+                "target-a",
                 session("session-a", "run-a"),
+                true,
                 "session.created",
                 json!({ "providerId": "codex" }),
             )
             .is_err());
         assert!(journal.session("session-a").unwrap().is_none());
         assert!(journal.replay("run-a", 0, 10).unwrap().events.is_empty());
+        let requests: i64 = lock(&journal.connection)
+            .query_row("SELECT COUNT(*) FROM control_requests", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(requests, 0);
+    }
+
+    #[test]
+    fn shutdown_rejects_only_new_starts_and_keeps_completed_replay_available() {
+        let journal = Journal::in_memory();
+        let first = journal
+            .begin_start_request(
+                "request-a",
+                "target-a",
+                session("session-a", "run-a"),
+                true,
+                "session.created",
+                json!({ "providerId": "codex" }),
+            )
+            .unwrap();
+        assert!(matches!(first, StartRequestDecision::Execute(_)));
+        journal
+            .set_request_phase("request-a", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_request_phase("request-a", OperationPhase::SideEffectStarted)
+            .unwrap();
+        journal
+            .set_request_phase("request-a", OperationPhase::Committed)
+            .unwrap();
+        journal
+            .complete_request("request-a", &json!({ "agentSessionId": "session-a" }))
+            .unwrap();
+
+        assert_eq!(
+            journal
+                .begin_start_request(
+                    "request-a",
+                    "target-a",
+                    session("session-a", "run-a"),
+                    false,
+                    "session.created",
+                    json!({ "providerId": "codex" }),
+                )
+                .unwrap(),
+            StartRequestDecision::Replay(json!({ "agentSessionId": "session-a" }))
+        );
+        assert_eq!(
+            journal
+                .begin_start_request(
+                    "request-b",
+                    "target-b",
+                    session("session-b", "run-b"),
+                    false,
+                    "session.created",
+                    json!({ "providerId": "codex" }),
+                )
+                .unwrap(),
+            StartRequestDecision::AdmissionClosed
+        );
+        assert!(journal.session("session-b").unwrap().is_none());
     }
 
     #[test]
@@ -1658,7 +1804,10 @@ mod tests {
         assert!(journal.session("stale-active").unwrap().is_some());
         let stale_unknown = journal.session("stale-unknown").unwrap().unwrap();
         assert_eq!(stale_unknown.state, RunState::UnknownOutcome);
-        assert_eq!(stale_unknown.operation_phase, OperationPhase::UnknownOutcome);
+        assert_eq!(
+            stale_unknown.operation_phase,
+            OperationPhase::UnknownOutcome
+        );
         let request_phase = |request_id: &str| {
             lock(&journal.connection)
                 .query_row(

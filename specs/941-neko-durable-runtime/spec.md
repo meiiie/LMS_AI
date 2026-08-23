@@ -203,6 +203,26 @@ side-effect/committed phases become `unknown_outcome`.
   identity from its workspace across retry attempts, component remounts and
   WebView reloads. A durable non-terminal native Run MUST block an automatic
   duplicate App Server launch after volatile client state is lost.
+- **FR-033**: Admission of a fresh `session/start` request, its listable
+  `Starting/Accepted` projection, and `session.created` MUST commit in one
+  transaction. Shutdown MAY reject a new identity but MUST preserve replay of
+  an already-recorded identity.
+- **FR-034**: Windows providers and probes MUST be assigned to a kill-on-close
+  Job Object before their suspended leader begins execution. Cleanup MUST query
+  that Job Object until no active member remains; PID ancestry is not proof of
+  cleanup because an intermediate process may exit first.
+- **FR-035**: A live exit notice MUST carry `terminationProven`. The renderer
+  MUST NOT treat leader exit alone as completed cleanup or skip an explicit
+  cancellation/reconciliation attempt when process-tree termination is
+  unproven.
+- **FR-036**: Post-spawn setup or ownership-commit failure MAY become ordinary
+  `failed` only after native cleanup proves the complete process tree stopped.
+  `unknown_outcome` is reserved for unproven cleanup or an uncertain persisted
+  side effect.
+- **FR-037**: Workspace-scoped bootstrap identities MUST normalize aliases that
+  the host treats as the same path. In particular, Windows drive and UNC paths
+  MUST normalize separator and casing differences without collapsing distinct
+  case-sensitive POSIX paths.
 
 ### Non-goals
 
@@ -229,3 +249,6 @@ side-effect/committed phases become `unknown_outcome`.
   starts; terminal request retention is bounded without pruning uncertain
   identities; real registry retries preserve one start and its buffered
   transport events; and Unix probe/journal files are owner-only.
+- **SC-007**: Tests prove atomic start admission rollback, shutdown-safe replay,
+  Windows Job Object ownership across an exited intermediate, host-aware
+  workspace identity, and fail-closed handling of an unproven exit notice.

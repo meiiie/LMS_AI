@@ -12,7 +12,7 @@ export interface CodexBootstrapIdentity {
  * App Server while the first start remains non-terminal.
  */
 export function codexBootstrapIdentity(workspacePath: string): CodexBootstrapIdentity {
-  const normalizedWorkspace = workspacePath.replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalizedWorkspace = canonicalWorkspaceIdentity(workspacePath);
   const scope = uuidv5(
     normalizedWorkspace,
     "ce6c70a7-cb49-5fd8-992f-a10e1459fa8e",
@@ -21,4 +21,22 @@ export function codexBootstrapIdentity(workspacePath: string): CodexBootstrapIde
     workspacePath,
     clientSessionId: `codex-account-bootstrap-${scope}`,
   };
+}
+
+/**
+ * Produce a stable logical identity for a host path without filesystem I/O.
+ * Windows drive and UNC namespaces are case-insensitive by default, so casing
+ * and separator aliases must not mint a second bootstrap Run. POSIX casing is
+ * preserved because it can identify different directories there.
+ */
+export function canonicalWorkspaceIdentity(workspacePath: string): string {
+  const nfc = workspacePath.normalize("NFC");
+  const hadUncPrefix = /^[\\/]{2}[^\\/]/.test(nfc);
+  let normalized = nfc.replaceAll("\\", "/").replace(/\/{2,}/g, "/");
+  if (hadUncPrefix) normalized = `/${normalized}`;
+  const isWindowsNamespace = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
+  if (normalized !== "/" && !/^[A-Za-z]:\/$/.test(normalized)) {
+    normalized = normalized.replace(/\/+$/, "");
+  }
+  return isWindowsNamespace ? normalized.toLocaleLowerCase("en-US") : normalized;
 }

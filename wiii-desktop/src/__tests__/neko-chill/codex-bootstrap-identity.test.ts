@@ -19,4 +19,19 @@ describe("Codex account bootstrap identity", () => {
     expect(backslash.clientSessionId).toBe(slash.clientSessionId);
     expect(next.clientSessionId).not.toBe(slash.clientSessionId);
   });
+
+  it("uses one identity for Windows drive and UNC casing aliases", () => {
+    expect(codexBootstrapIdentity("C:\\Work\\Wiii").clientSessionId).toBe(
+      codexBootstrapIdentity("c:/work/wiii/").clientSessionId,
+    );
+    expect(codexBootstrapIdentity("\\\\SERVER\\Share\\Wiii").clientSessionId).toBe(
+      codexBootstrapIdentity("//server/share/wiii/").clientSessionId,
+    );
+  });
+
+  it("preserves case for POSIX paths where casing may identify another workspace", () => {
+    expect(codexBootstrapIdentity("/srv/Wiii").clientSessionId).not.toBe(
+      codexBootstrapIdentity("/srv/wiii").clientSessionId,
+    );
+  });
 });

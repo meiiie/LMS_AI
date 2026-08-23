@@ -62,6 +62,11 @@ interface NativeSessionCancelResult {
   cancelled: boolean;
 }
 
+interface NativeProcessExitNotice {
+  exitCode: number | null;
+  terminationProven: boolean;
+}
+
 interface StartTransportState {
   lineHandlers: Array<(line: string) => void>;
   exitHandlers: Array<(code: number | null) => void>;
@@ -71,6 +76,7 @@ interface StartTransportState {
   overflowCancellation: Promise<boolean> | null;
   exitObserved: boolean;
   pendingExitCode: number | null;
+  exitTerminationProven: boolean;
   killed: boolean;
   killPromise: Promise<void> | null;
   cancelRequestId: string;
@@ -542,6 +548,7 @@ function createStartTransportState(): StartTransportState {
     overflowCancellation: null,
     exitObserved: false,
     pendingExitCode: null,
+    exitTerminationProven: false,
     killed: false,
     killPromise: null,
     cancelRequestId: uuidv4(),
@@ -612,13 +619,19 @@ async function ensureStartListeners(
       return;
     }
     try {
-      const unlistenExit = await listen<number | null>(
+      const unlistenExit = await listen<unknown>(
         `neko-session://exit/${agentSessionId}`,
         (event) => {
+          const notice = isNativeProcessExitNotice(event.payload)
+            ? event.payload
+            : { exitCode: null, terminationProven: false };
           state.exitObserved = true;
-          state.pendingExitCode = event.payload ?? null;
+          state.pendingExitCode = notice.exitCode;
+          state.exitTerminationProven = notice.terminationProven;
           for (const handler of state.exitHandlers) handler(state.pendingExitCode);
-          state.killed = true;
+          // A leader exit is not proof that its process tree disappeared.
+          // Keep cancellation live until native authority certifies cleanup.
+          state.killed = notice.terminationProven;
           state.unresolvedWriteIds.clear();
           queueMicrotask(() => detachStartListeners(state));
         },
@@ -692,6 +705,15 @@ function isNativeSessionRecord(value: unknown): value is NekoNativeSessionRecord
     ].every((field) => typeof session[field] === "string") &&
     (session.providerVersion === null || typeof session.providerVersion === "string") &&
     (session.pid === null || Number.isSafeInteger(session.pid))
+  );
+}
+
+function isNativeProcessExitNotice(value: unknown): value is NativeProcessExitNotice {
+  if (!value || typeof value !== "object") return false;
+  const notice = value as Record<string, unknown>;
+  return (
+    (notice.exitCode === null || typeof notice.exitCode === "number") &&
+    typeof notice.terminationProven === "boolean"
   );
 }
 

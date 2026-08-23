@@ -40,8 +40,9 @@ method and logical target before dispatch.
   availability is checked only for a new execution. A recorded or unresolved
   start therefore remains replayable if its workspace was renamed or is
   temporarily unavailable.
-- A new start publishes a listable `Starting/Accepted` session and its creation
-  event before any unlocked workspace or provider-discovery I/O. Account-probe
+- A new start atomically commits its request identity, listable
+  `Starting/Accepted` session and creation event before any unlocked workspace
+  or provider-discovery I/O. Account-probe
   retries derive one workspace-scoped caller identity across component remount
   and WebView reload; a durable non-terminal native Run blocks duplicate launch
   when the renderer's volatile retained-start map has been lost.
@@ -73,7 +74,10 @@ Provider discovery captures are owner-only on Unix and output-bounded while the
 probe is running. Windows uses a MAX+1-byte pipe reader, so the producer cannot
 grow a capture file between monitor polls. Probe output is accepted only after
 checked tree termination; leader reaping and descendant cleanup have explicit
-deadlines. Probe and agent launches use isolated process ownership; timeout,
+deadlines. Probe and agent launches use isolated process ownership. Windows
+assigns a kill-on-close Job Object while the leader is still suspended, then
+resumes it; cleanup queries active Job membership rather than reconstructing
+PID ancestry. Timeout,
 output overflow, helper-thread failure and shutdown terminate the owned process
 tree rather than accepting an unverified cleanup. Live provider stdout is parsed
 with a 4 MiB per-frame ceiling; an oversized, unterminated or invalid UTF-8
@@ -97,6 +101,12 @@ commit a respawn-permitting terminal state only when the OS termination result
 proves that tree stopped; otherwise Neko records `unknown_outcome`. Runtime
 shutdown closes start admission before draining children; a probe already in
 flight re-checks that gate before spawning a process.
+
+The live `neko-session://exit/<agentSessionId>` notice carries both `exitCode`
+and `terminationProven`. A renderer may notify its adapter about leader exit,
+but it cannot mark transport cleanup complete when native authority reports an
+unproven tree outcome. An explicit cancel/reconciliation remains required and
+fail-closed.
 
 Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution

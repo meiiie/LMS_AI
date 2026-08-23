@@ -32,11 +32,19 @@ Expected invariants:
 - a proven `provider_busy` rejection retries only with a fresh request ID;
 - event sequence is monotonic within a run stream and replay is cursor-based;
 - lifecycle state and its matching durable event commit or roll back together;
+- start request identity, `Starting/Accepted` projection and creation event
+  commit or roll back together;
 - provider probing and exit observation never block unrelated lifecycle work;
 - shutdown closes start admission before process cleanup;
 - Unix provider-probe captures and the journal database/WAL/SHM files are
   owner-only;
 - stdout EOF alone never releases a still-running provider process;
+- Windows provider descendants remain owned by one Job Object even after an
+  intermediate and leader exit;
+- live exit delivery cannot mark cleanup complete without
+  `terminationProven: true`;
+- Windows drive/UNC casing aliases derive one bootstrap identity while POSIX
+  case distinctions remain intact;
 - replacing a local runtime preserves Task identity but creates a fresh Run;
 - uncertain recovery becomes `unknown_outcome`, never automatic retry;
 - restored UI sessions reconcile native session state and replay cursor before

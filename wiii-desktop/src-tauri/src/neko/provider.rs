@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
-use std::collections::HashSet;
-#[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(unix)]
 use std::fs::{File, OpenOptions};
@@ -21,6 +19,8 @@ use uuid::Uuid;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+#[cfg(windows)]
+const CREATE_SUSPENDED: u32 = 0x0000_0004;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const PROCESS_TERMINATION_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(windows)]
@@ -31,6 +31,43 @@ const MAX_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
 struct ProbeOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
+}
+
+/// An approved provider process plus its host-level containment primitive.
+/// On Windows the Job Object is assigned before the suspended leader runs, so
+/// membership survives exited intermediates and cannot be reconstructed from
+/// lossy PID ancestry. Unix uses the dedicated process group configured by
+/// `hidden()`.
+pub(crate) struct OwnedChild {
+    pub(crate) child: Child,
+    #[cfg(windows)]
+    job: WindowsJob,
+}
+
+#[cfg(windows)]
+struct WindowsJob {
+    // Store the owned kernel handle as its pointer-sized scalar representation
+    // so the supervisor can move it between Rust worker threads. Windows
+    // handles are thread-safe kernel object references; all access stays owned.
+    handle: isize,
+}
+
+#[cfg(windows)]
+impl WindowsJob {
+    fn raw(&self) -> windows_sys::Win32::Foundation::HANDLE {
+        self.handle as windows_sys::Win32::Foundation::HANDLE
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsJob {
+    fn drop(&mut self) {
+        if self.handle != 0 {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.raw());
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -102,7 +139,7 @@ impl Drop for ProbeCapture {
     }
 }
 
-fn probe_failure_after_cleanup(child: &mut Child, original: io::Error) -> io::Error {
+fn probe_failure_after_cleanup(child: &mut OwnedChild, original: io::Error) -> io::Error {
     match terminate_child_tree(child) {
         Ok(()) => original,
         Err(cleanup) => io::Error::other(format!(
@@ -141,8 +178,7 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
             });
         }
     }
-    hidden(&mut command);
-    let mut child = command.spawn()?;
+    let mut child = spawn_owned(&mut command)?;
     let deadline = Instant::now() + PROBE_TIMEOUT;
     let status = loop {
         let capture_len = match capture.len() {
@@ -159,7 +195,7 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
             );
             return Err(probe_failure_after_cleanup(&mut child, error));
         }
-        let child_status = match child.try_wait() {
+        let child_status = match child.child.try_wait() {
             Ok(child_status) => child_status,
             Err(error) => {
                 return Err(probe_failure_after_cleanup(&mut child, error));
@@ -192,9 +228,8 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    hidden(&mut command);
-    let mut child = command.spawn()?;
-    let stdout = match child.stdout.take() {
+    let mut child = spawn_owned(&mut command)?;
+    let stdout = match child.child.stdout.take() {
         Some(stdout) => stdout,
         None => {
             let error = io::Error::other("provider probe stdout is unavailable");
@@ -243,7 +278,7 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
             }
         }
 
-        match child.try_wait() {
+        match child.child.try_wait() {
             Ok(Some(status)) => {
                 terminate_child_tree(&mut child)?;
                 break status;
@@ -323,18 +358,135 @@ fn candidate_paths(candidate: &str) -> Vec<PathBuf> {
     resolved
 }
 
-pub(crate) fn hidden(command: &mut Command) -> &mut Command {
+#[cfg(unix)]
+fn hidden(command: &mut Command) -> &mut Command {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+    command
+}
+
+#[cfg(windows)]
+fn create_windows_job() -> io::Result<WindowsJob> {
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    if handle.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let job = WindowsJob {
+        handle: handle as isize,
+    };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let configured = unsafe {
+        SetInformationJobObject(
+            job.raw(),
+            JobObjectExtendedLimitInformation,
+            std::ptr::from_ref(&limits).cast(),
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+    };
+    if configured == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(job)
+}
+
+#[cfg(windows)]
+fn resume_suspended_process(pid: u32) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        ..Default::default()
+    };
+    let mut found = false;
+    let mut current = unsafe { Thread32First(snapshot, &mut entry) };
+    while current != 0 {
+        if entry.th32OwnerProcessID == pid {
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if thread.is_null() {
+                let error = io::Error::last_os_error();
+                unsafe { CloseHandle(snapshot) };
+                return Err(error);
+            }
+            let resumed = unsafe { ResumeThread(thread) };
+            let resume_error = (resumed == u32::MAX).then(io::Error::last_os_error);
+            unsafe { CloseHandle(thread) };
+            if let Some(error) = resume_error {
+                unsafe { CloseHandle(snapshot) };
+                return Err(error);
+            }
+            found = true;
+            break;
+        }
+        current = unsafe { Thread32Next(snapshot, &mut entry) };
+    }
+    let iteration_error = if !found && current == 0 {
+        let code = unsafe { GetLastError() };
+        (code != ERROR_NO_MORE_FILES).then(|| io::Error::from_raw_os_error(code as i32))
+    } else {
+        None
+    };
+    unsafe { CloseHandle(snapshot) };
+    if let Some(error) = iteration_error {
+        return Err(error);
+    }
+    if !found {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "suspended provider primary thread was not found",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
     #[cfg(windows)]
     {
+        use std::os::windows::io::AsRawHandle;
         use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, TerminateJobObject,
+        };
+
+        let job = create_windows_job()?;
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED);
+        let mut child = command.spawn()?;
+        let assigned = unsafe { AssignProcessToJobObject(job.raw(), child.as_raw_handle()) };
+        if assigned == 0 {
+            let error = io::Error::last_os_error();
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        if let Err(error) = resume_suspended_process(child.id()) {
+            unsafe {
+                TerminateJobObject(job.raw(), 1);
+            }
+            let _ = child.wait();
+            return Err(error);
+        }
+        Ok(OwnedChild { child, job })
     }
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+        hidden(command);
+        command.spawn().map(|child| OwnedChild { child })
     }
-    command
 }
 
 fn reap_child_before(child: &mut Child, deadline: Instant) -> io::Result<()> {
@@ -353,116 +505,38 @@ fn reap_child_before(child: &mut Child, deadline: Instant) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-fn windows_process_snapshot() -> io::Result<Vec<(u32, u32)>> {
-    use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE,
-    };
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
+pub(crate) fn terminate_child_tree(owned: &mut OwnedChild) -> io::Result<()> {
+    use windows_sys::Win32::System::JobObjects::{
+        JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
     };
 
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-    if snapshot == INVALID_HANDLE_VALUE {
+    let deadline = Instant::now() + PROCESS_TERMINATION_TIMEOUT;
+    if unsafe { TerminateJobObject(owned.job.raw(), 1) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    let mut entries = Vec::new();
-    let mut entry = PROCESSENTRY32W {
-        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-        ..Default::default()
-    };
-    let first = unsafe { Process32FirstW(snapshot, &mut entry) };
-    if first == 0 {
-        let code = unsafe { GetLastError() };
-        unsafe { CloseHandle(snapshot) };
-        return if code == ERROR_NO_MORE_FILES {
-            Ok(entries)
-        } else {
-            Err(io::Error::from_raw_os_error(code as i32))
+    reap_child_before(&mut owned.child, deadline)?;
+    loop {
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        let queried = unsafe {
+            QueryInformationJobObject(
+                owned.job.raw(),
+                JobObjectBasicAccountingInformation,
+                std::ptr::from_mut(&mut accounting).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
         };
-    }
-    loop {
-        entries.push((entry.th32ProcessID, entry.th32ParentProcessID));
-        if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
-            let code = unsafe { GetLastError() };
-            unsafe { CloseHandle(snapshot) };
-            return if code == ERROR_NO_MORE_FILES {
-                Ok(entries)
-            } else {
-                Err(io::Error::from_raw_os_error(code as i32))
-            };
+        if queried == 0 {
+            return Err(io::Error::last_os_error());
         }
-    }
-}
-
-#[cfg(windows)]
-fn windows_live_descendants(root_pid: u32, known: &mut HashSet<u32>) -> io::Result<Vec<u32>> {
-    let entries = windows_process_snapshot()?;
-    known.insert(root_pid);
-    loop {
-        let mut changed = false;
-        for (pid, parent) in &entries {
-            if *pid != root_pid && known.contains(parent) && known.insert(*pid) {
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    Ok(entries
-        .into_iter()
-        .map(|(pid, _)| pid)
-        .filter(|pid| *pid != root_pid && known.contains(pid))
-        .collect())
-}
-
-#[cfg(windows)]
-fn terminate_windows_process(pid: u32) -> io::Result<()> {
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_INVALID_PARAMETER};
-    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-
-    let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
-    if handle.is_null() {
-        let code = unsafe { GetLastError() };
-        return if code == ERROR_INVALID_PARAMETER {
-            Ok(())
-        } else {
-            Err(io::Error::from_raw_os_error(code as i32))
-        };
-    }
-    let terminated = unsafe { TerminateProcess(handle, 1) };
-    let error = (terminated == 0).then(io::Error::last_os_error);
-    unsafe { CloseHandle(handle) };
-    error.map_or(Ok(()), Err)
-}
-
-#[cfg(windows)]
-pub(crate) fn terminate_child_tree(child: &mut Child) -> io::Result<()> {
-    let root_pid = child.id();
-    let deadline = Instant::now() + PROCESS_TERMINATION_TIMEOUT;
-    if child.try_wait()?.is_none() {
-        child.kill()?;
-    }
-    reap_child_before(child, deadline)?;
-
-    // A terminated Windows parent can disappear before taskkill can address
-    // its tree. Preserve every discovered parent PID and repeatedly snapshot
-    // descendants until none remain; this also catches a child spawned while
-    // an earlier snapshot was being terminated.
-    let mut known = HashSet::from([root_pid]);
-    loop {
-        let descendants = windows_live_descendants(root_pid, &mut known)?;
-        if descendants.is_empty() {
+        if accounting.ActiveProcesses == 0 {
             return Ok(());
-        }
-        for pid in descendants {
-            terminate_windows_process(pid)?;
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "provider process descendants did not terminate before the deadline",
+                "provider Job Object did not become empty before the deadline",
             ));
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
@@ -470,11 +544,11 @@ pub(crate) fn terminate_child_tree(child: &mut Child) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-pub(crate) fn terminate_child_tree(child: &mut Child) -> io::Result<()> {
+pub(crate) fn terminate_child_tree(owned: &mut OwnedChild) -> io::Result<()> {
     // All approved provider commands are placed in a dedicated process group
     // by hidden(). A negative PID targets that complete group. ESRCH is the
     // only safe non-success result: it proves the isolated group is absent.
-    let result = unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+    let result = unsafe { libc::kill(-(owned.child.id() as i32), libc::SIGKILL) };
     if result != 0 {
         let error = io::Error::last_os_error();
         if error.raw_os_error() != Some(libc::ESRCH) {
@@ -482,9 +556,9 @@ pub(crate) fn terminate_child_tree(child: &mut Child) -> io::Result<()> {
         }
     }
     let deadline = Instant::now() + PROCESS_TERMINATION_TIMEOUT;
-    reap_child_before(child, deadline)?;
+    reap_child_before(&mut owned.child, deadline)?;
     loop {
-        let group = unsafe { libc::kill(-(child.id() as i32), 0) };
+        let group = unsafe { libc::kill(-(owned.child.id() as i32), 0) };
         if group != 0 {
             let error = io::Error::last_os_error();
             if error.raw_os_error() == Some(libc::ESRCH) {
@@ -834,11 +908,10 @@ mod tests {
             command.args(["-c", "sleep 30"]);
             command
         };
-        hidden(&mut command);
-        let mut child = command.spawn().unwrap();
+        let mut child = spawn_owned(&mut command).unwrap();
 
         terminate_child_tree(&mut child).unwrap();
-        assert!(child.try_wait().unwrap().is_some());
+        assert!(child.child.try_wait().unwrap().is_some());
     }
 
     #[cfg(windows)]
@@ -861,25 +934,59 @@ mod tests {
             "-Command",
             &script,
         ]);
-        hidden(&mut command);
-        let mut child = command.spawn().unwrap();
+        let mut child = spawn_owned(&mut command).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
-        while (!marker.exists() || child.try_wait().unwrap().is_none()) && Instant::now() < deadline
+        while (!marker.exists() || child.child.try_wait().unwrap().is_none())
+            && Instant::now() < deadline
         {
             thread::sleep(PROCESS_POLL_INTERVAL);
         }
-        let descendant_pid: u32 = std::fs::read_to_string(&marker)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        assert!(marker.exists());
 
         terminate_child_tree(&mut child).unwrap();
+        let _ = std::fs::remove_file(marker);
+    }
 
-        assert!(!windows_process_snapshot()
-            .unwrap()
-            .into_iter()
-            .any(|(pid, _)| pid == descendant_pid));
+    #[cfg(windows)]
+    #[test]
+    fn job_owns_grandchild_after_intermediate_and_leader_exit() {
+        let marker = std::env::temp_dir().join(format!(
+            "wiii-neko-indirect-descendant-{}.pid",
+            uuid::Uuid::new_v4()
+        ));
+        let escaped_marker = marker.to_string_lossy().replace('\'', "''");
+        let intermediate = format!(
+            "$g = Start-Process powershell.exe -WindowStyle Hidden -PassThru \
+             -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-Command', \
+             'Start-Sleep -Seconds 30'); \
+             [IO.File]::WriteAllText('{escaped_marker}', [string]$g.Id)"
+        );
+        let escaped_intermediate = intermediate.replace('\'', "''");
+        let script = format!(
+            "$inner = '{escaped_intermediate}'; \
+             $p = Start-Process powershell.exe -WindowStyle Hidden -PassThru \
+             -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-Command',$inner); \
+             Wait-Process -Id $p.Id"
+        );
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ]);
+        let mut child = spawn_owned(&mut command).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while (!marker.exists() || child.child.try_wait().unwrap().is_none())
+            && Instant::now() < deadline
+        {
+            thread::sleep(PROCESS_POLL_INTERVAL);
+        }
+        assert!(marker.exists());
+        assert!(child.child.try_wait().unwrap().is_some());
+
+        terminate_child_tree(&mut child).unwrap();
         let _ = std::fs::remove_file(marker);
     }
 
