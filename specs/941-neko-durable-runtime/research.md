@@ -41,7 +41,9 @@ This prevents credential or prompt capture and detects request-ID collisions.
 SQLite uses WAL, foreign keys, a busy timeout and transactions. It stores
 sessions, idempotency records and bounded lifecycle events. Sequence is
 allocated by `(stream_id, MAX(seq)+1)` inside the same immediate transaction
-that inserts the event.
+that inserts the event. Session creation and every lifecycle state transition
+commit atomically with their matching durable event, so neither half can
+become authoritative alone.
 
 Startup maintenance keeps at most 10,000 lifecycle events per run and removes
 events older than 30 days, while retaining each stream's latest event as its
@@ -70,7 +72,9 @@ process crash, so it must not claim recovered live ownership.
 Rust holds binary candidates, version probes, launch arguments and profile
 rules for Neko Core, Gemini CLI and Codex. TypeScript retains product-facing
 metadata and adapter selection but no executable path or launch argument
-table. Detection does not reveal resolved paths to the WebView.
+table. Detection does not reveal resolved paths to the WebView. Rust resolves
+and probes an absolute canonical executable and launches that exact path; a
+later workspace `cwd` therefore cannot change which executable is selected.
 
 ## Rejected alternatives
 

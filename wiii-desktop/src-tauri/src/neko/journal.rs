@@ -70,6 +70,7 @@ pub struct ControlEvent {
     #[serde(rename = "type")]
     pub event_type: String,
     pub run_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
     pub payload: Value,
 }
@@ -425,6 +426,7 @@ impl Journal {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn insert_session(&self, session: NewSession<'_>) -> Result<(), String> {
         let timestamp = now();
         lock(&self.connection)
@@ -447,6 +449,83 @@ impl Journal {
             )
             .map_err(|error| format!("record Neko session failed: {error}"))?;
         Ok(())
+    }
+
+    /// Create the initial session fact and its matching durable event in one
+    /// transaction. A session can never become visible without its creation
+    /// event (or vice versa).
+    pub fn insert_session_with_event(
+        &self,
+        session: NewSession<'_>,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<ControlEvent, String> {
+        validate_payload(&payload)?;
+        let encoded = serde_json::to_string(&payload)
+            .map_err(|error| format!("encode Neko control event failed: {error}"))?;
+        let mut connection = lock(&self.connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("begin Neko session transaction failed: {error}"))?;
+        let timestamp = now();
+        transaction
+            .execute(
+                "INSERT INTO runtime_sessions
+                   (agent_session_id, task_id, run_id, environment_id, provider_id,
+                    workspace_path, state, operation_phase, continuity, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', ?9, ?9)",
+                params![
+                    session.agent_session_id,
+                    session.task_id,
+                    session.run_id,
+                    session.environment_id,
+                    session.provider_id,
+                    session.workspace_path,
+                    RunState::Starting.as_str(),
+                    OperationPhase::Accepted.as_str(),
+                    timestamp
+                ],
+            )
+            .map_err(|error| format!("record Neko session failed: {error}"))?;
+        let next: i64 = transaction
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM control_events WHERE stream_id = ?1",
+                [session.run_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("allocate Neko event sequence failed: {error}"))?;
+        let event = ControlEvent {
+            v: 1,
+            event_id: Uuid::new_v4().to_string(),
+            stream_id: session.run_id.to_string(),
+            seq: next as u64,
+            at: timestamp,
+            event_type: event_type.to_string(),
+            run_id: session.run_id.to_string(),
+            agent_session_id: Some(session.agent_session_id.to_string()),
+            payload,
+        };
+        transaction
+            .execute(
+                "INSERT INTO control_events
+                   (event_id, stream_id, seq, at, event_type, run_id, agent_session_id, payload_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    event.event_id,
+                    event.stream_id,
+                    next,
+                    event.at,
+                    event.event_type,
+                    event.run_id,
+                    event.agent_session_id,
+                    encoded
+                ],
+            )
+            .map_err(|error| format!("append Neko session creation event failed: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit Neko session transaction failed: {error}"))?;
+        Ok(event)
     }
 
     pub fn set_session_phase(
@@ -481,6 +560,7 @@ impl Journal {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn update_session(
         &self,
         agent_session_id: &str,
@@ -535,6 +615,112 @@ impl Journal {
             )
             .map_err(|error| format!("update Neko session state failed: {error}"))?;
         Ok(())
+    }
+
+    /// Commit a session lifecycle transition and its authoritative event in
+    /// one SQLite transaction. Renderer delivery happens only after commit.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_session_with_event(
+        &self,
+        agent_session_id: &str,
+        next_state: RunState,
+        phase: OperationPhase,
+        continuity: &str,
+        pid: Option<u32>,
+        provider_version: Option<&str>,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<ControlEvent, String> {
+        validate_payload(&payload)?;
+        let encoded = serde_json::to_string(&payload)
+            .map_err(|error| format!("encode Neko control event failed: {error}"))?;
+        let mut connection = lock(&self.connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("begin Neko lifecycle transaction failed: {error}"))?;
+        let (current_state, current_phase, run_id): (String, String, String) = transaction
+            .query_row(
+                "SELECT state, operation_phase, run_id FROM runtime_sessions
+                  WHERE agent_session_id = ?1",
+                [agent_session_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|error| format!("read Neko session state failed: {error}"))?;
+        let current_state = RunState::parse(&current_state)
+            .ok_or_else(|| "recorded Neko session has an invalid state".to_string())?;
+        let current_phase = OperationPhase::parse(&current_phase)
+            .ok_or_else(|| "recorded Neko session has an invalid operation phase".to_string())?;
+        if !can_transition(current_state, next_state) {
+            return Err(format!(
+                "invalid Neko run transition {} -> {}",
+                current_state.as_str(),
+                next_state.as_str()
+            ));
+        }
+        if !can_advance_operation(current_phase, phase) {
+            return Err(format!(
+                "invalid Neko session operation transition {} -> {}",
+                current_phase.as_str(),
+                phase.as_str()
+            ));
+        }
+        let timestamp = now();
+        transaction
+            .execute(
+                "UPDATE runtime_sessions
+                    SET state = ?2, operation_phase = ?3, continuity = ?4, pid = ?5,
+                        provider_version = COALESCE(?6, provider_version), updated_at = ?7
+                  WHERE agent_session_id = ?1",
+                params![
+                    agent_session_id,
+                    next_state.as_str(),
+                    phase.as_str(),
+                    continuity,
+                    pid.map(i64::from),
+                    provider_version,
+                    timestamp
+                ],
+            )
+            .map_err(|error| format!("update Neko session state failed: {error}"))?;
+        let next: i64 = transaction
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM control_events WHERE stream_id = ?1",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("allocate Neko event sequence failed: {error}"))?;
+        let event = ControlEvent {
+            v: 1,
+            event_id: Uuid::new_v4().to_string(),
+            stream_id: run_id.clone(),
+            seq: next as u64,
+            at: timestamp,
+            event_type: event_type.to_string(),
+            run_id,
+            agent_session_id: Some(agent_session_id.to_string()),
+            payload,
+        };
+        transaction
+            .execute(
+                "INSERT INTO control_events
+                   (event_id, stream_id, seq, at, event_type, run_id, agent_session_id, payload_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    event.event_id,
+                    event.stream_id,
+                    next,
+                    event.at,
+                    event.event_type,
+                    event.run_id,
+                    event.agent_session_id,
+                    encoded
+                ],
+            )
+            .map_err(|error| format!("append Neko lifecycle event failed: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit Neko lifecycle transaction failed: {error}"))?;
+        Ok(event)
     }
 
     pub fn session(&self, agent_session_id: &str) -> Result<Option<SessionRecord>, String> {
@@ -751,19 +937,14 @@ impl Journal {
                         _ => unreachable!("non-terminal recovery disposition cannot be preserved"),
                     },
                 };
-            self.update_session(
+            self.update_session_with_event(
                 &session.agent_session_id,
                 state,
                 phase,
                 continuity,
                 None,
                 None,
-            )?;
-            self.append_event(
-                &session.run_id,
                 "run.state_changed",
-                &session.run_id,
-                Some(&session.agent_session_id),
                 json!({ "state": state.as_str(), "reason": reason }),
             )?;
         }
@@ -1041,6 +1222,87 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_state_and_event_commit_or_roll_back_together() {
+        let journal = Journal::in_memory();
+        journal
+            .insert_session(session("session-a", "run-a"))
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::SideEffectStarted)
+            .unwrap();
+        lock(&journal.connection)
+            .execute_batch(
+                "CREATE TRIGGER reject_lifecycle_event
+                   BEFORE INSERT ON control_events
+                   BEGIN SELECT RAISE(ABORT, 'event rejected'); END;",
+            )
+            .unwrap();
+
+        assert!(journal
+            .update_session_with_event(
+                "session-a",
+                RunState::Running,
+                OperationPhase::Committed,
+                "active",
+                Some(42),
+                Some("test-version"),
+                "run.state_changed",
+                json!({ "state": "running" }),
+            )
+            .is_err());
+        let unchanged = journal.session("session-a").unwrap().unwrap();
+        assert_eq!(unchanged.state, RunState::Starting);
+        assert_eq!(unchanged.operation_phase, OperationPhase::SideEffectStarted);
+        assert!(journal.replay("run-a", 0, 10).unwrap().events.is_empty());
+
+        lock(&journal.connection)
+            .execute_batch("DROP TRIGGER reject_lifecycle_event;")
+            .unwrap();
+        let event = journal
+            .update_session_with_event(
+                "session-a",
+                RunState::Running,
+                OperationPhase::Committed,
+                "active",
+                Some(42),
+                Some("test-version"),
+                "run.state_changed",
+                json!({ "state": "running" }),
+            )
+            .unwrap();
+        assert_eq!(event.seq, 1);
+        assert_eq!(
+            journal.session("session-a").unwrap().unwrap().state,
+            RunState::Running
+        );
+        assert_eq!(journal.replay("run-a", 0, 10).unwrap().events, [event]);
+    }
+
+    #[test]
+    fn session_creation_and_event_commit_or_roll_back_together() {
+        let journal = Journal::in_memory();
+        lock(&journal.connection)
+            .execute_batch(
+                "CREATE TRIGGER reject_creation_event
+                   BEFORE INSERT ON control_events
+                   BEGIN SELECT RAISE(ABORT, 'event rejected'); END;",
+            )
+            .unwrap();
+        assert!(journal
+            .insert_session_with_event(
+                session("session-a", "run-a"),
+                "session.created",
+                json!({ "providerId": "codex" }),
+            )
+            .is_err());
+        assert!(journal.session("session-a").unwrap().is_none());
+        assert!(journal.replay("run-a", 0, 10).unwrap().events.is_empty());
+    }
+
+    #[test]
     fn replay_rejects_invalid_limits_and_unrepresentable_cursors() {
         let journal = Journal::in_memory();
         assert!(journal.replay("run-a", 0, 0).is_err());
@@ -1140,6 +1402,11 @@ mod tests {
         let retained = journal.replay("run-a", 0, 10).unwrap();
         assert_eq!(retained.events.len(), 1);
         assert_eq!(retained.events[0].seq, 3);
+        assert_eq!(retained.events[0].agent_session_id, None);
+        assert!(serde_json::to_value(&retained.events[0])
+            .unwrap()
+            .get("agentSessionId")
+            .is_none());
         let next = journal
             .append_event(
                 "run-a",

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Check, FolderOpen, LoaderCircle, ShieldCheck } from "lucide-react";
+import { v4 as uuidv4 } from "uuid";
 import {
   loadAgentProfiles,
   useNekoAgentStore,
@@ -30,7 +31,7 @@ function recentWorkspaces(): WorkspaceRef[] {
 }
 
 export function NewSessionView() {
-  const { agents, isLoading } = useNekoAgentStore();
+  const { agents, isLoading, error: discoveryError, detect } = useNekoAgentStore();
   const createSession = useNekoSessionStore((state) => state.createSession);
   const sessions = useNekoSessionStore((state) => state.sessions);
   const [workspace, setWorkspace] = useState<WorkspaceRef | null>(null);
@@ -96,7 +97,9 @@ export function NewSessionView() {
     setCodexAccountState("checking");
     void getNekoControlClient().spawnProvider({
       providerId: "codex",
-      clientSessionId: "codex-account-bootstrap",
+      // A finished bootstrap run is terminal. Every account probe therefore
+      // gets a new execution identity instead of attempting to reopen it.
+      clientSessionId: `codex-account-bootstrap-${uuidv4()}`,
       workspacePath: workspace.path,
     })
       .then(async ({ transport }) => {
@@ -258,6 +261,20 @@ export function NewSessionView() {
               </span>
               Chọn một dự án trước. Neko Chill sẽ chỉ sau đó đọc các agent,
               profile và model thật sự có trên máy bạn.
+            </div>
+          ) : discoveryError ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-[var(--nk-danger)]/30 bg-[var(--nk-composer)] p-4 text-[12.5px] leading-5 text-[var(--nk-danger)]"
+            >
+              <p>{discoveryError}</p>
+              <button
+                type="button"
+                className="mt-3 rounded-lg border border-[var(--nk-border-strong)] px-2.5 py-1.5 text-[11.5px] text-[var(--nk-text-2)] hover:bg-[var(--nk-raised)]"
+                onClick={() => void detect()}
+              >
+                Thử dò lại
+              </button>
             </div>
           ) : isLoading ? (
             <p className="flex items-center gap-2 py-4 text-[13px] text-[var(--nk-text-3)]">

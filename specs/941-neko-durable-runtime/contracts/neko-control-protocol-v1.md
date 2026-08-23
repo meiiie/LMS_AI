@@ -12,6 +12,8 @@ method and logical target before dispatch.
 - Same request ID while outcome is uncertain: return `unknown_outcome`.
 - Same request ID with another method or target: return `invalid_request`.
 - The server never retries a side effect merely because a response was lost.
+- `provider_busy` proves a bounded writer queue rejected the frame before it
+  was enqueued. A caller may retry that frame only with a new request ID.
 
 ## Native methods implemented in Phase 2A
 
@@ -49,6 +51,9 @@ idempotent by request ID. It does not accept a PID or executable.
 - `streamId` is the durable run stream ID.
 - `seq` is strictly monotonic within one `streamId` only.
 - Database row IDs and arrival order are not protocol ordering.
+- A session creation or lifecycle state transition and its corresponding
+  durable event commit in the same SQLite transaction. Renderer delivery
+  happens only after that commit and is recoverable through replay.
 
 ## Replay
 

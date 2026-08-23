@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::io::{self, Read};
+#[cfg(windows)]
+use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::mpsc::sync_channel;
 use std::thread;
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -15,37 +19,64 @@ struct ProbeOutput {
     stdout: Vec<u8>,
 }
 
+struct ProbeCapture {
+    path: PathBuf,
+    file: Option<File>,
+}
+
+impl ProbeCapture {
+    fn create() -> io::Result<Self> {
+        let path = std::env::temp_dir().join(format!("wiii-neko-probe-{}.tmp", Uuid::new_v4()));
+        let file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    fn stdio(&self) -> io::Result<Stdio> {
+        self.file
+            .as_ref()
+            .ok_or_else(|| io::Error::other("provider probe capture is closed"))?
+            .try_clone()
+            .map(Stdio::from)
+    }
+
+    fn read_bounded(&mut self) -> io::Result<Vec<u8>> {
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| io::Error::other("provider probe capture is closed"))?;
+        file.seek(SeekFrom::Start(0))?;
+        let mut captured = Vec::new();
+        file.take(MAX_PROBE_OUTPUT_BYTES as u64)
+            .read_to_end(&mut captured)?;
+        Ok(captured)
+    }
+}
+
+impl Drop for ProbeCapture {
+    fn drop(&mut self) {
+        self.file.take();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 /// Run a discovery command without allowing a broken provider shim to hang
-/// the desktop. The reader drains stdout after the durable cap so the child
-/// cannot deadlock on a full pipe while remaining bounded in memory.
+/// the desktop. A temporary file avoids a reader thread that can outlive a
+/// broken descendant holding stdout open; only a bounded prefix is returned.
 fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
+    let mut capture = ProbeCapture::create()?;
     command
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(capture.stdio()?)
         .stderr(Stdio::null());
     hidden(&mut command);
     let mut child = command.spawn()?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| io::Error::other("provider probe stdout was not piped"))?;
-    let (output_tx, output_rx) = sync_channel(1);
-    thread::spawn(move || {
-        let mut captured = Vec::new();
-        let mut chunk = [0_u8; 4096];
-        let result = loop {
-            let read = match stdout.read(&mut chunk) {
-                Ok(read) => read,
-                Err(error) => break Err(error),
-            };
-            if read == 0 {
-                break Ok(captured);
-            }
-            let remaining = MAX_PROBE_OUTPUT_BYTES.saturating_sub(captured.len());
-            captured.extend_from_slice(&chunk[..read.min(remaining)]);
-        };
-        let _ = output_tx.send(result);
-    });
     let deadline = Instant::now() + PROBE_TIMEOUT;
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -61,15 +92,51 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
         }
         thread::sleep(Duration::from_millis(25));
     };
-    let stdout = output_rx
-        .recv_timeout(Duration::from_millis(250))
-        .map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::TimedOut,
-                "provider probe stdout did not close",
-            )
-        })??;
+    let stdout = capture.read_bounded()?;
     Ok(ProbeOutput { status, stdout })
+}
+
+fn candidate_paths(candidate: &str) -> Vec<PathBuf> {
+    let candidate = Path::new(candidate);
+    if candidate.is_absolute() || candidate.components().count() > 1 {
+        return std::fs::canonicalize(candidate).into_iter().collect();
+    }
+    let Some(path) = std::env::var_os("PATH") else {
+        return Vec::new();
+    };
+    #[cfg(windows)]
+    let names = {
+        let mut names = vec![candidate.as_os_str().to_os_string()];
+        if candidate.extension().is_none() {
+            let extensions = std::env::var_os("PATHEXT")
+                .unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
+            names.extend(
+                extensions
+                    .to_string_lossy()
+                    .split(';')
+                    .filter(|extension| !extension.is_empty())
+                    .map(|extension| {
+                        let mut name = candidate.as_os_str().to_os_string();
+                        name.push(extension);
+                        name
+                    }),
+            );
+        }
+        names
+    };
+    #[cfg(not(windows))]
+    let names = vec![candidate.as_os_str().to_os_string()];
+    let mut resolved = Vec::new();
+    for directory in std::env::split_paths(&path) {
+        for name in &names {
+            if let Ok(path) = std::fs::canonicalize(directory.join(name)) {
+                if !resolved.contains(&path) {
+                    resolved.push(path);
+                }
+            }
+        }
+    }
+    resolved
 }
 
 pub(crate) fn hidden(command: &mut Command) -> &mut Command {
@@ -173,22 +240,24 @@ pub struct AgentInfo {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedProvider {
     pub definition: ProviderDefinition,
-    pub program: String,
+    pub program: PathBuf,
     pub version: Option<String>,
 }
 
 fn probe_definition(provider: ProviderDefinition) -> Option<ResolvedProvider> {
     for candidate in provider.candidates() {
-        let mut command = Command::new(candidate);
-        command.arg(provider.version_arg);
-        if let Ok(output) = run_probe(command) {
-            if output.status.success() {
-                let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                return Some(ResolvedProvider {
-                    definition: provider,
-                    program: (*candidate).to_string(),
-                    version: (!version.is_empty()).then_some(version),
-                });
+        for program in candidate_paths(candidate) {
+            let mut command = Command::new(&program);
+            command.arg(provider.version_arg);
+            if let Ok(output) = run_probe(command) {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    return Some(ResolvedProvider {
+                        definition: provider,
+                        program,
+                        version: (!version.is_empty()).then_some(version),
+                    });
+                }
             }
         }
     }
@@ -353,5 +422,14 @@ mod tests {
         assert!(profiles[0].active);
         assert_eq!(profiles[2].model, None);
         assert!(!profiles[2].active);
+    }
+
+    #[test]
+    fn approved_launch_paths_are_canonical_and_absolute() {
+        let current = std::env::current_exe().unwrap();
+        let resolved = candidate_paths(current.to_str().unwrap());
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved[0].is_absolute());
+        assert_eq!(resolved[0], std::fs::canonicalize(current).unwrap());
     }
 }

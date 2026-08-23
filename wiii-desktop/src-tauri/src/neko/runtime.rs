@@ -174,28 +174,29 @@ impl NekoRuntime {
             RequestDecision::Execute => {}
         }
 
-        if let Err(error) = self.inner.journal.insert_session(NewSession {
-            agent_session_id: &request.agent_session_id,
-            task_id: &request.task_id,
-            run_id: &request.run_id,
-            environment_id: &request.environment_id,
-            provider_id: &request.provider_id,
-            workspace_path: &request.workspace_path,
-        }) {
-            let _ = self
-                .inner
-                .journal
-                .fail_request(&request.request_id, "invalid_state");
-            return Err(error);
-        }
-        if let Err(error) = self.emit_control_event(
-            &app,
-            &request.run_id,
+        let created = self.inner.journal.insert_session_with_event(
+            NewSession {
+                agent_session_id: &request.agent_session_id,
+                task_id: &request.task_id,
+                run_id: &request.run_id,
+                environment_id: &request.environment_id,
+                provider_id: &request.provider_id,
+                workspace_path: &request.workspace_path,
+            },
             "session.created",
-            &request.agent_session_id,
             json!({ "providerId": request.provider_id }),
-        ) {
-            return Err(self.reject_start_error(&app, &request, "journal_error", None, error));
+        );
+        match created {
+            Ok(event) => {
+                let _ = app.emit("neko-control://event", event);
+            }
+            Err(error) => {
+                let _ = self
+                    .inner
+                    .journal
+                    .fail_request(&request.request_id, "invalid_state");
+                return Err(error);
+            }
         }
 
         if let Err(error) = self.advance_start_phase(&request, OperationPhase::Dispatched) {
@@ -269,19 +270,15 @@ impl NekoRuntime {
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = self.inner.journal.mark_request_unknown(&request.request_id);
-                let _ = self.inner.journal.update_session(
+                let _ = self.transition_session_event(
+                    &app,
                     &request.agent_session_id,
                     RunState::UnknownOutcome,
                     OperationPhase::UnknownOutcome,
                     "unknown_outcome",
                     None,
                     resolved.version.as_deref(),
-                );
-                let _ = self.emit_control_event(
-                    &app,
-                    &request.run_id,
                     "run.state_changed",
-                    &request.agent_session_id,
                     json!({ "state": "unknown_outcome", "reason": "provider_stdio_unavailable" }),
                 );
                 return Err(
@@ -308,13 +305,16 @@ impl NekoRuntime {
             },
         };
         let ownership_commit = (|| -> Result<(), String> {
-            self.inner.journal.update_session(
+            self.transition_session_event(
+                &app,
                 &request.agent_session_id,
                 RunState::Running,
                 OperationPhase::Committed,
                 "active",
                 Some(pid),
                 resolved.version.as_deref(),
+                "run.state_changed",
+                json!({ "state": "running" }),
             )?;
             self.inner
                 .journal
@@ -325,13 +325,6 @@ impl NekoRuntime {
                 "session.started",
                 &request.agent_session_id,
                 json!({ "providerId": result.provider.id, "providerVersion": result.provider.version }),
-            )?;
-            self.emit_control_event(
-                &app,
-                &request.run_id,
-                "run.state_changed",
-                &request.agent_session_id,
-                json!({ "state": "running" }),
             )?;
             self.inner.journal.complete_request(
                 &request.request_id,
@@ -345,19 +338,15 @@ impl NekoRuntime {
                 kill_proc(process);
             }
             let _ = self.inner.journal.mark_request_unknown(&request.request_id);
-            let _ = self.inner.journal.update_session(
+            let _ = self.transition_session_event(
+                &app,
                 &request.agent_session_id,
                 RunState::UnknownOutcome,
                 OperationPhase::UnknownOutcome,
                 "unknown_outcome",
                 None,
                 resolved.version.as_deref(),
-            );
-            let _ = self.emit_control_event(
-                &app,
-                &request.run_id,
                 "run.state_changed",
-                &request.agent_session_id,
                 json!({ "state": "unknown_outcome", "reason": "ownership_commit_failed" }),
             );
             return Err(format!(
@@ -441,7 +430,8 @@ impl NekoRuntime {
                     .journal
                     .fail_request(&request.request_id, "provider_busy")?;
                 return Err(
-                    "provider stdin queue is full; retry with a new request identity".into(),
+                    "provider_busy: provider stdin queue is full; retry with a new request identity"
+                        .into(),
                 );
             }
             Err(TrySendError::Disconnected(_)) => {
@@ -542,19 +532,15 @@ impl NekoRuntime {
             .set_request_phase(&request.request_id, OperationPhase::Committed)?;
         let cancelled = !session.state.is_terminal();
         if cancelled {
-            self.inner.journal.update_session(
+            self.transition_session_event(
+                app,
                 &request.agent_session_id,
                 RunState::Cancelled,
                 OperationPhase::Completed,
                 "active",
                 None,
                 None,
-            )?;
-            self.emit_control_event(
-                app,
-                &request.run_id,
                 "run.state_changed",
-                &request.agent_session_id,
                 json!({ "state": "cancelled", "reason": "requested" }),
             )?;
         }
@@ -580,19 +566,15 @@ impl NekoRuntime {
             kill_proc(process);
             if let Ok(Some(session)) = self.inner.journal.session(&agent_session_id) {
                 if !session.state.is_terminal() {
-                    let _ = self.inner.journal.update_session(
+                    let _ = self.transition_session_event(
+                        app,
                         &agent_session_id,
                         RunState::Cancelled,
                         OperationPhase::Completed,
                         "active",
                         None,
                         None,
-                    );
-                    let _ = self.emit_control_event(
-                        app,
-                        &session.run_id,
                         "run.state_changed",
-                        &agent_session_id,
                         json!({ "state": "cancelled", "reason": "application_exit" }),
                     );
                 }
@@ -621,6 +603,33 @@ impl NekoRuntime {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn transition_session_event(
+        &self,
+        app: &AppHandle,
+        agent_session_id: &str,
+        next_state: RunState,
+        phase: OperationPhase,
+        continuity: &str,
+        pid: Option<u32>,
+        provider_version: Option<&str>,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<(), String> {
+        let event = self.inner.journal.update_session_with_event(
+            agent_session_id,
+            next_state,
+            phase,
+            continuity,
+            pid,
+            provider_version,
+            event_type,
+            payload,
+        )?;
+        let _ = app.emit("neko-control://event", event);
+        Ok(())
+    }
+
     fn reject_start(
         &self,
         app: &AppHandle,
@@ -632,21 +641,15 @@ impl NekoRuntime {
         if let Err(error) = self.inner.journal.fail_request(&request.request_id, reason) {
             failures.push(error);
         }
-        if let Err(error) = self.inner.journal.update_session(
+        if let Err(error) = self.transition_session_event(
+            app,
             &request.agent_session_id,
             RunState::Failed,
             OperationPhase::Failed,
             "continuity_lost",
             None,
             provider_version,
-        ) {
-            failures.push(error);
-        }
-        if let Err(error) = self.emit_control_event(
-            app,
-            &request.run_id,
             "run.state_changed",
-            &request.agent_session_id,
             json!({ "state": "failed", "reason": reason }),
         ) {
             failures.push(error);
@@ -697,19 +700,15 @@ impl NekoRuntime {
             return code;
         };
         if !session.state.is_terminal() {
-            let _ = self.inner.journal.update_session(
+            let _ = self.transition_session_event(
+                app,
                 agent_session_id,
                 RunState::Failed,
                 OperationPhase::Failed,
                 "continuity_lost",
                 None,
                 None,
-            );
-            let _ = self.emit_control_event(
-                app,
-                &session.run_id,
                 "run.state_changed",
-                agent_session_id,
                 json!({ "state": "failed", "reason": "provider_process_exited" }),
             );
         }

@@ -170,6 +170,9 @@ class TauriNekoControlClient implements NekoControlClient {
 
     const lineHandlers: Array<(line: string) => void> = [];
     const exitHandlers: Array<(code: number | null) => void> = [];
+    const pendingLines: string[] = [];
+    let exitObserved = false;
+    let pendingExitCode: number | null = null;
     let killed = false;
     let killPromise: Promise<void> | null = null;
     const cancelRequestId = uuidv4();
@@ -187,10 +190,16 @@ class TauriNekoControlClient implements NekoControlClient {
     // race ahead of the WebView listener registration.
     try {
       unlistenLine = await listen<string>(`neko-session://line/${agentSessionId}`, (event) => {
-        for (const handler of lineHandlers) handler(event.payload);
+        if (lineHandlers.length === 0) {
+          pendingLines.push(event.payload);
+        } else {
+          for (const handler of lineHandlers) handler(event.payload);
+        }
       });
       unlistenExit = await listen<number | null>(`neko-session://exit/${agentSessionId}`, (event) => {
-        for (const handler of exitHandlers) handler(event.payload ?? null);
+        exitObserved = true;
+        pendingExitCode = event.payload ?? null;
+        for (const handler of exitHandlers) handler(pendingExitCode);
         killed = true;
         unresolvedWriteIds.clear();
         queueMicrotask(detach);
@@ -244,16 +253,27 @@ class TauriNekoControlClient implements NekoControlClient {
             unresolvedWriteIds.delete(line);
           }
         } catch (error) {
-          // Deliberately retain requestId for a caller retry. Provider frames
-          // remain memory-only; neither the frame nor credentials are journaled.
+          // A full bounded writer queue proves Rust did not enqueue this
+          // frame. Only that explicit rejection may mint a fresh identity on
+          // retry; all uncertain outcomes retain the original request ID.
+          if (isProviderBusy(error) && unresolvedWriteIds.get(line) === requestId) {
+            unresolvedWriteIds.delete(line);
+          }
           throw error;
         }
       },
       onLine(handler: (line: string) => void): void {
         lineHandlers.push(handler);
+        if (pendingLines.length > 0) {
+          const buffered = pendingLines.splice(0);
+          for (const line of buffered) handler(line);
+        }
       },
       onExit(handler: (code: number | null) => void): void {
         exitHandlers.push(handler);
+        if (exitObserved) {
+          queueMicrotask(() => handler(pendingExitCode));
+        }
       },
       async kill(): Promise<void> {
         if (killed) return;
@@ -293,6 +313,11 @@ class TauriNekoControlClient implements NekoControlClient {
 
 function hasNativeAuthority(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function isProviderBusy(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith("provider_busy:");
 }
 
 function isDetectedProvider(value: unknown): value is NekoDetectedProvider {

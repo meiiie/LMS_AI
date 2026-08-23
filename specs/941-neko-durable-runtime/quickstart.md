@@ -23,7 +23,10 @@ Expected invariants:
 
 - the WebView cannot name an executable, argument vector or PID;
 - Rust resolves only registered Neko/Gemini/Codex launch contracts;
+- Rust launches the exact canonical executable that passed its bounded probe;
 - repeated request IDs never repeat a side effect;
+- a proven `provider_busy` rejection retries only with a fresh request ID;
 - event sequence is monotonic within a run stream and replay is cursor-based;
+- lifecycle state and its matching durable event commit or roll back together;
 - uncertain recovery becomes `unknown_outcome`, never automatic retry;
 - provider frames and credentials are absent from the SQLite lifecycle schema.

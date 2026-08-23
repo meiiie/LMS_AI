@@ -27,6 +27,7 @@ export async function loadAgentProfiles(
 interface NekoAgentState {
   agents: DetectedAgent[];
   isLoading: boolean;
+  error: string | null;
   detect: () => Promise<void>;
 }
 
@@ -38,10 +39,18 @@ async function detectAgents(): Promise<DetectedAgent[]> {
 export const useNekoAgentStore = create<NekoAgentState>((set) => ({
   agents: [],
   isLoading: false,
+  error: null,
 
   detect: async () => {
-    set({ isLoading: true });
-    const agents = await detectAgents();
-    set({ agents, isLoading: false });
+    set({ isLoading: true, error: null });
+    try {
+      const agents = await detectAgents();
+      set({ agents, error: null });
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      set({ error: `Không thể dò agent cục bộ: ${detail}` });
+    } finally {
+      set({ isLoading: false });
+    }
   },
 }));

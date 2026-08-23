@@ -51,6 +51,7 @@ describe("Neko Chill shell UI", () => {
     useNekoAgentStore.setState({
       agents: [],
       isLoading: false,
+      error: null,
       detect: vi.fn(async () => {}),
     });
     useNekoSessionStore.setState({
@@ -537,5 +538,31 @@ describe("Neko Chill shell UI", () => {
         null,
       );
     });
+  });
+
+  it("recovers provider discovery failures without leaving the launcher loading", () => {
+    const detect = vi.fn(async () => {});
+    useNekoAgentStore.setState({
+      agents: [],
+      isLoading: false,
+      error: "Không thể dò agent cục bộ: journal unavailable",
+      detect,
+    });
+    useNekoSessionStore.setState({
+      sessions: {
+        recent: makeSession("recent", "Lịch sử", {
+          path: "C:/Users/me/project",
+          name: "project",
+        }),
+      },
+      activeSessionId: null,
+    });
+
+    render(<NekoChillApp />);
+    fireEvent.click(screen.getByRole("button", { name: "project" }));
+    expect(screen.getByRole("alert").textContent).toContain("journal unavailable");
+    expect(screen.queryByText(/Đang dò agent/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Thử dò lại" }));
+    expect(detect).toHaveBeenCalledTimes(2);
   });
 });

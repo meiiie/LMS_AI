@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
 
 import type { Driver } from "@/neko-chill/drivers/types";
 import { createDriverForAgent } from "@/neko-chill/drivers/factory";
+import { useNekoAgentStore } from "@/neko-chill/stores/neko-agent-store";
 import { getNekoControlClient } from "@/neko/control-client";
 
 const PROVIDER = {
@@ -71,6 +72,25 @@ describe("Neko driver factory resource ownership", () => {
         "journal unavailable",
       );
     } finally {
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    }
+  });
+
+  it("finishes provider discovery and exposes a retryable native error", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      value: {},
+      configurable: true,
+    });
+    tauri.invoke.mockRejectedValueOnce("journal unavailable");
+    try {
+      await useNekoAgentStore.getState().detect();
+      expect(useNekoAgentStore.getState()).toMatchObject({
+        agents: [],
+        isLoading: false,
+        error: "Không thể dò agent cục bộ: journal unavailable",
+      });
+    } finally {
+      useNekoAgentStore.setState({ agents: [], isLoading: false, error: null });
       Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
     }
   });
@@ -199,6 +219,81 @@ describe("Neko driver factory resource ownership", () => {
       writeCalls[0][1].request.requestId,
       writeCalls[0][1].request.requestId,
     ]);
+  });
+
+  it("uses a fresh write identity after a proven queue rejection", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    let writes = 0;
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command === "neko_control_session_start") {
+        return {
+          agentSessionId: payload?.request.agentSessionId,
+          runId: payload?.request.runId,
+          provider: PROVIDER,
+        };
+      }
+      if (command === "neko_control_session_write") {
+        writes += 1;
+        if (writes === 1) {
+          throw "provider_busy: provider stdin queue is full; retry with a new request identity";
+        }
+        return undefined;
+      }
+      return undefined;
+    });
+
+    const { transport } = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-queue-full",
+      workspacePath: "C:/tmp/project",
+    });
+    const frame = JSON.stringify({ jsonrpc: "2.0", id: 8, method: "session/prompt" });
+    await expect(transport.send(frame)).rejects.toContain("provider_busy:");
+    await expect(transport.send(frame)).resolves.toBeUndefined();
+
+    const writeCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_write",
+    );
+    expect(writeCalls).toHaveLength(2);
+    expect(writeCalls[0][1].request.requestId).not.toBe(
+      writeCalls[1][1].request.requestId,
+    );
+  });
+
+  it("replays bootstrap output and exit observed before transport handlers attach", async () => {
+    let onLine: ((event: { payload: string }) => void) | null = null;
+    let onExit: ((event: { payload: number | null }) => void) | null = null;
+    tauri.listen.mockImplementation(async (event: string, handler: any) => {
+      if (event.includes("/line/")) onLine = handler;
+      if (event.includes("/exit/")) onExit = handler;
+      return vi.fn();
+    });
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command === "neko_control_session_start") {
+        onLine?.({ payload: "bootstrap-ready" });
+        onExit?.({ payload: 17 });
+        return {
+          agentSessionId: payload?.request.agentSessionId,
+          runId: payload?.request.runId,
+          provider: PROVIDER,
+        };
+      }
+      return undefined;
+    });
+
+    const { transport } = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-fast-exit",
+      workspacePath: "C:/tmp/project",
+    });
+    const lines: string[] = [];
+    const exits: Array<number | null> = [];
+    transport.onLine((line) => lines.push(line));
+    transport.onExit((code) => exits.push(code));
+    await Promise.resolve();
+
+    expect(lines).toEqual(["bootstrap-ready"]);
+    expect(exits).toEqual([17]);
   });
 
   it("exposes ownership before ACP initialization completes", async () => {

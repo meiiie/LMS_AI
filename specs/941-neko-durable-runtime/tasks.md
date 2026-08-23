@@ -47,16 +47,18 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 26 Rust/security
-  tests and 118 focused Vitest tests passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,873 Vitest,
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 29 Rust/security
+  tests and the final 28-test regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,877 Vitest,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
   release check, 9 release tests, 445 self-harness tests and PR harness passed.
 - [x] T504 Harden review findings: bounded provider probes and session writers,
   second-instance focus, journal retention/checkpoint, structural capability
-  tests, replay validation and native-response cleanup.
-- [ ] T505 Resolve review threads and follow CI through merge.
+  tests, replay validation, atomic state/event commits, canonical launch paths,
+  early-event buffering, discovery recovery and native-response cleanup.
+- [x] T505 Address the second review round and keep merge blocked on fresh
+  required CI and a clean final review.
 
 ## Dependencies
 
