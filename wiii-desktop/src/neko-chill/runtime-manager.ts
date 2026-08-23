@@ -12,6 +12,16 @@ import {
 } from "@/neko/provider-registry";
 
 type Disposer = () => void | Promise<void>;
+type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
+
+async function observeCleanup(operation: Promise<unknown>): Promise<CleanupOutcome> {
+  try {
+    await operation;
+    return { failed: false };
+  } catch (error) {
+    return { failed: true, error };
+  }
+}
 
 /**
  * Owns every resource created for one runtime. Disposal is idempotent and
@@ -31,16 +41,20 @@ export class RuntimeScope {
   dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
     this.disposePromise = (async () => {
+      let failed = false;
       let firstError: unknown;
       for (const disposer of [...this.disposers].reverse()) {
         try {
           await disposer();
         } catch (error) {
-          firstError ??= error;
+          if (!failed) {
+            failed = true;
+            firstError = error;
+          }
         }
       }
       this.disposers.length = 0;
-      if (firstError) throw firstError;
+      if (failed) throw firstError;
     })();
     return this.disposePromise;
   }
@@ -71,17 +85,20 @@ interface RuntimePreparation {
 export interface RuntimeReplacement {
   current: RuntimeProviderSnapshot;
   previous: RuntimeProviderSnapshot | null;
+  cleanupFailed: boolean;
   cleanupError?: unknown;
 }
 
 export interface RuntimeDisposalResult {
   provider: RuntimeProviderSnapshot;
+  cleanupFailed: boolean;
   error?: unknown;
 }
 
 export interface RuntimeSessionDisposalResult {
   sessionId: string;
   provider: RuntimeProviderSnapshot | null;
+  cleanupFailed: boolean;
   error?: unknown;
 }
 
@@ -288,30 +305,24 @@ export class RuntimeRegistry {
         generation !== this.generation ||
         sessionGeneration !== (this.sessionGenerations.get(sessionId) ?? 0)
       ) {
-        const cleanupError = await preparation.scope.dispose().then(
-          () => null,
-          (error) => error,
-        );
-        if (cleanupError) {
+        const cleanup = await observeCleanup(preparation.scope.dispose());
+        if (cleanup.failed) {
           preparationCleanupFailed = true;
-          preparationCleanupError = cleanupError;
+          preparationCleanupError = cleanup.error;
           throw new AggregateError(
-            [new Error("Runtime preparation was cancelled during teardown."), cleanupError],
+            [new Error("Runtime preparation was cancelled during teardown."), cleanup.error],
             "Runtime preparation cancellation and cleanup both failed.",
           );
         }
         throw new Error("Runtime preparation was cancelled during teardown.");
       }
       if (driver.sessionId !== sessionId) {
-        const cleanupError = await preparation.scope.dispose().then(
-          () => null,
-          (error) => error,
-        );
-        if (cleanupError) {
+        const cleanup = await observeCleanup(preparation.scope.dispose());
+        if (cleanup.failed) {
           preparationCleanupFailed = true;
-          preparationCleanupError = cleanupError;
+          preparationCleanupError = cleanup.error;
           throw new AggregateError(
-            [new Error("Driver trả về sai sessionId."), cleanupError],
+            [new Error("Driver trả về sai sessionId."), cleanup.error],
             "Invalid runtime preparation and cleanup both failed.",
           );
         }
@@ -342,11 +353,13 @@ export class RuntimeRegistry {
 
       // Commit: all consumers resolve to the new provider identity atomically.
       this.bindings.set(sessionId, { driver, provider, scope: preparation.scope });
+      let cleanupFailed = false;
       let cleanupError: unknown;
       if (previous) {
         try {
           await this.joinDisposal(sessionId, previous.scope.dispose());
         } catch (error) {
+          cleanupFailed = true;
           cleanupError = error;
         }
       }
@@ -358,7 +371,8 @@ export class RuntimeRegistry {
       return {
         current: provider,
         previous: previous?.provider ?? null,
-        ...(cleanupError ? { cleanupError } : {}),
+        cleanupFailed,
+        ...(cleanupFailed ? { cleanupError } : {}),
       };
     } finally {
       if (preparationCleanupFailed) {
@@ -423,6 +437,7 @@ export class RuntimeRegistry {
     // Revoke synchronously so no further consumer can dispatch while cleanup
     // awaits a process or transport disposer.
     this.bindings.delete(sessionId);
+    let cleanupFailed = false;
     let error: unknown;
     try {
       const preparations = [...(this.pendingPreparations.get(sessionId) ?? [])];
@@ -433,6 +448,7 @@ export class RuntimeRegistry {
       );
       if (cleanup) await cleanup;
     } catch (disposeError) {
+      cleanupFailed = true;
       error = disposeError;
     } finally {
       if (!this.pendingPreparations.has(sessionId)) {
@@ -441,7 +457,8 @@ export class RuntimeRegistry {
     }
     return {
       provider: binding.provider,
-      ...(error ? { error } : {}),
+      cleanupFailed,
+      ...(cleanupFailed ? { error } : {}),
     };
   }
 
@@ -458,6 +475,7 @@ export class RuntimeRegistry {
     // Revoke every provider synchronously before awaiting any disposer. A
     // stalled process cannot leave unrelated sessions registered or unowned.
     this.bindings.clear();
+    const cleanupFailures = new Set<string>();
     const cleanupResults = new Map<string, unknown>();
     await Promise.all([...sessionIds].map(async (sessionId) => {
       const sessionBindings = bindings.filter(
@@ -477,6 +495,7 @@ export class RuntimeRegistry {
       try {
         await cleanup;
       } catch (error) {
+        cleanupFailures.add(sessionId);
         cleanupResults.set(sessionId, error);
       }
     }));
@@ -485,10 +504,12 @@ export class RuntimeRegistry {
         (binding) => binding.provider.sessionId === sessionId,
       )?.provider ?? null;
       const error = cleanupResults.get(sessionId);
+      const cleanupFailed = cleanupFailures.has(sessionId);
       return {
         sessionId,
         provider,
-        ...(error ? { error } : {}),
+        cleanupFailed,
+        ...(cleanupFailed ? { error } : {}),
       };
     });
   }

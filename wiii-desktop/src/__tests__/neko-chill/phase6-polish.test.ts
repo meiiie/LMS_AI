@@ -146,6 +146,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     readonly runtime: Driver["runtime"];
     disposed = 0;
     failDispose = false;
+    failDisposeWithoutReason = false;
     constructor(readonly sessionId: string, executionId: string) {
       this.runtime = {
         capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
@@ -164,6 +165,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     async setConfigOption(): Promise<void> {}
     async dispose(): Promise<void> {
       this.disposed += 1;
+      if (this.failDisposeWithoutReason) return Promise.reject(undefined);
       if (this.failDispose) throw new Error("native cancellation outcome lost");
     }
   }
@@ -235,7 +237,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   it("keeps an idle-reap cleanup failure uncertain and blocks respawn", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
-    driver.failDispose = true;
+    driver.failDisposeWithoutReason = true;
     useNekoSessionStore.setState((state) => {
       state.sessions[id].lastActivityAt = Date.now() - 31 * 60 * 1000;
     });
@@ -247,6 +249,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     expect(reaped.events.at(-1)?.data).toMatchObject({
       type: "native-runtime-cleanup-uncertain",
       providerId: "neko",
+      reason: "Unknown native runtime cleanup failure.",
     });
     expect(reaped.events.some((event) => (
       event.data.type === "runtime-detached" && event.data.reason === "idle"
@@ -262,7 +265,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   it("keeps a mode-exit cleanup failure uncertain instead of recording exit", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
-    driver.failDispose = true;
+    driver.failDisposeWithoutReason = true;
 
     await disposeAllNekoRuntimes();
 
@@ -271,6 +274,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     expect(session.events.at(-1)?.data).toMatchObject({
       type: "native-runtime-cleanup-uncertain",
       providerId: "neko",
+      reason: "Unknown native runtime cleanup failure.",
     });
     expect(session.events.some((event) => (
       event.data.type === "runtime-detached" && event.data.reason === "mode-exit"

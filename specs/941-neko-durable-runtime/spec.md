@@ -186,7 +186,9 @@ side-effect/committed phases become `unknown_outcome`.
 - **FR-030**: A live runtime cleanup that does not prove cancellation reached a
   safe terminal state MUST leave a durable blocking tombstone, render the
   visible session as an error, and prevent replacement execution until native
-  reconciliation establishes `completed`, `failed`, or `cancelled`.
+  reconciliation establishes `completed`, `failed`, or `cancelled`. Cleanup
+  success/failure MUST use a tagged outcome and MUST NOT depend on truthiness of
+  the rejection reason.
 
 ### Non-goals
 

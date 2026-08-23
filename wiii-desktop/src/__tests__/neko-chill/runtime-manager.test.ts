@@ -84,6 +84,22 @@ describe("RuntimeScope", () => {
     await expect(scope.dispose()).rejects.toThrow("driver cleanup failed");
     expect(calls).toEqual(["driver", "transport"]);
   });
+
+  it.each([undefined, null, false, 0, ""])(
+    "preserves a falsy disposer rejection (%s)",
+    async (reason) => {
+      const scope = new RuntimeScope();
+      scope.add(() => Promise.reject(reason));
+
+      const outcome = await scope.dispose().then(
+        () => ({ rejected: false as const, reason: null }),
+        (error) => ({ rejected: true as const, reason: error }),
+      );
+
+      expect(outcome.rejected).toBe(true);
+      expect(outcome.reason).toBe(reason);
+    },
+  );
 });
 
 describe("RuntimeRegistry", () => {
@@ -179,6 +195,22 @@ describe("RuntimeRegistry", () => {
     await registry.detach("s1");
     expect(second.disposed).toBe(1);
   });
+
+  it.each([undefined, null, false, 0, ""])(
+    "tags a falsy exact-session cleanup rejection (%s)",
+    async (reason) => {
+      const registry = new RuntimeRegistry();
+      const driver = new FakeDriver("s1");
+      driver.dispose = async () => Promise.reject(reason);
+      const attached = await registry.replace("s1", "neko", async () => driver);
+
+      const result = await registry.detachInstance("s1", attached.current.instanceId);
+
+      expect(result).toMatchObject({ cleanupFailed: true });
+      expect(Object.hasOwn(result ?? {}, "error")).toBe(true);
+      expect(result?.error).toBe(reason);
+    },
+  );
 
   it("joins an in-flight disposal when detach is called again", async () => {
     const registry = new RuntimeRegistry();
