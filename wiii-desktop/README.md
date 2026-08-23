@@ -1,6 +1,6 @@
 # Wiii Desktop
 
-Wiii Desktop is the native Wiii Workbench: a Tauri v2 application for durable
+Wiii Desktop is the native Wiii app: a Tauri v2 application for durable
 AI conversations, local and cloud agents, project files, tools, memory, and
 live artifacts. The interface is Vietnamese-first and uses the approved Neko
 companion identity.

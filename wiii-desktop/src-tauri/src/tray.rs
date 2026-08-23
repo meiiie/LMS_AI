@@ -15,7 +15,7 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 pub fn create_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItemBuilder::with_id("show", "Mở Wiii Workbench").build(app)?;
+    let show = MenuItemBuilder::with_id("show", "Mở Wiii").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Thoát").build(app)?;
 
     let menu = MenuBuilder::new(app)
@@ -32,7 +32,7 @@ pub fn create_tray(app: &tauri::App) -> tauri::Result<()> {
 
     let _tray = builder
         .menu(&menu)
-        .tooltip("Wiii Workbench")
+        .tooltip("Wiii")
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "quit" => app.exit(0),

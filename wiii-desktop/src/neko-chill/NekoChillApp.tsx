@@ -90,7 +90,7 @@ function ModeSwitcher({ onOpenManaged }: { onOpenManaged: () => void }) {
         onClick={() => setOpen((value) => !value)}
       >
         <WiiiMark className="shrink-0" size={17} />
-        <span>Wiii Workbench</span>
+        <span>Wiii</span>
         <ChevronDown aria-hidden="true" className="h-3 w-3 text-[var(--nk-text-3)]" />
       </button>
       {open ? (

@@ -2,7 +2,7 @@
 export const APP_VERSION = "1.2.0";
 
 /** App name */
-export const APP_NAME = "Wiii Workbench";
+export const APP_NAME = "Wiii";
 
 function isLocalBrowserHost(): boolean {
   if (typeof window === "undefined") return false;

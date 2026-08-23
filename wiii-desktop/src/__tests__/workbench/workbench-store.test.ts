@@ -13,6 +13,7 @@ vi.mock("@/lib/storage", () => ({
 }));
 
 import {
+  hasManagedAccountState,
   resolveInitialWorkbenchSurface,
   useWorkbenchStore,
 } from "@/workbench/workbench-store";
@@ -51,6 +52,20 @@ describe("Workbench surface migration", () => {
     expect(resolveInitialWorkbenchSurface(desktop, null, null, false)).toBe("local");
   });
 
+  it("does not mistake empty persisted auth metadata for an account", () => {
+    expect(hasManagedAccountState(null)).toBe(false);
+    expect(hasManagedAccountState({})).toBe(false);
+    expect(hasManagedAccountState({ user: null })).toBe(false);
+    expect(hasManagedAccountState({ user: { id: "existing" } })).toBe(true);
+    expect(hasManagedAccountState({ authMode: "oauth" })).toBe(false);
+    expect(hasManagedAccountState({ authMode: "legacy" })).toBe(true);
+  });
+
+  it("returns stale managed desktop preferences to local without an account", () => {
+    expect(resolveInitialWorkbenchSurface(desktop, "managed", null, false)).toBe("local");
+    expect(resolveInitialWorkbenchSurface(desktop, null, "wiii", false)).toBe("local");
+  });
+
   it("preserves an existing managed-mode intent without deleting auth", () => {
     expect(resolveInitialWorkbenchSurface(desktop, null, "wiii", true)).toBe("managed");
     expect(resolveInitialWorkbenchSurface(desktop, null, null, true)).toBe("managed");
@@ -71,6 +86,18 @@ describe("Workbench surface migration", () => {
     expect(storage.get("wiii-workbench.json:surface")).toBe("local");
     expect(storage.get("neko-chill-mode.json:mode")).toBe("wiii");
     expect(storage.get("auth_state:data")).toEqual({ user: { id: "existing" } });
+  });
+
+  it("boots local when the persisted auth file is empty", async () => {
+    storage.set("wiii-workbench.json:surface", "managed");
+    storage.set("neko-chill-mode.json:mode", "wiii");
+    storage.set("auth_state:data", {});
+
+    await useWorkbenchStore.getState().load(desktop);
+    expect(useWorkbenchStore.getState().surface).toBe("local");
+
+    await useWorkbenchStore.getState().setSurface("managed", desktop);
+    expect(useWorkbenchStore.getState().surface).toBe("managed");
   });
 
   it("refuses a local surface on hosted web", async () => {

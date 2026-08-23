@@ -57,6 +57,7 @@ class DesktopReleaseVerifierTests(unittest.TestCase):
                 release_target=target,
                 version="1.2.0",
                 git_sha=self.git_sha,
+                release_channel="stable",
             )
         return output_root
 
@@ -104,7 +105,7 @@ class DesktopReleaseVerifierTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output_root = self._create_release(root, ("windows-x64",))
-            manifest_path = next(output_root.rglob("*_release-manifest.json"))
+            manifest_path = next(output_root.rglob("*-release-manifest.json"))
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["git_sha"] = "d" * 40
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")

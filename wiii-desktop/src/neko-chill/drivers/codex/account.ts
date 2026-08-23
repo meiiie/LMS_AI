@@ -61,7 +61,7 @@ export class CodexAccountSession {
       await this.client.request("initialize", {
         clientInfo: {
           name: "wiii-workbench",
-          title: "Wiii Workbench",
+          title: "Wiii",
           version: APP_VERSION,
         },
         capabilities: { experimentalApi: true, requestAttestation: false },

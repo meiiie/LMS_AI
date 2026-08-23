@@ -53,6 +53,20 @@ Preserve these contracts unless a PR explicitly changes them:
 - Vietnamese UI copy should be natural and accented unless the surrounding
   surface is intentionally English.
 
+## Desktop Entry And Wiii Service
+
+- A desktop install without usable managed-account metadata opens the local
+  Wiii surface, even if stale legacy mode or an empty auth file exists.
+- Treat Wiii Service as an optional capability gateway, not the Wiii home
+  screen and not a competing product mode. Its login explains what managed
+  capabilities it adds and provides a prominent path back to local Wiii.
+- Keep custom Service endpoints in progressive advanced setup. Endpoint
+  configuration must not dominate first-run desktop UX.
+- Opening Service explicitly may show authentication; restarting without an
+  account returns to local Wiii. Hosted web remains managed-only.
+- Preserve Google OAuth, magic-link, supported API-key/dev paths, and auth
+  security boundaries when changing gateway presentation.
+
 ## Where To Start
 
 Common frontend entry points:

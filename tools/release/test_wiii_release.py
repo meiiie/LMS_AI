@@ -93,13 +93,31 @@ class ReleaseToolTests(unittest.TestCase):
 
     def test_manifest_is_deterministic_and_hashed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            artifact = Path(directory) / "Wiii-Workbench_1.2.0_windows-x64-setup.exe"
+            artifact = Path(directory) / "Wiii-1.2.0-candidate-aaaaaaaa-windows-x64-unsigned-setup.exe"
             artifact.write_bytes(b"wiii-release-test")
-            manifest = wiii_release.build_manifest([artifact], "1.2.0", "a" * 40)
-            self.assertEqual(manifest["schema"], "wiii.release-manifest.v1")
+            manifest = wiii_release.build_manifest(
+                [artifact],
+                "1.2.0",
+                "a" * 40,
+                release_channel="candidate",
+                trust_state="unsigned",
+            )
+            self.assertEqual(manifest["schema"], "wiii.release-manifest.v2")
+            self.assertEqual(manifest["product"], "Wiii")
+            self.assertEqual(manifest["build_identity"], "1.2.0-candidate-aaaaaaaa")
             self.assertEqual(manifest["artifacts"][0]["bytes"], 17)
             self.assertEqual(len(manifest["artifacts"][0]["sha256"]), 64)
             json.dumps(manifest)
+
+    def test_candidate_build_identity_is_commit_bound(self) -> None:
+        self.assertEqual(
+            wiii_release.build_identity("1.2.0", "candidate", "ABCDEF1234567890"),
+            "1.2.0-candidate-abcdef12",
+        )
+        self.assertEqual(
+            wiii_release.build_identity("1.2.0", "stable", "f" * 40),
+            "1.2.0",
+        )
 
     def test_set_version_updates_every_surface(self) -> None:
         source_root = wiii_release.ROOT

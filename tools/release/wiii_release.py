@@ -104,6 +104,22 @@ def canonical_tag(version: str) -> str:
     return f"wiii-v{validate_semver(version)}"
 
 
+def validate_release_channel(channel: str) -> str:
+    if channel not in {"candidate", "stable"}:
+        raise ValueError("release channel must be 'candidate' or 'stable'")
+    return channel
+
+
+def build_identity(version: str, channel: str, git_sha: str) -> str:
+    version = validate_semver(version)
+    channel = validate_release_channel(channel)
+    if channel == "stable":
+        return version
+    if not re.fullmatch(r"[0-9a-fA-F]{8,64}", git_sha):
+        raise ValueError("candidate git SHA must contain at least 8 hexadecimal characters")
+    return f"{version}-candidate-{git_sha[:8].lower()}"
+
+
 def read_version(root: Path = ROOT) -> str:
     return validate_semver((root / "VERSION").read_text(encoding="utf-8"))
 
@@ -368,8 +384,18 @@ def sha256(path: Path) -> str:
 
 
 def build_manifest(
-    artifacts: Iterable[Path], version: str, git_sha: str, root: Path = ROOT
+    artifacts: Iterable[Path],
+    version: str,
+    git_sha: str,
+    *,
+    release_channel: str,
+    trust_state: str,
+    root: Path = ROOT,
 ) -> dict[str, object]:
+    release_channel = validate_release_channel(release_channel)
+    identity = build_identity(version, release_channel, git_sha)
+    if not trust_state.strip():
+        raise ValueError("manifest trust state must not be empty")
     entries: list[dict[str, object]] = []
     for artifact in artifacts:
         path = artifact.resolve()
@@ -379,10 +405,13 @@ def build_manifest(
     if not entries:
         raise ValueError("at least one --artifact is required")
     return {
-        "schema": "wiii.release-manifest.v1",
-        "product": "Wiii Workbench",
+        "schema": "wiii.release-manifest.v2",
+        "product": "Wiii",
         "version": validate_semver(version),
-        "tag": canonical_tag(version),
+        "release_channel": release_channel,
+        "build_identity": identity,
+        "trust_state": trust_state,
+        "tag": canonical_tag(version) if release_channel == "stable" else None,
         "git_sha": git_sha,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "artifacts": sorted(entries, key=lambda item: str(item["name"])),
@@ -425,6 +454,10 @@ def build_parser() -> argparse.ArgumentParser:
     manifest_parser.add_argument("--artifact", action="append", type=Path, required=True)
     manifest_parser.add_argument("--version")
     manifest_parser.add_argument("--git-sha")
+    manifest_parser.add_argument(
+        "--release-channel", choices=("candidate", "stable"), required=True
+    )
+    manifest_parser.add_argument("--trust-state", required=True)
     manifest_parser.add_argument("--out", type=Path, required=True)
     return parser
 
@@ -455,7 +488,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "manifest":
             version = args.version or read_version()
-            manifest = build_manifest(args.artifact, version, args.git_sha or _git_sha())
+            manifest = build_manifest(
+                args.artifact,
+                version,
+                args.git_sha or _git_sha(),
+                release_channel=args.release_channel,
+                trust_state=args.trust_state,
+            )
             _write_json(manifest, args.out)
             return 0
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:

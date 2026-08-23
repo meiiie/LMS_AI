@@ -24,7 +24,7 @@ class DesktopBundleNormalizerTests(unittest.TestCase):
     def test_normalizes_every_release_target(self) -> None:
         cases = {
             "windows-x64": [
-                ("release/bundle/nsis/Wiii_1.2.0_x64-setup.exe", "windows-x64-setup.exe"),
+                ("release/bundle/nsis/Wiii_1.2.0_x64-setup.exe", "windows-x64-unsigned-setup.exe"),
             ],
             "linux-x64": [
                 ("release/bundle/deb/Wiii_1.2.0_amd64.deb", "linux-x64.deb"),
@@ -59,17 +59,43 @@ class DesktopBundleNormalizerTests(unittest.TestCase):
                     release_target=release_target,
                     version="1.2.0",
                     git_sha="a" * 40,
+                    release_channel="candidate",
                 )
 
                 self.assertEqual(result["release_target"], release_target)
                 for _relative, suffix in source_files:
-                    artifact = output_directory / f"Wiii-Workbench_1.2.0_{suffix}"
+                    artifact = output_directory / f"Wiii-1.2.0-candidate-aaaaaaaa-{suffix}"
                     self.assertTrue(artifact.is_file())
                     sidecar = artifact.with_name(f"{artifact.name}.sha256")
                     self.assertIn(artifact.name, sidecar.read_text(encoding="ascii"))
                 manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
                 self.assertEqual(len(manifest["artifacts"]), len(source_files))
                 self.assertEqual(manifest["git_sha"], "a" * 40)
+                self.assertEqual(manifest["product"], "Wiii")
+                self.assertEqual(manifest["release_channel"], "candidate")
+                self.assertIsNone(manifest["tag"])
+
+    def test_stable_windows_name_records_signing_truth(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "target/release/bundle/nsis/Wiii_1.2.0_x64-setup.exe"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(b"signed-test-bundle")
+
+            result = normalizer.normalize_bundle(
+                source_root=root / "target",
+                output_directory=root / "output",
+                release_target="windows-x64",
+                version="1.2.0",
+                git_sha="d" * 40,
+                release_channel="stable",
+            )
+
+            artifact = root / "output/Wiii-1.2.0-windows-x64-signed-setup.exe"
+            self.assertTrue(artifact.is_file())
+            manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["trust_state"], "authenticode-signed")
+            self.assertEqual(manifest["tag"], "wiii-v1.2.0")
 
     def test_rejects_ambiguous_tauri_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -85,6 +111,7 @@ class DesktopBundleNormalizerTests(unittest.TestCase):
                     release_target="windows-x64",
                     version="1.2.0",
                     git_sha="b" * 40,
+                    release_channel="candidate",
                 )
 
 

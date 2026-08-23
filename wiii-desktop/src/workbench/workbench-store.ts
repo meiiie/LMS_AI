@@ -11,19 +11,41 @@ const LEGACY_MODE_KEY = "mode";
 const AUTH_STORE = "auth_state";
 const AUTH_KEY = "data";
 
-function isSurface(value: unknown): value is WorkbenchSurface {
-  return value === "local" || value === "managed";
-}
-
 function hostAllowsLocalSurface(host: WorkbenchHost): boolean {
   return host.capabilities.localProcess && host.capabilities.localWorkspace;
 }
 
 /**
+ * Persisted auth files can exist without containing an account (for example
+ * after logout or an older install that wrote `{}`).  File presence alone is
+ * therefore not managed-account evidence.
+ */
+export function hasManagedAccountState(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  const user = state.user;
+  if (user && typeof user === "object" && !Array.isArray(user)) {
+    const identity = user as Record<string, unknown>;
+    if (
+      (typeof identity.id === "string" && identity.id.trim().length > 0) ||
+      (typeof identity.email === "string" && identity.email.trim().length > 0)
+    ) {
+      return true;
+    }
+  }
+  // OAuth identity is only meaningful with a persisted user; logout writes
+  // `{ user: null, authMode: "oauth" }`. Legacy mode has no user object and
+  // represents an API-key choice whose credential remains in settings.
+  return state.authMode === "legacy";
+}
+
+/**
  * Resolve the initial surface without mutating any legacy state.
  *
- * Existing desktop users keep their prior intent. A fresh desktop install is
- * local-first, while a browser fails closed onto a remotely-backed surface.
+ * A desktop without usable managed-account metadata is always local-first,
+ * including after stale `managed` or legacy `wiii` preferences. Explicitly
+ * opening Service still works for the current session. Hosted web fails closed
+ * onto its remotely-backed surface.
  */
 export function resolveInitialWorkbenchSurface(
   host: WorkbenchHost,
@@ -32,8 +54,9 @@ export function resolveInitialWorkbenchSurface(
   hasManagedAccount: boolean,
 ): WorkbenchSurface {
   if (!hostAllowsLocalSurface(host)) return "managed";
-  if (isSurface(storedSurface)) return storedSurface;
-  if (legacyMode === "wiii") return "managed";
+  if (storedSurface === "local") return "local";
+  if (storedSurface === "managed" && hasManagedAccount) return "managed";
+  if (legacyMode === "wiii" && hasManagedAccount) return "managed";
   if (legacyMode === "neko-chill") return "local";
   return hasManagedAccount ? "managed" : "local";
 }
@@ -64,7 +87,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
         host,
         storedSurface,
         legacyMode,
-        authState !== null && authState !== undefined,
+        hasManagedAccountState(authState),
       ),
       isLoaded: true,
     });

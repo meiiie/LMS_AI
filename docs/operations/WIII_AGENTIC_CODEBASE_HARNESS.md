@@ -4,11 +4,17 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-05-19
+Last updated: 2026-08-24
 
 This document translates large-codebase agent practices into Wiii's repository
 workflow. The goal is not to add ceremony. The goal is to make Wiii easier to
 navigate, safer to edit, and less dependent on tribal memory.
+
+The operating model follows the May 2026 Anthropic guidance on large-codebase
+agent harnesses: keep committed context lean and layered, load specialized
+instructions on demand, use hooks/checks for deterministic policy, and turn
+repeated review corrections into durable repository rules. Reference:
+[How Claude Code works in large codebases](https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start).
 
 ## Principles
 
@@ -19,6 +25,7 @@ navigate, safer to edit, and less dependent on tribal memory.
 5. Keep WIP reviewable by contract, not by enthusiasm.
 6. Put durable learnings in docs, not chat.
 7. Let deterministic checks enforce what prompts should not have to remember.
+8. Promote repeated product/release corrections into canonical contracts.
 
 ## Layered Context
 
@@ -36,6 +43,30 @@ Wiii uses layered agent guidance:
 
 Root guidance should stay compact. Path-specific guidance should carry the local
 details.
+
+`CLAUDE.md` is a compatibility entry point, not a second source of truth. It
+must route Claude Code into this same `AGENTS.md`/`docs` hierarchy. Do not add a
+committed `.claude/` tree that silently forks repository policy.
+
+## Durable Correction Mining
+
+When a maintainer or reviewer corrects the same class of mistake more than
+once, capture it at the narrowest durable layer:
+
+1. Put the invariant in root or path-specific `AGENTS.md`.
+2. Put the rationale and operator procedure in `docs/`.
+3. Add a focused test/check when the rule is machine-verifiable.
+4. Link the issue/PR that introduced the correction.
+5. Remove older text that conflicts with the new source of truth.
+
+Current mined contracts include:
+
+- Wiii is the product name; surface labels do not rename it.
+- Desktop is local-first; Wiii Service is optional managed capability.
+- An empty auth file is not evidence of a managed account.
+- Candidate and stable artifacts must never share an ambiguous identity.
+- Trust claims such as signed or notarized are facts proven by release gates,
+  not marketing labels.
 
 ## Exploration Protocol
 
@@ -113,6 +144,18 @@ npx tsc --noEmit
 
 Run broader suites only after focused checks are green or when the PR touches a
 shared contract.
+
+Release contract checks:
+
+```powershell
+python tools/release/wiii_release.py check
+python -m unittest discover -s tools/release -p 'test_*.py' -v
+```
+
+During iteration, run focused tests once per meaningful contract change. Run
+the broad desktop/repository gate at a review checkpoint and on the exact commit
+intended for merge or release; do not burn hours repeatedly rerunning an
+unchanged full suite.
 
 ## Repository Hygiene Rules
 

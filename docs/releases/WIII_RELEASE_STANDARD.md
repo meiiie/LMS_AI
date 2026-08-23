@@ -22,6 +22,11 @@ splash UI, and installer art. A candidate is invalid when any surface diverges;
 a stable release additionally requires its immutable tag, dated changelog
 section, verified artifacts, and GitHub Release.
 
+The product name in public release metadata and package filenames is `Wiii`.
+Names such as Workbench, ADE, Neko Chill, and Wiii Service describe Wiii
+surfaces; they do not create independent version lines. Internal executable and
+bundle identifiers may retain older names to preserve upgrades.
+
 ## 2. Channels
 
 ### Candidate
@@ -40,6 +45,9 @@ Each matrix member emits professionally named packages, SHA-256 sidecars,
 release notes, and a platform manifest. Candidate artifacts are internal
 evaluation builds and must never be presented as a public stable release.
 Candidate notes come from the non-empty `Unreleased` changelog section.
+Candidate filenames include `candidate` plus the source commit prefix so two
+builds with the same coordinated `VERSION` can never masquerade as the same
+binary.
 
 Ubuntu 22.04 is intentional. Tauri v2 requires WebKitGTK 4.1 and recommends
 building on the oldest supported Linux baseline to avoid raising the required
@@ -120,16 +128,17 @@ mandatory.
 
 Public desktop package names are stable and architecture-explicit:
 
-- `Wiii-Workbench_<version>_windows-x64-setup.exe`
-- `Wiii-Workbench_<version>_linux-x64.deb`
-- `Wiii-Workbench_<version>_linux-x64.AppImage`
-- `Wiii-Workbench_<version>_macos-arm64-unnotarized.dmg`
-- `Wiii-Workbench_<version>_macos-x64-unnotarized.dmg`
+- Candidate Windows: `Wiii-<version>-candidate-<sha8>-windows-x64-unsigned-setup.exe`
+- Stable Windows: `Wiii-<version>-windows-x64-signed-setup.exe`
+- Candidate Linux: `Wiii-<version>-candidate-<sha8>-linux-x64.{deb,AppImage}`
+- Stable Linux: `Wiii-<version>-linux-x64.{deb,AppImage}`
+- Candidate macOS: `Wiii-<version>-candidate-<sha8>-macos-<arch>-unnotarized.dmg`
+- Stable macOS: `Wiii-<version>-macos-<arch>-unnotarized.dmg`
 
 Every binary is published with `<binary>.sha256`. Each build target also emits
-`Wiii-Workbench_<version>_<target>_release-manifest.json`; the Linux manifest
-contains both Linux packages. A manifest binds file name, byte length, SHA-256
-digest, git commit, tag, and version. Stable publication also attaches
+`Wiii-<build-identity>-<target>-release-manifest.json`; the Linux manifest
+contains both Linux packages. A manifest binds product, channel, trust state,
+file name, byte length, SHA-256 digest, git commit, tag, and version. Stable publication also attaches
 GitHub-generated provenance attestations and release notes extracted from
 `CHANGELOG.md`.
 
@@ -141,21 +150,21 @@ upgrades and installed application state.
 Verify the sidecar before opening a downloaded package. On PowerShell:
 
 ```powershell
-$expected = (Get-Content .\Wiii-Workbench_1.2.0_windows-x64-setup.exe.sha256).Split()[0]
-$actual = (Get-FileHash .\Wiii-Workbench_1.2.0_windows-x64-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected = (Get-Content .\Wiii-1.2.0-windows-x64-signed-setup.exe.sha256).Split()[0]
+$actual = (Get-FileHash .\Wiii-1.2.0-windows-x64-signed-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw 'Wiii checksum mismatch' }
 ```
 
 On Linux:
 
 ```bash
-sha256sum -c Wiii-Workbench_<version>_<package>.sha256
+sha256sum -c Wiii-<version>-<package>.sha256
 ```
 
 On macOS:
 
 ```bash
-shasum -a 256 -c Wiii-Workbench_<version>_<package>.sha256
+shasum -a 256 -c Wiii-<version>-<package>.sha256
 ```
 
 - Windows: run the NSIS installer normally. Managed automation may use the

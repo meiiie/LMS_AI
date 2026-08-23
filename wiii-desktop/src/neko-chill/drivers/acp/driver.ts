@@ -354,7 +354,7 @@ export class AcpDriver implements Driver {
       },
       clientInfo: {
         name: "wiii-neko-chill",
-        title: "Wiii Workbench · Neko Chill",
+        title: "Wiii · Neko Chill",
         version: APP_VERSION,
       },
     })) as { protocolVersion?: unknown; agentCapabilities?: unknown };

@@ -289,7 +289,7 @@ export class CodexAppServerDriver implements Driver {
     await this.client.request("initialize", {
       clientInfo: {
         name: "wiii-workbench",
-        title: "Wiii Workbench",
+        title: "Wiii",
         version: APP_VERSION,
       },
       capabilities: {

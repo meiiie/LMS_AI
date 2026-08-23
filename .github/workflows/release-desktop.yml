@@ -258,12 +258,17 @@ jobs:
         shell: bash
         run: |
           version="$(tr -d '\r\n' < VERSION)"
+          release_channel='candidate'
+          if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
+            release_channel='stable'
+          fi
           python tools/release/normalize_desktop_bundle.py \
             --source-root wiii-desktop/src-tauri/target \
             --output-dir artifacts/release \
             --release-target "$RELEASE_TARGET_VALUE" \
             --version "$version" \
-            --git-sha "$GIT_SHA_VALUE"
+            --git-sha "$GIT_SHA_VALUE" \
+            --release-channel "$release_channel"
           arguments=(tools/release/wiii_release.py notes "$version" --out artifacts/release/release-notes.md)
           if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
             arguments+=(--tag "${GITHUB_REF_NAME}")
@@ -288,7 +293,7 @@ jobs:
       - name: Upload candidate or stable bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: Wiii-Workbench-${{ github.sha }}-${{ matrix.release_target }}
+          name: Wiii-${{ github.sha }}-${{ matrix.release_target }}
           path: artifacts/release/*
           if-no-files-found: error
           retention-days: 30
@@ -320,7 +325,7 @@ jobs:
       - name: Download verified platform bundles
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          pattern: Wiii-Workbench-${{ github.sha }}-*
+          pattern: Wiii-${{ github.sha }}-*
           path: artifacts/platforms
           merge-multiple: false
 
