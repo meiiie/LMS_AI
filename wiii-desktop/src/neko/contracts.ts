@@ -26,12 +26,14 @@ export type NekoProviderIntegration =
   | "pty";
 export type NekoProviderAuthOwner = "provider" | "wiii" | "user-credential" | "none";
 export type NekoProviderExtensionValue = string | number | boolean | null;
+export type NekoProviderAvailability = "available" | "not_installed" | "host_unsupported";
 
 export interface NekoDetectedProvider {
   id: string;
   name: string;
   version: string | null;
   found: boolean;
+  availability: NekoProviderAvailability;
   supportsProfiles: boolean;
 }
 

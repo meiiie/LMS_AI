@@ -22,6 +22,7 @@ const PROVIDER = {
   name: "Neko Core",
   version: "0.25.0",
   found: true,
+  availability: "available",
   supportsProfiles: true,
 };
 
@@ -44,6 +45,7 @@ describe("Neko driver factory resource ownership", () => {
             name: "Unknown executable",
             version: "1.0.0",
             found: true,
+            availability: "available",
             supportsProfiles: false,
           },
         ];
@@ -69,6 +71,22 @@ describe("Neko driver factory resource ownership", () => {
     await expect(getNekoControlClient().listProviders()).resolves.toEqual([PROVIDER]);
     expect(tauri.invoke).toHaveBeenCalledWith("neko_control_provider_list");
     expect(JSON.stringify(tauri.invoke.mock.results)).not.toContain("binary");
+  });
+
+  it("preserves an explicit host-unsupported provider state", async () => {
+    tauri.invoke.mockResolvedValueOnce([{
+      ...PROVIDER,
+      version: null,
+      found: false,
+      availability: "host_unsupported",
+    }]);
+
+    await expect(getNekoControlClient().listProviders()).resolves.toEqual([{
+      ...PROVIDER,
+      version: null,
+      found: false,
+      availability: "host_unsupported",
+    }]);
   });
 
   it("propagates native authority failures instead of faking an empty session list", async () => {

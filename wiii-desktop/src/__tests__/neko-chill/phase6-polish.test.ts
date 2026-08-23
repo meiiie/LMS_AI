@@ -137,6 +137,7 @@ const AGENT: DetectedAgent = {
     name: "Neko Core",
     version: "0.24.0",
     found: true,
+    availability: "available",
     supportsProfiles: true,
 };
 const WORKSPACE = { path: "C:/tmp/project", name: "project" };

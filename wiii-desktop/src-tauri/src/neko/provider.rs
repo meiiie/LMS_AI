@@ -334,16 +334,18 @@ pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
         let assigned = unsafe { AssignProcessToJobObject(job.raw(), child.as_raw_handle()) };
         if assigned == 0 {
             let error = io::Error::last_os_error();
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
+            let termination = child.kill();
+            let cleanup = finish_failed_spawn_cleanup(&mut child, termination);
+            return Err(spawn_cleanup_error(error, cleanup));
         }
         if let Err(error) = resume_suspended_process(child.id()) {
-            unsafe {
-                TerminateJobObject(job.raw(), 1);
-            }
-            let _ = child.wait();
-            return Err(error);
+            let termination = if unsafe { TerminateJobObject(job.raw(), 1) } == 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            };
+            let cleanup = finish_failed_spawn_cleanup(&mut child, termination);
+            return Err(spawn_cleanup_error(error, cleanup));
         }
         Ok(OwnedChild { child, job })
     }
@@ -351,6 +353,30 @@ pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
     {
         let _ = command;
         Err(unix_containment_unavailable())
+    }
+}
+
+#[cfg(windows)]
+fn finish_failed_spawn_cleanup(child: &mut Child, termination: io::Result<()>) -> io::Result<()> {
+    let reaped = reap_child_before(child, Instant::now() + PROCESS_TERMINATION_TIMEOUT);
+    match (termination, reaped) {
+        (_, Ok(())) => Ok(()),
+        (Ok(()), Err(reap)) => Err(reap),
+        (Err(termination), Err(reap)) => Err(io::Error::new(
+            termination.kind(),
+            format!("provider termination failed: {termination}; reap also failed: {reap}"),
+        )),
+    }
+}
+
+#[cfg(windows)]
+fn spawn_cleanup_error(primary: io::Error, cleanup: io::Result<()>) -> io::Error {
+    match cleanup {
+        Ok(()) => primary,
+        Err(cleanup) => io::Error::new(
+            primary.kind(),
+            format!("{primary}; suspended provider cleanup also failed: {cleanup}"),
+        ),
     }
 }
 
@@ -505,12 +531,21 @@ pub fn definition(provider_id: &str) -> Option<ProviderDefinition> {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentAvailability {
+    Available,
+    NotInstalled,
+    HostUnsupported,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub id: String,
     pub name: String,
     pub version: Option<String>,
     pub found: bool,
+    pub availability: AgentAvailability,
     pub supports_profiles: bool,
 }
 
@@ -541,11 +576,22 @@ fn probe_definition(provider: ProviderDefinition) -> Option<ResolvedProvider> {
     None
 }
 
+fn host_supports_provider_containment() -> bool {
+    cfg!(windows)
+}
+
 pub fn resolve(provider_id: &str) -> Result<ResolvedProvider, String> {
     let provider =
         definition(provider_id).ok_or_else(|| format!("unknown Neko provider '{provider_id}'"))?;
-    probe_definition(provider)
-        .ok_or_else(|| format!("provider '{}' is not available on this host", provider.name))
+    #[cfg(unix)]
+    {
+        return Err(unix_containment_unavailable().to_string());
+    }
+    #[cfg(windows)]
+    {
+        probe_definition(provider)
+            .ok_or_else(|| format!("provider '{}' is not available on this host", provider.name))
+    }
 }
 
 pub fn list() -> Vec<AgentInfo> {
@@ -553,12 +599,22 @@ pub fn list() -> Vec<AgentInfo> {
         .iter()
         .copied()
         .map(|provider| {
-            let resolved = probe_definition(provider);
+            let resolved = host_supports_provider_containment()
+                .then(|| probe_definition(provider))
+                .flatten();
+            let availability = if !host_supports_provider_containment() {
+                AgentAvailability::HostUnsupported
+            } else if resolved.is_some() {
+                AgentAvailability::Available
+            } else {
+                AgentAvailability::NotInstalled
+            };
             AgentInfo {
                 id: provider.id.to_string(),
                 name: provider.name.to_string(),
                 version: resolved.as_ref().and_then(|item| item.version.clone()),
                 found: resolved.is_some(),
+                availability,
                 supports_profiles: provider.supports_profiles(),
             }
         })
@@ -742,6 +798,16 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_roster_reports_host_containment_as_unsupported() {
+        let providers = list();
+        assert!(!providers.is_empty());
+        assert!(providers.iter().all(|provider| {
+            !provider.found && provider.availability == AgentAvailability::HostUnsupported
+        }));
     }
 
     #[test]

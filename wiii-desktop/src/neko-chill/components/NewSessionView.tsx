@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, Check, FolderOpen, LoaderCircle, ShieldCheck } from "lucide-react";
 import {
   loadAgentProfiles,
@@ -10,6 +10,7 @@ import { useNekoSessionStore } from "../stores/neko-session-store";
 import { getNekoControlClient } from "@/neko/control-client";
 import {
   CodexAccountSession,
+  getCodexAccountBootstrapOwner,
   type CodexAccountSummary,
 } from "../drivers/codex/account";
 import {
@@ -48,7 +49,7 @@ export function NewSessionView() {
   >("idle");
   const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
   const [codexBootstrapAttempt, setCodexBootstrapAttempt] = useState(0);
-  const codexAccountSession = useRef<CodexAccountSession | null>(null);
+  const codexAccountOwner = getCodexAccountBootstrapOwner();
   const recent = useMemo(() => recentWorkspaces(), [sessions]);
   const neko = agents.find((agent) => agent.id === "neko" && agent.found);
   const codex = agents.find((agent) => agent.id === "codex" && agent.found);
@@ -86,34 +87,37 @@ export function NewSessionView() {
   useEffect(() => {
     let cancelled = false;
     let bootstrapSession: CodexAccountSession | null = null;
-    const previous = codexAccountSession.current;
-    codexAccountSession.current = null;
-    if (previous) void previous.dispose();
     setCodexAccount(null);
     setCodexLoginUrl(null);
     if (!workspace || !codex?.found) {
       setCodexAccountState("idle");
+      void codexAccountOwner.release().catch(() => {
+        // Ownership remains in the module-level owner and the next bootstrap
+        // retries cleanup before it can launch another App Server.
+      });
       return;
     }
 
     setCodexAccountState("checking");
     const bootstrapIdentity = codexBootstrapIdentity(workspace.path);
-    void getNekoControlClient().spawnProvider({
-      providerId: "codex",
-      // Retry the same logical caller identity until Neko proves the previous
-      // start terminal while every proven attempt receives a fresh Run.
-      clientSessionId: bootstrapIdentity.clientSessionId,
-      clientRunId: bootstrapIdentity.clientRunId,
-      workspacePath: workspace.path,
-    })
-      .then(async ({ transport }) => {
-        const session = new CodexAccountSession(transport);
+    void codexAccountOwner
+      .replace(async () => {
+        const { transport } = await getNekoControlClient().spawnProvider({
+          providerId: "codex",
+          // Retry the same logical caller identity until Neko proves the previous
+          // start terminal while every proven attempt receives a fresh Run.
+          clientSessionId: bootstrapIdentity.clientSessionId,
+          clientRunId: bootstrapIdentity.clientRunId,
+          workspacePath: workspace.path,
+        });
+        return new CodexAccountSession(transport);
+      })
+      .then(async (session) => {
         bootstrapSession = session;
         if (cancelled) {
-          await session.dispose();
+          await codexAccountOwner.release(session);
           return;
         }
-        codexAccountSession.current = session;
         const account = await session.start();
         if (cancelled) return;
         setCodexAccount(account);
@@ -121,20 +125,28 @@ export function NewSessionView() {
       })
       .catch(async (cause) => {
         const failed = bootstrapSession;
-        if (codexAccountSession.current === failed) {
-          codexAccountSession.current = null;
+        let reported = cause;
+        if (failed) {
+          try {
+            await codexAccountOwner.release(failed);
+          } catch (cleanup) {
+            const detail = cleanup instanceof Error ? cleanup.message : String(cleanup);
+            const original = cause instanceof Error ? cause.message : String(cause);
+            reported = new Error(`${original}; cleanup vẫn chưa hoàn tất: ${detail}`);
+          }
         }
-        if (failed) await failed.dispose();
         if (cancelled) return;
         setCodexAccountState("error");
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(reported instanceof Error ? reported.message : String(reported));
       });
 
     return () => {
       cancelled = true;
-      const current = codexAccountSession.current;
-      codexAccountSession.current = null;
-      if (current) void current.dispose();
+      if (bootstrapSession) {
+        void codexAccountOwner.release(bootstrapSession).catch(() => {
+          // A failed cleanup stays owned and is retried before replacement.
+        });
+      }
     };
   }, [codex?.found, workspace?.path, codexBootstrapAttempt]);
 
@@ -164,7 +176,7 @@ export function NewSessionView() {
   };
 
   const loginCodex = async () => {
-    const session = codexAccountSession.current;
+    const session = codexAccountOwner.current();
     if (!session) return;
     setCodexAccountState("logging-in");
     setError(null);
@@ -302,7 +314,11 @@ export function NewSessionView() {
                           {agent.name}
                         </strong>
                         <span className="block truncate text-[11px] text-[var(--nk-text-3)]">
-                          {agent.found ? agent.version : "Chưa cài trên máy này"}
+                          {agent.found
+                            ? agent.version
+                            : agent.availability === "host_unsupported"
+                              ? "Máy này chưa có cơ chế cô lập process được Wiii chấp thuận"
+                              : "Chưa cài trên máy này"}
                         </span>
                       </div>
                       <button

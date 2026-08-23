@@ -47,9 +47,9 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 42 Rust/security
-  tests and the latest 208-test review regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,921 Vitest
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 47 Rust/security
+  tests and the latest 135-test review regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,926 Vitest
   across 173 files,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
@@ -126,6 +126,10 @@
 - [x] T524 Close final incremental-review contracts: move native session
   listing off the Tauri main thread, retain terminal facts only on journal read
   errors, reject Unix discovery before spawn, and harden replay/test validation.
+- [x] T525 Preserve exact verified cancellation/shutdown facts through journal
+  failure and restart, bound every suspended-launch cleanup, reject multi-frame
+  writes before dispatch, expose host-unsupported providers truthfully, and
+  keep failed Codex bootstrap cleanup owned outside React until retry succeeds.
 
 ## Dependencies
 

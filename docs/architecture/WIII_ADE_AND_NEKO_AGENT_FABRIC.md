@@ -109,8 +109,11 @@ packages still build, but local Neko execution remains unavailable there until
 an approved boundary prevents that migration. Live exit IPC carries both `terminationProven` and
 `terminalStatePersisted`, so the renderer cannot mistake leader exit—or an
 uncommitted journal transition—for complete cleanup. A verified exit whose
-terminal transaction temporarily fails is retained by native authority and
-retried on explicit cancellation or session-list hydration. Exit handlers are
+terminal transaction temporarily fails is retained in a dedicated durable
+SQLite recovery record and retried on explicit cancellation or session-list
+hydration. Recovery and retention skip the linked projection/request until the
+exact terminal state, event and optional cancellation result reconcile
+atomically. Exit handlers are
 withheld until both proofs are true.
 
 The compatibility client also bounds bootstrap output before a provider
@@ -217,6 +220,12 @@ Implemented across the foundation and Phase 2A slices:
   producer-bounded pipe, and checked tree cleanup plus bounded reaping gate
   successful discovery; Unix provider discovery and execution both reject
   before spawn until non-escapable containment exists;
+- provider discovery reports host containment as unsupported instead of
+  mislabelling every Unix provider as not installed; one renderer write is one
+  delimiter-free frame, and suspended Windows setup cleanup is checked and
+  deadline-bounded;
+- Codex account bootstrap cleanup is serialized by a module-level owner outside
+  React; failed cleanup remains retryable and blocks replacement launch;
 - the Unix SQLite parent, database and WAL/SHM sidecars remain owner-only even
   though Windows is currently the only host authorized to probe or launch local
   providers;

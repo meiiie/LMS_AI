@@ -683,11 +683,14 @@ function isRecordedStartFailure(error: unknown): boolean {
 function isDetectedProvider(value: unknown): value is NekoDetectedProvider {
   if (!value || typeof value !== "object") return false;
   const provider = value as Record<string, unknown>;
+  const availability = provider.availability;
   return (
     typeof provider.id === "string" &&
     typeof provider.name === "string" &&
     (provider.version === null || typeof provider.version === "string") &&
     typeof provider.found === "boolean" &&
+    ["available", "not_installed", "host_unsupported"].includes(availability as string) &&
+    (provider.found === (availability === "available")) &&
     typeof provider.supportsProfiles === "boolean"
   );
 }

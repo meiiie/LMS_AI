@@ -41,6 +41,20 @@ prove deletion cannot permit a repeated side effect.
 
 No raw provider frame or terminal line is a `ControlEvent` in Phase 2A.
 
+### PendingTerminalFact
+
+- `agentSessionId`: one retained exact lifecycle fact per native session
+- optional linked cancellation `requestId`
+- target run state, operation phase and continuity
+- bounded normalized event type/payload
+- optional bounded idempotent request result
+
+This is a recovery record, not a second lifecycle projection. It exists only
+when native process-tree termination is already known but the authoritative
+session/event transaction failed. Startup recovery and retention skip linked
+rows until this fact is reconciled; reconciliation removes it in the same
+transaction that commits the terminal event and optional request result.
+
 ### Workbench reconciliation companion
 
 The additive `neko-chill-native-runtime.json` companion may contain runtime-only
@@ -89,6 +103,12 @@ control_events
   agent_session_id nullable FK
   payload_json
   UNIQUE(stream_id, seq)
+
+pending_terminal_facts
+  agent_session_id PK FK
+  request_id nullable FK
+  fact_json
+  updated_at
 ```
 
 The schema intentionally has no columns for token, secret, cookie,
@@ -143,4 +163,5 @@ no outgoing transition. A retry is a new Run.
 | `accepted` / `dispatched` | `continuity_lost`, failed | none |
 | `side_effect_started` | `unknown_outcome` | none |
 | `committed` without terminal completion | `unknown_outcome` | none |
+| retained verified terminal fact | preserve for exact reconciliation | none |
 | Active session with no live in-process owner | `continuity_lost` | none |

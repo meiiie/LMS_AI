@@ -255,6 +255,24 @@ side-effect/committed phases become `unknown_outcome`.
   cancellation and `session/list` hydration MUST fail closed until the exact
   terminal fact is committed; they MUST NOT convert this hand-off into missing
   ownership or a provisional `unknown_outcome` session transition.
+- **FR-043**: A verified cancellation or shutdown terminal fact that cannot
+  commit its lifecycle event MUST be retained durably before authority returns.
+  Startup recovery and maintenance MUST preserve the linked session/request,
+  and later reconciliation MUST atomically commit session state, event and any
+  idempotent cancellation result without repeating process termination.
+- **FR-044**: `session/write` MUST reject literal CR or LF delimiters before
+  request admission so one request identity can dispatch exactly one provider
+  frame.
+- **FR-045**: Provider detection MUST distinguish host containment being
+  unsupported from the provider not being installed; UI MUST not report the
+  former as an installation failure.
+- **FR-046**: Windows suspended-launch setup failures MUST check termination
+  and reap the leader within the existing finite deadline. No cleanup path may
+  block indefinitely while holding lifecycle serialization.
+- **FR-047**: Codex account bootstrap ownership MUST live outside React
+  component lifetime. Failed cleanup MUST remain retryable and block a
+  replacement bootstrap until the prior App Server reaches a proven terminal
+  result.
 
 ### Non-goals
 
@@ -286,3 +304,7 @@ side-effect/committed phases become `unknown_outcome`.
   Windows Job Object ownership across an exited intermediate, host-aware
   workspace identity with fresh Run attempts, Unix pre-spawn rejection, and
   fail-closed handling of an unproven or unpersisted exit notice.
+- **SC-008**: Tests prove retained cancel/shutdown facts survive journal
+  recovery, cancellation result commits atomically, embedded frame delimiters
+  are rejected, host-unsupported discovery is explicit, and failed Codex
+  bootstrap cleanup prevents replacement until a successful retry.

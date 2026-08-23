@@ -3,7 +3,7 @@ use super::journal::{
 };
 use super::lifecycle::{OperationPhase, RunState};
 use super::provider::{
-    self, spawn_owned, terminate_child_tree, AgentInfo, AgentProfile, OwnedChild,
+    self, spawn_owned, terminate_child_tree, AgentAvailability, AgentInfo, AgentProfile, OwnedChild,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -60,13 +60,22 @@ struct ProcessExitNotice {
     terminal_state_persisted: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingRequestCompletion {
+    request_id: String,
+    result: Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PendingTerminalFact {
     next_state: RunState,
     phase: OperationPhase,
-    continuity: &'static str,
-    event_type: &'static str,
+    continuity: String,
+    event_type: String,
     payload: Value,
+    request_completion: Option<PendingRequestCompletion>,
 }
 
 struct RuntimeInner {
@@ -145,12 +154,22 @@ impl NekoRuntime {
         lease
             .try_lock()
             .map_err(|_| "another Neko runtime already owns this local journal".to_string())?;
+        let journal = Journal::open(path)?;
+        let pending_terminal_facts = journal
+            .pending_terminal_facts()?
+            .into_iter()
+            .map(|(agent_session_id, value)| {
+                serde_json::from_value(value)
+                    .map(|fact| (agent_session_id, fact))
+                    .map_err(|error| format!("decode retained Neko terminal fact failed: {error}"))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
         Ok(Self {
             inner: Arc::new(RuntimeInner {
-                journal: Journal::open(path)?,
+                journal,
                 processes: Mutex::new(HashMap::new()),
                 exit_supervisions: Mutex::new(HashSet::new()),
-                pending_terminal_facts: Mutex::new(HashMap::new()),
+                pending_terminal_facts: Mutex::new(pending_terminal_facts),
                 operations: Mutex::new(()),
                 shutting_down: AtomicBool::new(false),
                 _lease: lease,
@@ -453,6 +472,7 @@ impl NekoRuntime {
                 name: resolved.definition.name.to_string(),
                 version: resolved.version.clone(),
                 found: true,
+                availability: AgentAvailability::Available,
                 supports_profiles: resolved.definition.supports_profiles(),
             },
         };
@@ -511,9 +531,7 @@ impl NekoRuntime {
     pub fn write_session(&self, request: SessionWriteRequest) -> Result<(), String> {
         validate_identity("requestId", &request.request_id)?;
         validate_identity("agentSessionId", &request.agent_session_id)?;
-        if request.line.is_empty() || request.line.len() > 1024 * 1024 {
-            return Err("provider frame must be between 1 byte and 1 MiB".into());
-        }
+        validate_provider_frame(&request.line)?;
         let target = digest_target(&[&request.agent_session_id, &request.line]);
         let writer = {
             let _operation = lock(&self.inner.operations);
@@ -689,32 +707,35 @@ impl NekoRuntime {
                 error,
             ));
         }
-        self.inner
-            .journal
-            .set_request_phase(&request.request_id, OperationPhase::Committed)?;
         let cancelled = !session.state.is_terminal();
-        if cancelled {
-            self.transition_session_event(
-                app,
-                &request.agent_session_id,
-                RunState::Cancelled,
-                OperationPhase::Completed,
-                "active",
-                None,
-                None,
-                "run.state_changed",
-                json!({ "state": "cancelled", "reason": "requested" }),
-            )?;
-        }
         let result = SessionCancelResult {
-            agent_session_id: request.agent_session_id,
+            agent_session_id: request.agent_session_id.clone(),
             cancelled,
         };
-        self.inner.journal.complete_request(
-            &request.request_id,
-            &serde_json::to_value(&result)
-                .map_err(|error| format!("encode session cancel result failed: {error}"))?,
-        )?;
+        if cancelled {
+            let fact = PendingTerminalFact {
+                next_state: RunState::Cancelled,
+                phase: OperationPhase::Completed,
+                continuity: "active".into(),
+                event_type: "run.state_changed".into(),
+                payload: json!({ "state": "cancelled", "reason": "requested" }),
+                request_completion: Some(PendingRequestCompletion {
+                    request_id: request.request_id.clone(),
+                    result: serde_json::to_value(&result)
+                        .map_err(|error| format!("encode session cancel result failed: {error}"))?,
+                }),
+            };
+            self.persist_terminal_fact(app, &request.agent_session_id, fact)?;
+        } else {
+            self.inner
+                .journal
+                .set_request_phase(&request.request_id, OperationPhase::Committed)?;
+            self.inner.journal.complete_request(
+                &request.request_id,
+                &serde_json::to_value(&result)
+                    .map_err(|error| format!("encode session cancel result failed: {error}"))?,
+            )?;
+        }
         Ok(result)
     }
 
@@ -729,40 +750,33 @@ impl NekoRuntime {
         };
         for (agent_session_id, mut process) in processes {
             let termination = kill_proc(&mut process);
-            if let Ok(Some(session)) = self.inner.journal.session(&agent_session_id) {
-                if !session.state.is_terminal() {
-                    match termination {
-                        Ok(()) => {
-                            let _ = self.transition_session_event(
-                                app,
-                                &agent_session_id,
-                                RunState::Cancelled,
-                                OperationPhase::Completed,
-                                "active",
-                                None,
-                                None,
-                                "run.state_changed",
-                                json!({ "state": "cancelled", "reason": "application_exit" }),
-                            );
-                        }
-                        Err(error) => {
-                            let _ = self.transition_session_event(
-                                app,
-                                &agent_session_id,
-                                RunState::UnknownOutcome,
-                                OperationPhase::UnknownOutcome,
-                                "unknown_outcome",
-                                None,
-                                None,
-                                "run.state_changed",
-                                json!({
-                                    "state": "unknown_outcome",
-                                    "reason": "shutdown_termination_unproven",
-                                    "detail": bounded_error(&error),
-                                }),
-                            );
-                        }
-                    }
+            let fact = match termination {
+                Ok(()) => PendingTerminalFact {
+                    next_state: RunState::Cancelled,
+                    phase: OperationPhase::Completed,
+                    continuity: "active".into(),
+                    event_type: "run.state_changed".into(),
+                    payload: json!({ "state": "cancelled", "reason": "application_exit" }),
+                    request_completion: None,
+                },
+                Err(error) => PendingTerminalFact {
+                    next_state: RunState::UnknownOutcome,
+                    phase: OperationPhase::UnknownOutcome,
+                    continuity: "unknown_outcome".into(),
+                    event_type: "run.state_changed".into(),
+                    payload: json!({
+                        "state": "unknown_outcome",
+                        "reason": "shutdown_termination_unproven",
+                        "detail": bounded_error(&error),
+                    }),
+                    request_completion: None,
+                },
+            };
+            match self.inner.journal.session(&agent_session_id) {
+                Ok(Some(session)) if session.state.is_terminal() => {}
+                Ok(None) => {}
+                Ok(Some(_)) | Err(_) => {
+                    let _ = self.persist_terminal_fact(app, &agent_session_id, fact);
                 }
             }
         }
@@ -976,26 +990,61 @@ impl NekoRuntime {
         agent_session_id: &str,
         fact: PendingTerminalFact,
     ) -> Result<(), String> {
-        let result = self.transition_session_event(
-            app,
-            agent_session_id,
-            fact.next_state,
-            fact.phase,
-            fact.continuity,
-            None,
-            None,
-            fact.event_type,
-            fact.payload.clone(),
-        );
+        // Persist the exact proven fact before the authoritative lifecycle
+        // transaction. If the process crashes during that transaction, startup
+        // recovery must see this record and preserve the session/request for
+        // exact reconciliation instead of degrading it to unknown_outcome.
+        let request_id = fact
+            .request_completion
+            .as_ref()
+            .map(|completion| completion.request_id.as_str());
+        let encoded = serde_json::to_value(&fact)
+            .map_err(|error| format!("encode retained Neko terminal fact failed: {error}"))?;
+        let retention =
+            self.inner
+                .journal
+                .retain_terminal_fact(agent_session_id, request_id, &encoded);
+        lock(&self.inner.pending_terminal_facts).insert(agent_session_id.to_string(), fact.clone());
+        let result = if let Some(completion) = &fact.request_completion {
+            self.inner
+                .journal
+                .complete_request_with_session_event(
+                    agent_session_id,
+                    fact.next_state,
+                    fact.phase,
+                    &fact.continuity,
+                    &fact.event_type,
+                    fact.payload.clone(),
+                    &completion.request_id,
+                    &completion.result,
+                )
+                .map(|event| {
+                    let _ = app.emit("neko-control://event", event);
+                })
+        } else {
+            self.transition_session_event(
+                app,
+                agent_session_id,
+                fact.next_state,
+                fact.phase,
+                &fact.continuity,
+                None,
+                None,
+                &fact.event_type,
+                fact.payload.clone(),
+            )
+        };
         match result {
             Ok(()) => {
                 lock(&self.inner.pending_terminal_facts).remove(agent_session_id);
                 Ok(())
             }
-            Err(error) => {
-                lock(&self.inner.pending_terminal_facts).insert(agent_session_id.to_string(), fact);
-                Err(error)
-            }
+            Err(error) => match retention {
+                Ok(()) => Err(error),
+                Err(retention) => Err(format!(
+                    "{error}; retaining the verified terminal fact also failed: {retention}"
+                )),
+            },
         }
     }
 
@@ -1016,6 +1065,15 @@ impl NekoRuntime {
             .session(agent_session_id)?
             .is_some_and(|session| session.state.is_terminal())
         {
+            if let Some(completion) = &fact.request_completion {
+                self.inner.journal.reconcile_terminal_request(
+                    agent_session_id,
+                    &completion.request_id,
+                    &completion.result,
+                )?;
+            } else {
+                self.inner.journal.remove_terminal_fact(agent_session_id)?;
+            }
             lock(&self.inner.pending_terminal_facts).remove(agent_session_id);
             return Ok(true);
         }
@@ -1162,20 +1220,22 @@ fn terminal_fact_for_termination(
         Ok(()) => PendingTerminalFact {
             next_state: RunState::Failed,
             phase: OperationPhase::Failed,
-            continuity: "continuity_lost",
-            event_type: "run.state_changed",
+            continuity: "continuity_lost".into(),
+            event_type: "run.state_changed".into(),
             payload: json!({ "state": "failed", "reason": proven_reason }),
+            request_completion: None,
         },
         Err(error) => PendingTerminalFact {
             next_state: RunState::UnknownOutcome,
             phase: OperationPhase::UnknownOutcome,
-            continuity: "unknown_outcome",
-            event_type: "run.state_changed",
+            continuity: "unknown_outcome".into(),
+            event_type: "run.state_changed".into(),
             payload: json!({
                 "state": "unknown_outcome",
                 "reason": unproven_reason,
                 "detail": bounded_error(error),
             }),
+            request_completion: None,
         },
     }
 }
@@ -1217,6 +1277,16 @@ fn validate_start_identity(request: &SessionStartRequest) -> Result<(), String> 
     }
     if let Some(profile_id) = request.profile_id.as_deref() {
         provider::validate_profile_id(profile_id)?;
+    }
+    Ok(())
+}
+
+fn validate_provider_frame(frame: &str) -> Result<(), String> {
+    if frame.is_empty() || frame.len() > 1024 * 1024 {
+        return Err("provider frame must be between 1 byte and 1 MiB".into());
+    }
+    if frame.contains(['\r', '\n']) {
+        return Err("provider frame must contain exactly one delimiter-free JSON-RPC line".into());
     }
     Ok(())
 }
@@ -1421,6 +1491,14 @@ mod tests {
         assert!(validate_identity("runId", "run\n1").is_err());
         assert!(validate_channel_identity("agentSessionId", "session-1").is_ok());
         assert!(validate_channel_identity("agentSessionId", "session/escape").is_err());
+    }
+
+    #[test]
+    fn provider_write_rejects_embedded_frame_delimiters_before_dispatch() {
+        assert!(validate_provider_frame(r#"{"jsonrpc":"2.0"}"#).is_ok());
+        assert!(validate_provider_frame("first\nsecond").is_err());
+        assert!(validate_provider_frame("first\rsecond").is_err());
+        assert!(validate_provider_frame("first\r\nsecond").is_err());
     }
 
     #[test]

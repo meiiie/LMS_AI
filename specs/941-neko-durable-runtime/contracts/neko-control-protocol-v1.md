@@ -33,6 +33,9 @@ method and logical target before dispatch.
   invocation reuses its ID. A later caller invocation always receives a fresh
   ID; retry after an unresolved outcome requires an explicit future operation
   token and is not inferred from frame bytes.
+- One `session/write` request is exactly one delimiter-free JSON-RPC frame.
+  Literal CR or LF bytes are rejected before request admission or provider I/O;
+  the native writer appends the single transport delimiter itself.
 - Native start errors prefixed with `unknown_outcome:` are authoritative but
   unresolved. The control client retains the original request, agent-session,
   Run/Environment binding and listeners; it must not downgrade that result to
@@ -75,7 +78,10 @@ repeated.
 and Codex adapters. It is scoped to a Rust-owned agent-session identity and is
 idempotent by request ID. It does not accept a PID or executable.
 
-Unix provider discovery rejects before spawn until a non-escapable containment
+`provider/list` distinguishes `available`, `not_installed`, and
+`host_unsupported`; `found=false` on Unix therefore does not falsely claim that
+an installed provider is missing. Unix provider discovery rejects before spawn
+until a non-escapable containment
 primitive exists. Windows uses a MAX+1-byte pipe reader, so the producer cannot
 grow unbounded output. Probe output is accepted only after checked tree
 termination; leader reaping and descendant cleanup have explicit deadlines.
@@ -122,7 +128,12 @@ Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution
 blocks respawn even when a newer Run is already terminal. Native `session/list`
 first flushes any verified terminal fact retained after a transient journal
-failure and fails closed if that commit still cannot be proven. It is then the
+failure and fails closed if that commit still cannot be proven. These facts are
+stored in a dedicated SQLite recovery table before authority can return the
+journal error. Startup recovery and retention maintenance skip their linked
+session/request, so a proven cancellation or shutdown cannot be rewritten as
+`unknown_outcome` merely because the process restarted. Session lifecycle,
+event append and any linked cancellation result reconcile atomically. It is then the
 complete retained projection catalog: when a formerly reconciled,
 provably terminal projection has been pruned, Workbench appends a retirement
 fact and stops treating that historical checkpoint as a live respawn barrier.
@@ -143,6 +154,11 @@ lost ownership.
 
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).
+
+The Codex account bootstrap has a module-level serialized owner outside React.
+A rejected App Server cleanup remains retryable and blocks replacement; a
+workspace change or component remount cannot clear the owner and launch another
+bootstrap until the previous cleanup reaches a proven terminal result.
 
 ## Event ordering
 

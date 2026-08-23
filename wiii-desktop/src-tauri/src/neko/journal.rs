@@ -246,7 +246,14 @@ impl Journal {
                    UNIQUE(stream_id, seq)
                  );
                  CREATE INDEX IF NOT EXISTS idx_control_events_replay
-                   ON control_events(stream_id, seq);",
+                   ON control_events(stream_id, seq);
+                 CREATE TABLE IF NOT EXISTS pending_terminal_facts (
+                   agent_session_id TEXT PRIMARY KEY
+                     REFERENCES runtime_sessions(agent_session_id) ON DELETE CASCADE,
+                   request_id TEXT REFERENCES control_requests(request_id) ON DELETE RESTRICT,
+                   fact_json TEXT NOT NULL,
+                   updated_at TEXT NOT NULL
+                 );",
             )
             .map_err(|error| format!("initialize Neko runtime journal failed: {error}"))?;
         Ok(Self {
@@ -299,7 +306,11 @@ impl Journal {
             .execute(
                 "DELETE FROM control_requests
                   WHERE phase IN ('completed', 'failed')
-                    AND updated_at < ?1",
+                    AND updated_at < ?1
+                    AND request_id NOT IN (
+                      SELECT request_id FROM pending_terminal_facts
+                       WHERE request_id IS NOT NULL
+                    )",
                 [request_cutoff.as_str()],
             )
             .map_err(|error| format!("prune terminal Neko request identities failed: {error}"))?;
@@ -307,7 +318,10 @@ impl Journal {
             .execute(
                 "DELETE FROM runtime_sessions
                   WHERE state IN ('completed', 'failed', 'cancelled')
-                    AND updated_at < ?1",
+                    AND updated_at < ?1
+                    AND agent_session_id NOT IN (
+                      SELECT agent_session_id FROM pending_terminal_facts
+                    )",
                 [terminal_cutoff.as_str()],
             )
             .map_err(|error| format!("prune terminal Neko sessions failed: {error}"))?;
@@ -604,6 +618,131 @@ impl Journal {
         Ok(())
     }
 
+    pub fn retain_terminal_fact(
+        &self,
+        agent_session_id: &str,
+        request_id: Option<&str>,
+        fact: &Value,
+    ) -> Result<(), String> {
+        let encoded = serde_json::to_string(fact)
+            .map_err(|error| format!("encode pending Neko terminal fact failed: {error}"))?;
+        if encoded.len() > MAX_EVENT_PAYLOAD_BYTES * 2 {
+            return Err("pending Neko terminal fact exceeds the durable limit".to_string());
+        }
+        lock(&self.connection)
+            .execute(
+                "INSERT INTO pending_terminal_facts
+                   (agent_session_id, request_id, fact_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(agent_session_id) DO UPDATE SET
+                   request_id = excluded.request_id,
+                   fact_json = excluded.fact_json,
+                   updated_at = excluded.updated_at",
+                params![agent_session_id, request_id, encoded, now()],
+            )
+            .map_err(|error| format!("retain pending Neko terminal fact failed: {error}"))?;
+        Ok(())
+    }
+
+    pub fn pending_terminal_facts(&self) -> Result<Vec<(String, Value)>, String> {
+        let connection = lock(&self.connection);
+        let mut statement = connection
+            .prepare(
+                "SELECT agent_session_id, fact_json
+                   FROM pending_terminal_facts ORDER BY updated_at, agent_session_id",
+            )
+            .map_err(|error| format!("prepare pending Neko terminal facts failed: {error}"))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| format!("query pending Neko terminal facts failed: {error}"))?;
+        rows.map(|row| {
+            let (agent_session_id, encoded) =
+                row.map_err(|error| format!("read pending Neko terminal fact failed: {error}"))?;
+            let fact = serde_json::from_str(&encoded)
+                .map_err(|error| format!("decode pending Neko terminal fact failed: {error}"))?;
+            Ok((agent_session_id, fact))
+        })
+        .collect()
+    }
+
+    pub fn remove_terminal_fact(&self, agent_session_id: &str) -> Result<(), String> {
+        lock(&self.connection)
+            .execute(
+                "DELETE FROM pending_terminal_facts WHERE agent_session_id = ?1",
+                [agent_session_id],
+            )
+            .map_err(|error| format!("remove pending Neko terminal fact failed: {error}"))?;
+        Ok(())
+    }
+
+    pub fn reconcile_terminal_request(
+        &self,
+        agent_session_id: &str,
+        request_id: &str,
+        result: &Value,
+    ) -> Result<(), String> {
+        let encoded = serde_json::to_string(result)
+            .map_err(|error| format!("encode Neko request result failed: {error}"))?;
+        if encoded.len() > MAX_EVENT_PAYLOAD_BYTES {
+            return Err("Neko request result exceeds the durable limit".to_string());
+        }
+        let mut connection = lock(&self.connection);
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("begin Neko request reconciliation failed: {error}"))?;
+        let (phase, recorded): (String, Option<String>) = transaction
+            .query_row(
+                "SELECT phase, result_json FROM control_requests WHERE request_id = ?1",
+                [request_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| format!("read Neko request reconciliation state failed: {error}"))?;
+        let phase = OperationPhase::parse(&phase)
+            .ok_or_else(|| "recorded Neko request has an invalid phase".to_string())?;
+        match phase {
+            OperationPhase::SideEffectStarted | OperationPhase::Committed => {
+                transaction
+                    .execute(
+                        "UPDATE control_requests SET phase = 'completed', result_json = ?2,
+                                error_code = NULL, updated_at = ?3 WHERE request_id = ?1",
+                        params![request_id, encoded, now()],
+                    )
+                    .map_err(|error| format!("reconcile Neko request result failed: {error}"))?;
+            }
+            OperationPhase::Completed if recorded.as_deref() == Some(encoded.as_str()) => {}
+            _ => {
+                return Err(format!(
+                    "retained Neko request cannot reconcile from phase {}",
+                    phase.as_str()
+                ));
+            }
+        }
+        transaction
+            .execute(
+                "DELETE FROM pending_terminal_facts WHERE agent_session_id = ?1",
+                [agent_session_id],
+            )
+            .map_err(|error| format!("clear reconciled Neko terminal fact failed: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("commit Neko request reconciliation failed: {error}"))?;
+        Ok(())
+    }
+
+    fn has_pending_terminal_fact(&self, agent_session_id: &str) -> Result<bool, String> {
+        lock(&self.connection)
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM pending_terminal_facts WHERE agent_session_id = ?1
+                 )",
+                [agent_session_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("read pending Neko terminal fact state failed: {error}"))
+    }
+
     pub fn fail_request(&self, request_id: &str, error_code: &str) -> Result<(), String> {
         let mut connection = lock(&self.connection);
         let transaction = connection
@@ -800,9 +939,72 @@ impl Journal {
         event_type: &str,
         payload: Value,
     ) -> Result<ControlEvent, String> {
+        self.commit_session_event(
+            agent_session_id,
+            next_state,
+            phase,
+            continuity,
+            pid,
+            provider_version,
+            event_type,
+            payload,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn complete_request_with_session_event(
+        &self,
+        agent_session_id: &str,
+        next_state: RunState,
+        phase: OperationPhase,
+        continuity: &str,
+        event_type: &str,
+        payload: Value,
+        request_id: &str,
+        result: &Value,
+    ) -> Result<ControlEvent, String> {
+        self.commit_session_event(
+            agent_session_id,
+            next_state,
+            phase,
+            continuity,
+            None,
+            None,
+            event_type,
+            payload,
+            Some((request_id, result)),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_session_event(
+        &self,
+        agent_session_id: &str,
+        next_state: RunState,
+        phase: OperationPhase,
+        continuity: &str,
+        pid: Option<u32>,
+        provider_version: Option<&str>,
+        event_type: &str,
+        payload: Value,
+        request_completion: Option<(&str, &Value)>,
+    ) -> Result<ControlEvent, String> {
         validate_payload(&payload)?;
         let encoded = serde_json::to_string(&payload)
             .map_err(|error| format!("encode Neko control event failed: {error}"))?;
+        let encoded_result = request_completion
+            .map(|(_, result)| {
+                serde_json::to_string(result)
+                    .map_err(|error| format!("encode Neko request result failed: {error}"))
+            })
+            .transpose()?;
+        if encoded_result
+            .as_ref()
+            .is_some_and(|result| result.len() > MAX_EVENT_PAYLOAD_BYTES)
+        {
+            return Err("Neko request result exceeds the durable limit".to_string());
+        }
         let mut connection = lock(&self.connection);
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -832,6 +1034,36 @@ impl Journal {
                 current_phase.as_str(),
                 phase.as_str()
             ));
+        }
+        if let Some((request_id, _)) = request_completion {
+            let current: String = transaction
+                .query_row(
+                    "SELECT phase FROM control_requests WHERE request_id = ?1",
+                    [request_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("read Neko request phase failed: {error}"))?;
+            let current = OperationPhase::parse(&current)
+                .ok_or_else(|| "recorded Neko request has an invalid phase".to_string())?;
+            let can_complete = match current {
+                OperationPhase::SideEffectStarted => {
+                    can_advance_operation(current, OperationPhase::Committed)
+                        && can_advance_operation(
+                            OperationPhase::Committed,
+                            OperationPhase::Completed,
+                        )
+                }
+                OperationPhase::Committed => {
+                    can_advance_operation(current, OperationPhase::Completed)
+                }
+                _ => false,
+            };
+            if !can_complete {
+                return Err(format!(
+                    "invalid Neko operation transition {} -> completed",
+                    current.as_str()
+                ));
+            }
         }
         let timestamp = now();
         transaction
@@ -863,7 +1095,7 @@ impl Journal {
             event_id: Uuid::new_v4().to_string(),
             stream_id: run_id.clone(),
             seq: next as u64,
-            at: timestamp,
+            at: timestamp.clone(),
             event_type: event_type.to_string(),
             run_id,
             agent_session_id: Some(agent_session_id.to_string()),
@@ -886,6 +1118,22 @@ impl Journal {
                 ],
             )
             .map_err(|error| format!("append Neko lifecycle event failed: {error}"))?;
+        if let Some((request_id, _)) = request_completion {
+            transaction
+                .execute(
+                    "UPDATE control_requests SET phase = 'completed', result_json = ?2,
+                            error_code = NULL, updated_at = ?3
+                       WHERE request_id = ?1",
+                    params![request_id, encoded_result, timestamp],
+                )
+                .map_err(|error| format!("persist Neko request result failed: {error}"))?;
+        }
+        transaction
+            .execute(
+                "DELETE FROM pending_terminal_facts WHERE agent_session_id = ?1",
+                [agent_session_id],
+            )
+            .map_err(|error| format!("clear committed Neko terminal fact failed: {error}"))?;
         transaction
             .commit()
             .map_err(|error| format!("commit Neko lifecycle transaction failed: {error}"))?;
@@ -1067,7 +1315,9 @@ impl Journal {
     pub fn recover_incomplete(&self) -> Result<(), String> {
         let sessions = self.sessions(None)?;
         for session in sessions {
-            if session.state.is_terminal() {
+            if session.state.is_terminal()
+                || self.has_pending_terminal_fact(&session.agent_session_id)?
+            {
                 continue;
             }
             let (state, phase, continuity, reason) =
@@ -1123,7 +1373,11 @@ impl Journal {
             .execute(
                 "UPDATE control_requests
                     SET phase = 'failed', error_code = 'continuity_lost', updated_at = ?1
-                  WHERE phase IN ('accepted', 'dispatched')",
+                  WHERE phase IN ('accepted', 'dispatched')
+                    AND request_id NOT IN (
+                      SELECT request_id FROM pending_terminal_facts
+                       WHERE request_id IS NOT NULL
+                    )",
                 [now()],
             )
             .map_err(|error| format!("recover safe Neko requests failed: {error}"))?;
@@ -1131,7 +1385,11 @@ impl Journal {
             .execute(
                 "UPDATE control_requests
                     SET phase = 'unknown_outcome', error_code = 'unknown_outcome', updated_at = ?1
-                  WHERE phase IN ('side_effect_started', 'committed')",
+                  WHERE phase IN ('side_effect_started', 'committed')
+                    AND request_id NOT IN (
+                      SELECT request_id FROM pending_terminal_facts
+                       WHERE request_id IS NOT NULL
+                    )",
                 [now()],
             )
             .map_err(|error| format!("recover uncertain Neko requests failed: {error}"))?;
@@ -1475,6 +1733,205 @@ mod tests {
             RunState::Running
         );
         assert_eq!(journal.replay("run-a", 0, 10).unwrap().events, [event]);
+    }
+
+    #[test]
+    fn retained_cancel_fact_survives_recovery_and_completes_request_atomically() {
+        let journal = Journal::in_memory();
+        journal
+            .insert_session(session("session-a", "run-a"))
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::SideEffectStarted)
+            .unwrap();
+        journal
+            .update_session(
+                "session-a",
+                RunState::Running,
+                OperationPhase::Committed,
+                "active",
+                Some(42),
+                Some("test-version"),
+            )
+            .unwrap();
+        assert_eq!(
+            journal
+                .begin_request("cancel-a", "session/cancel", "target-a")
+                .unwrap(),
+            RequestDecision::Execute
+        );
+        journal
+            .set_request_phase("cancel-a", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_request_phase("cancel-a", OperationPhase::SideEffectStarted)
+            .unwrap();
+
+        let result = json!({ "agentSessionId": "session-a", "cancelled": true });
+        let fact = json!({
+            "nextState": "cancelled",
+            "phase": "completed",
+            "continuity": "active",
+            "eventType": "run.state_changed",
+            "payload": { "state": "cancelled", "reason": "requested" },
+            "requestCompletion": { "requestId": "cancel-a", "result": result }
+        });
+        lock(&journal.connection)
+            .execute_batch(
+                "CREATE TRIGGER reject_retained_cancel_event
+                   BEFORE INSERT ON control_events
+                   BEGIN SELECT RAISE(ABORT, 'event rejected'); END;",
+            )
+            .unwrap();
+        assert!(journal
+            .complete_request_with_session_event(
+                "session-a",
+                RunState::Cancelled,
+                OperationPhase::Completed,
+                "active",
+                "run.state_changed",
+                json!({ "state": "cancelled", "reason": "requested" }),
+                "cancel-a",
+                &result,
+            )
+            .is_err());
+        journal
+            .retain_terminal_fact("session-a", Some("cancel-a"), &fact)
+            .unwrap();
+        lock(&journal.connection)
+            .execute_batch("DROP TRIGGER reject_retained_cancel_event;")
+            .unwrap();
+
+        journal.recover_incomplete().unwrap();
+        let preserved = journal.session("session-a").unwrap().unwrap();
+        assert_eq!(preserved.state, RunState::Running);
+        assert_eq!(preserved.operation_phase, OperationPhase::Committed);
+        assert_eq!(journal.pending_terminal_facts().unwrap().len(), 1);
+
+        journal
+            .complete_request_with_session_event(
+                "session-a",
+                RunState::Cancelled,
+                OperationPhase::Completed,
+                "active",
+                "run.state_changed",
+                json!({ "state": "cancelled", "reason": "requested" }),
+                "cancel-a",
+                &result,
+            )
+            .unwrap();
+        assert_eq!(
+            journal.session("session-a").unwrap().unwrap().state,
+            RunState::Cancelled
+        );
+        assert_eq!(
+            journal
+                .begin_request("cancel-a", "session/cancel", "target-a")
+                .unwrap(),
+            RequestDecision::Replay(result)
+        );
+        assert!(journal.pending_terminal_facts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn retained_shutdown_fact_prevents_false_unknown_outcome_on_recovery() {
+        let journal = Journal::in_memory();
+        journal
+            .insert_session(session("session-a", "run-a"))
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_session_phase("session-a", OperationPhase::SideEffectStarted)
+            .unwrap();
+        journal
+            .update_session(
+                "session-a",
+                RunState::Running,
+                OperationPhase::Committed,
+                "active",
+                Some(42),
+                None,
+            )
+            .unwrap();
+        journal
+            .retain_terminal_fact(
+                "session-a",
+                None,
+                &json!({
+                    "nextState": "cancelled",
+                    "phase": "completed",
+                    "continuity": "active",
+                    "eventType": "run.state_changed",
+                    "payload": { "state": "cancelled", "reason": "application_exit" },
+                    "requestCompletion": null
+                }),
+            )
+            .unwrap();
+
+        journal.recover_incomplete().unwrap();
+        let preserved = journal.session("session-a").unwrap().unwrap();
+        assert_eq!(preserved.state, RunState::Running);
+        assert_eq!(preserved.operation_phase, OperationPhase::Committed);
+    }
+
+    #[test]
+    fn retained_terminal_fact_survives_a_real_journal_restart() {
+        let path =
+            std::env::temp_dir().join(format!("wiii-neko-retained-{}.sqlite3", Uuid::new_v4()));
+        {
+            let journal = Journal::open(&path).unwrap();
+            journal
+                .insert_session(session("session-a", "run-a"))
+                .unwrap();
+            journal
+                .set_session_phase("session-a", OperationPhase::Dispatched)
+                .unwrap();
+            journal
+                .set_session_phase("session-a", OperationPhase::SideEffectStarted)
+                .unwrap();
+            journal
+                .update_session(
+                    "session-a",
+                    RunState::Running,
+                    OperationPhase::Committed,
+                    "active",
+                    Some(42),
+                    None,
+                )
+                .unwrap();
+            journal
+                .retain_terminal_fact(
+                    "session-a",
+                    None,
+                    &json!({
+                        "nextState": "cancelled",
+                        "phase": "completed",
+                        "continuity": "active",
+                        "eventType": "run.state_changed",
+                        "payload": { "state": "cancelled", "reason": "application_exit" },
+                        "requestCompletion": null
+                    }),
+                )
+                .unwrap();
+        }
+
+        let reopened = Journal::open(&path).unwrap();
+        let session = reopened.session("session-a").unwrap().unwrap();
+        assert_eq!(session.state, RunState::Running);
+        assert_eq!(session.operation_phase, OperationPhase::Committed);
+        assert_eq!(reopened.pending_terminal_facts().unwrap().len(), 1);
+        drop(reopened);
+        let _ = std::fs::remove_file(&path);
+        for suffix in ["-wal", "-shm"] {
+            let mut sidecar = path.as_os_str().to_os_string();
+            sidecar.push(suffix);
+            let _ = std::fs::remove_file(std::path::PathBuf::from(sidecar));
+        }
     }
 
     #[test]

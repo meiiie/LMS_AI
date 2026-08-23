@@ -509,6 +509,7 @@ describe("Neko Chill shell UI", () => {
       name: "Neko Core",
       version: "0.24.0",
       found: true,
+      availability: "available",
       supportsProfiles: true,
     };
     useNekoAgentStore.setState({ agents: [agent], isLoading: false });
@@ -538,6 +539,35 @@ describe("Neko Chill shell UI", () => {
         null,
       );
     });
+  });
+
+  it("explains host containment limits instead of claiming the provider is missing", async () => {
+    useNekoAgentStore.setState({
+      agents: [{
+        id: "neko",
+        name: "Neko Core",
+        version: null,
+        found: false,
+        availability: "host_unsupported",
+        supportsProfiles: true,
+      }],
+      isLoading: false,
+    });
+    useNekoSessionStore.setState({
+      sessions: {
+        recent: makeSession("recent", "Lịch sử", {
+          path: "C:/Users/me/project",
+          name: "project",
+        }),
+      },
+      activeSessionId: null,
+    });
+
+    render(<NekoChillApp />);
+    fireEvent.click(screen.getByRole("button", { name: "project" }));
+
+    expect(await screen.findByText(/chưa có cơ chế cô lập process/)).toBeTruthy();
+    expect(screen.queryByText("Chưa cài trên máy này")).toBeNull();
   });
 
   it("recovers provider discovery failures without leaving the launcher loading", () => {
