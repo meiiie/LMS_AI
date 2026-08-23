@@ -232,9 +232,10 @@ Implemented across the foundation and Phase 2A slices:
   than a retryable provider rejection when cleanup cannot be proven;
 - Codex account bootstrap cleanup is serialized by a module-level owner outside
   React; failed cleanup remains retryable and blocks replacement launch. A
-  workspace handoff also reconciles any control-client bootstrap identity that
-  never reached the owner because both start responses were lost; cancellation
-  must succeed before the next workspace can spawn Codex;
+  workspace handoff reconciles both control-client identities and durable
+  native sessions that survived a renderer reload, attempts all independent
+  cleanup, and requires every cancellation to succeed before the next workspace
+  can spawn Codex;
 - leaving Neko Chill enumerates retained control-client starts, refreshes that
   set after runtime preparation settles, and requires authoritative
   cancellation before recording a clean mode exit;

@@ -1,6 +1,7 @@
 import { v4 as uuidv4, v5 as uuidv5 } from "uuid";
 import type {
   NekoControlClient,
+  NekoNativeSessionRecord,
   NekoSpawnedProvider,
 } from "@/neko/control-client";
 
@@ -11,11 +12,14 @@ export interface CodexBootstrapIdentity {
 }
 
 interface RetainedStartControl {
+  listSessions(runId?: string): Promise<NekoNativeSessionRecord[]>;
   unresolvedStartSessionIds(): string[];
   cancelUnresolvedStarts(clientSessionId: string): Promise<number>;
 }
 
 const CODEX_BOOTSTRAP_SESSION_PREFIX = "codex-account-bootstrap-";
+const LEGACY_LOCAL_TASK_PREFIX = "legacy-local/task/";
+const NATIVE_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
 
 /**
  * Derive the account-probe caller from durable workspace identity rather than
@@ -48,24 +52,65 @@ export async function cancelOtherCodexBootstrapStarts(
   control: RetainedStartControl,
   currentClientSessionId: string,
 ): Promise<number> {
+  const failures: unknown[] = [];
+  const candidates = new Set(control.unresolvedStartSessionIds());
+  try {
+    for (const session of await control.listSessions()) {
+      const clientSessionId = codexBootstrapClientSessionId(session);
+      if (clientSessionId) candidates.add(clientSessionId);
+    }
+  } catch (error) {
+    failures.push(error);
+  }
+
   let cancelled = 0;
-  const prior = [...new Set(control.unresolvedStartSessionIds())]
+  const prior = [...candidates]
     .filter((sessionId) => (
       sessionId.startsWith(CODEX_BOOTSTRAP_SESSION_PREFIX) &&
       sessionId !== currentClientSessionId
     ))
     .sort();
   for (const sessionId of prior) {
-    cancelled += await control.cancelUnresolvedStarts(sessionId);
+    try {
+      cancelled += await control.cancelUnresolvedStarts(sessionId);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    if (failures.length === 1) throw failures[0];
+    throw new AggregateError(
+      failures,
+      `Neko could not safely reconcile ${failures.length} older Codex bootstrap operation(s).`,
+    );
   }
   return cancelled;
+}
+
+function codexBootstrapClientSessionId(
+  session: NekoNativeSessionRecord,
+): string | null {
+  if (
+    session.providerId !== "codex" ||
+    NATIVE_TERMINAL_STATES.has(session.state) ||
+    !session.taskId.startsWith(LEGACY_LOCAL_TASK_PREFIX)
+  ) {
+    return null;
+  }
+  const clientSessionId = session.taskId.slice(LEGACY_LOCAL_TASK_PREFIX.length);
+  return clientSessionId.startsWith(CODEX_BOOTSTRAP_SESSION_PREFIX)
+    ? clientSessionId
+    : null;
 }
 
 /** Fail-closed workspace handoff followed by the one authorized launch. */
 export async function spawnCodexAccountBootstrap(
   control: Pick<
     NekoControlClient,
-    "unresolvedStartSessionIds" | "cancelUnresolvedStarts" | "spawnProvider"
+    | "listSessions"
+    | "unresolvedStartSessionIds"
+    | "cancelUnresolvedStarts"
+    | "spawnProvider"
   >,
   identity: CodexBootstrapIdentity,
 ): Promise<NekoSpawnedProvider> {

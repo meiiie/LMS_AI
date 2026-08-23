@@ -387,6 +387,7 @@ describe("Neko driver factory resource ownership", () => {
         }] : [];
       }
       if (command === "neko_control_session_cancel") {
+        nativeState = "cancelled";
         return { agentSessionId: payload?.request.agentSessionId, cancelled: true };
       }
       return undefined;
@@ -431,6 +432,55 @@ describe("Neko driver factory resource ownership", () => {
       runId: startCalls[0][1].request.runId,
       agentSessionId: startCalls[0][1].request.agentSessionId,
       requestId: expect.any(String),
+    });
+  });
+
+  it("cancels a durable retained start after renderer ownership is lost", async () => {
+    const clientSessionId = "codex-account-bootstrap-durable";
+    const agentSessionId = "native-durable-bootstrap";
+    const runId = "native-durable-run";
+    let nativeState = "running";
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command === "neko_control_session_list") {
+        return [{
+          agentSessionId,
+          taskId: `legacy-local/task/${clientSessionId}`,
+          runId,
+          environmentId: "native-durable-environment",
+          providerId: "codex",
+          providerVersion: "0.149.0",
+          workspacePath: "C:/tmp/old-project",
+          state: nativeState,
+          operationPhase: "committed",
+          continuity: "active",
+          pid: nativeState === "running" ? 123 : null,
+          createdAt: "2026-08-23T00:00:00.000Z",
+          updatedAt: "2026-08-23T00:01:00.000Z",
+        }];
+      }
+      if (command === "neko_control_session_cancel") {
+        nativeState = "cancelled";
+        return { agentSessionId: payload?.request.agentSessionId, cancelled: true };
+      }
+      return undefined;
+    });
+
+    expect(getNekoControlClient().unresolvedStartSessionIds()).not.toContain(clientSessionId);
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts(clientSessionId),
+    ).resolves.toBe(1);
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts(clientSessionId),
+    ).resolves.toBe(0);
+
+    const cancelCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_cancel",
+    );
+    expect(cancelCalls).toHaveLength(1);
+    expect(cancelCalls[0][1].request).toEqual({
+      requestId: `reconcile-retained-start-${agentSessionId}`,
+      runId,
+      agentSessionId,
     });
   });
 

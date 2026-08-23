@@ -117,6 +117,7 @@ export interface NekoControlClient {
 const MAX_PENDING_BOOTSTRAP_FRAMES = 256;
 const MAX_PENDING_BOOTSTRAP_BYTES = 8 * 1024 * 1024;
 const NATIVE_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
+const RECONCILE_CANCEL_REQUEST_PREFIX = "reconcile-retained-start-";
 
 function legacyExecution(
   clientSessionId: string,
@@ -220,65 +221,129 @@ class TauriNekoControlClient implements NekoControlClient {
     const retained = [...this.unresolvedStarts.entries()].filter(
       ([, identity]) => identity.clientSessionId === clientSessionId,
     );
+    const representedNativeSessions = new Set(
+      retained.map(([, identity]) => identity.agentSessionId),
+    );
+    const failures: unknown[] = [];
+    let cancelled = 0;
     for (const [startKey, identity] of retained) {
-      if (identity.transport.overflowCancellation) {
-        const cancelled = await this.confirmOverflowCancellation(identity);
-        if (!cancelled) {
-          throw new Error(identity.transport.terminalError ?? "Không thể dừng runtime native chưa đối soát.");
-        }
-      } else {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const sessions = await this.listSessions(identity.execution.runId);
-        let native = sessions.find(
-          (candidate) => candidate.agentSessionId === identity.agentSessionId,
-        );
-        if (!native) {
-          try {
-            const replayed = await invokeIdempotently<unknown>(
-              invoke,
-              "neko_control_session_start",
-              { request: nativeStartRequest(identity) },
-            );
-            if (!isNativeSessionStartResult(replayed)) {
-              throw new Error("Neko trả về phản hồi phát lại phiên khởi động đã giữ không hợp lệ.");
-            }
-            native = {
-              agentSessionId: replayed.agentSessionId,
-              taskId: identity.execution.taskId,
-              runId: replayed.runId,
-              environmentId: identity.execution.environmentId,
-              providerId: replayed.provider.id,
-              providerVersion: replayed.provider.version,
-              workspacePath: identity.workspacePath,
-              state: "running",
-              operationPhase: "committed",
-              continuity: "active",
-              pid: null,
-              createdAt: new Date(0).toISOString(),
-              updatedAt: new Date(0).toISOString(),
-            };
-          } catch (error) {
-            if (!isRecordedStartFailure(error)) throw error;
-          }
-        }
-        if (native && isNativeOutcomeUncertain(native)) {
-          throw new Error(
-            "unknown_outcome: Không thể tự quên hoặc hủy phiên khởi động native đã giữ khi kết quả còn chưa chắc chắn.",
-          );
-        }
-        if (native && !NATIVE_TERMINAL_STATES.has(native.state)) {
-          await this.cancelStartIdentity(invoke, identity);
-        }
-      }
-      identity.transport.killed = true;
-      identity.transport.pendingLines.length = 0;
-      identity.transport.pendingLineBytes = 0;
-      detachStartListeners(identity.transport);
-      if (this.unresolvedStarts.get(startKey) === identity) {
-        this.unresolvedStarts.delete(startKey);
+      try {
+        await this.cancelRetainedStart(startKey, identity);
+        cancelled += 1;
+      } catch (error) {
+        failures.push(error);
       }
     }
-    return retained.length;
+
+    try {
+      const durable = (await this.listSessions())
+        .filter((session) => (
+          session.taskId === legacyExecution(clientSessionId).taskId &&
+          !representedNativeSessions.has(session.agentSessionId) &&
+          !NATIVE_TERMINAL_STATES.has(session.state)
+        ))
+        .sort((a, b) => a.agentSessionId.localeCompare(b.agentSessionId));
+      if (durable.length > 0) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        for (const session of durable) {
+          try {
+            const result = await invokeIdempotently<unknown>(
+              invoke,
+              "neko_control_session_cancel",
+              {
+                request: {
+                  requestId: `${RECONCILE_CANCEL_REQUEST_PREFIX}${session.agentSessionId}`,
+                  runId: session.runId,
+                  agentSessionId: session.agentSessionId,
+                },
+              },
+            );
+            await this.requireSafeCancellation(
+              result,
+              session.runId,
+              session.agentSessionId,
+              "phiên khởi động native bền vững",
+            );
+            cancelled += 1;
+          } catch (error) {
+            failures.push(error);
+          }
+        }
+      }
+    } catch (error) {
+      failures.push(error);
+    }
+
+    if (failures.length > 0) {
+      if (failures.length === 1) throw failures[0];
+      throw new AggregateError(
+        failures,
+        `Neko could not safely reconcile ${failures.length} retained native start operation(s).`,
+      );
+    }
+    return cancelled;
+  }
+
+  private async cancelRetainedStart(
+    startKey: string,
+    identity: UnresolvedStartIdentity,
+  ): Promise<void> {
+    if (identity.transport.overflowCancellation) {
+      const cancelled = await this.confirmOverflowCancellation(identity);
+      if (!cancelled) {
+        throw new Error(identity.transport.terminalError ?? "Không thể dừng runtime native chưa đối soát.");
+      }
+    } else {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const sessions = await this.listSessions(identity.execution.runId);
+      let native = sessions.find(
+        (candidate) => candidate.agentSessionId === identity.agentSessionId,
+      );
+      if (!native) {
+        try {
+          const replayed = await invokeIdempotently<unknown>(
+            invoke,
+            "neko_control_session_start",
+            { request: nativeStartRequest(identity) },
+          );
+          if (!isNativeSessionStartResult(replayed)) {
+            throw new Error("Neko trả về phản hồi phát lại phiên khởi động đã giữ không hợp lệ.");
+          }
+          native = {
+            agentSessionId: replayed.agentSessionId,
+            taskId: identity.execution.taskId,
+            runId: replayed.runId,
+            environmentId: identity.execution.environmentId,
+            providerId: replayed.provider.id,
+            providerVersion: replayed.provider.version,
+            workspacePath: identity.workspacePath,
+            state: "running",
+            operationPhase: "committed",
+            continuity: "active",
+            pid: null,
+            createdAt: new Date(0).toISOString(),
+            updatedAt: new Date(0).toISOString(),
+          };
+        } catch (error) {
+          if (!isRecordedStartFailure(error)) throw error;
+        }
+      }
+      if (native && isNativeOutcomeUncertain(native)) {
+        throw new Error(
+          "unknown_outcome: Không thể tự quên hoặc hủy phiên khởi động native đã giữ khi kết quả còn chưa chắc chắn.",
+        );
+      }
+      if (native && !NATIVE_TERMINAL_STATES.has(native.state)) {
+        await this.cancelStartIdentity(invoke, identity);
+      }
+    }
+    identity.transport.killed = true;
+    identity.transport.pendingLines.length = 0;
+    identity.transport.pendingLineBytes = 0;
+    detachStartListeners(identity.transport);
+    if (this.unresolvedStarts.get(startKey) === identity) {
+      this.unresolvedStarts.delete(startKey);
+    }
   }
 
   private async confirmOverflowCancellation(
