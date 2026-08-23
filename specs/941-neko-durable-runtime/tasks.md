@@ -47,9 +47,9 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 30 Rust/security
-  tests and the final 101-test regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,885 Vitest,
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 31 Rust/security
+  tests and the final 102-test regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,886 Vitest,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
   release check, 15 release tests, 445 self-harness tests and PR harness passed.
@@ -73,6 +73,9 @@
 - [x] T509 Preserve unresolved start authority when Rust explicitly reports
   `unknown_outcome`; ordinary pre-side-effect native rejections may release the
   client identity, but uncertain starts cannot mint a replacement operation.
+- [x] T510 Keep duplicate `accepted`/`dispatched` operations unresolved while
+  their original caller may still run, and classify start-worker join failure
+  as `unknown_outcome` so it cannot release the shared start identity.
 
 ## Dependencies
 

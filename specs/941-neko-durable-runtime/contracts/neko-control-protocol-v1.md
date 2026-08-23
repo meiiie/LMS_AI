@@ -22,6 +22,10 @@ method and logical target before dispatch.
   unresolved. The control client retains the original request, agent-session,
   Run/Environment binding and listeners; it must not downgrade that result to
   an ordinary deterministic rejection or mint a replacement start identity.
+- A duplicate request observed in `accepted` or `dispatched` remains unresolved
+  while the original caller may still be running. Startup recovery, rather than
+  a concurrent caller, converts abandoned pre-side-effect requests into
+  explicit continuity loss.
 
 Completed and failed request identities are replayable for 90 days. Startup
 maintenance may prune them after that window. Requests in `accepted`,

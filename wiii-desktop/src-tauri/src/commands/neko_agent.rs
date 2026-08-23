@@ -7,8 +7,8 @@
 use crate::neko::journal::{ReplayPage, SessionRecord};
 use crate::neko::provider::{AgentInfo, AgentProfile};
 use crate::neko::runtime::{
-    NekoRuntime, SessionCancelRequest, SessionCancelResult, SessionStartRequest,
-    SessionStartResult, SessionWriteRequest,
+    unknown_outcome_error, NekoRuntime, SessionCancelRequest, SessionCancelResult,
+    SessionStartRequest, SessionStartResult, SessionWriteRequest,
 };
 use tauri::{AppHandle, State};
 
@@ -51,7 +51,9 @@ pub async fn neko_control_session_start(
     let runtime = runtime.inner().clone();
     tauri::async_runtime::spawn_blocking(move || runtime.start_session(app, request))
         .await
-        .map_err(|error| format!("Neko session start task failed: {error}"))?
+        .map_err(|error| {
+            unknown_outcome_error(format!("Neko session start task failed: {error}"))
+        })?
 }
 
 #[tauri::command]

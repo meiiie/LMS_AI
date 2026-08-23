@@ -19,6 +19,12 @@ const WRITER_QUEUE_CAPACITY: usize = 32;
 const WRITE_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+pub(crate) const UNKNOWN_OUTCOME_PREFIX: &str = "unknown_outcome:";
+
+pub(crate) fn unknown_outcome_error(message: impl std::fmt::Display) -> String {
+    format!("{UNKNOWN_OUTCOME_PREFIX} {message}")
+}
+
 struct WriteJob {
     line: String,
     result: std::sync::mpsc::Sender<io::Result<()>>,
@@ -178,9 +184,9 @@ impl NekoRuntime {
                     return Err(format!("recorded session start failed: {code}"));
                 }
                 RequestDecision::UnknownOutcome => {
-                    return Err(
-                        "unknown_outcome: session start cannot be replayed automatically".into(),
-                    );
+                    return Err(unknown_outcome_error(
+                        "session start cannot be replayed automatically",
+                    ));
                 }
                 RequestDecision::Execute => {
                     if let Err(error) = self.ensure_accepting_starts() {
@@ -324,9 +330,9 @@ impl NekoRuntime {
                     "run.state_changed",
                     json!({ "state": "unknown_outcome", "reason": "provider_stdio_unavailable" }),
                 );
-                return Err(
-                    "unknown_outcome: provider stdio became unavailable after spawn".into(),
-                );
+                return Err(unknown_outcome_error(
+                    "provider stdio became unavailable after spawn",
+                ));
             }
         };
         let pid = child.id();
@@ -392,9 +398,9 @@ impl NekoRuntime {
                 "run.state_changed",
                 json!({ "state": "unknown_outcome", "reason": "ownership_commit_failed" }),
             );
-            return Err(format!(
-                "unknown_outcome: provider spawned but ownership commit failed: {error}"
-            ));
+            return Err(unknown_outcome_error(format!(
+                "provider spawned but ownership commit failed: {error}"
+            )));
         }
 
         let runtime = self.clone();

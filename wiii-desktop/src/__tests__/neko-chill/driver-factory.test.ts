@@ -376,6 +376,57 @@ describe("Neko driver factory resource ownership", () => {
     expect(tauri.listen).toHaveBeenCalledTimes(2);
   });
 
+  it("does not release a start identity while the original caller is still in flight", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    let resolveOriginal: ((value: unknown) => void) | null = null;
+    let markOriginalInvoked: (() => void) | null = null;
+    const originalInvoked = new Promise<void>((resolve) => {
+      markOriginalInvoked = resolve;
+    });
+    let starts = 0;
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command !== "neko_control_session_start") return undefined;
+      starts += 1;
+      if (starts === 1) {
+        markOriginalInvoked?.();
+        return new Promise((resolve) => {
+          resolveOriginal = resolve;
+        });
+      }
+      throw "unknown_outcome: session start cannot be replayed automatically";
+    });
+    const request = {
+      providerId: "neko",
+      clientSessionId: "session-concurrent-start",
+      workspacePath: "C:/tmp/project",
+    };
+
+    const original = getNekoControlClient().spawnProvider(request);
+    await originalInvoked;
+    await expect(getNekoControlClient().spawnProvider(request)).rejects.toContain(
+      "unknown_outcome",
+    );
+    await expect(getNekoControlClient().spawnProvider(request)).rejects.toContain(
+      "unknown_outcome",
+    );
+
+    const startCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_start",
+    );
+    expect(startCalls).toHaveLength(3);
+    expect(new Set(startCalls.map(([, payload]) => payload.request.requestId)).size).toBe(1);
+    expect(new Set(startCalls.map(([, payload]) => payload.request.agentSessionId)).size).toBe(1);
+    resolveOriginal?.({
+      agentSessionId: startCalls[0][1].request.agentSessionId,
+      runId: startCalls[0][1].request.runId,
+      provider: PROVIDER,
+    });
+    await expect(original).resolves.toMatchObject({
+      agentSessionId: startCalls[0][1].request.agentSessionId,
+    });
+    expect(tauri.listen).toHaveBeenCalledTimes(2);
+  });
+
   it("retains a write identity when the caller retries an unresolved frame", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     let writes = 0;

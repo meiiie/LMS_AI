@@ -357,9 +357,14 @@ impl Journal {
                 Some(OperationPhase::UnknownOutcome)
                 | Some(OperationPhase::SideEffectStarted)
                 | Some(OperationPhase::Committed) => Ok(RequestDecision::UnknownOutcome),
-                Some(OperationPhase::Accepted) | Some(OperationPhase::Dispatched) => Ok(
-                    RequestDecision::RecordedError("continuity_lost".to_string()),
-                ),
+                // These phases can belong to another live caller of the same
+                // idempotent operation. Startup recovery converts abandoned
+                // pre-side-effect requests to a durable failed outcome before
+                // clients reconnect; while this process is alive they must
+                // remain unresolved so a duplicate cannot release identity.
+                Some(OperationPhase::Accepted) | Some(OperationPhase::Dispatched) => {
+                    Ok(RequestDecision::UnknownOutcome)
+                }
                 None => Err("recorded Neko request has an invalid phase".to_string()),
             };
         }
@@ -1238,6 +1243,33 @@ mod tests {
         assert!(journal
             .begin_request("request-1", "session/cancel", "session-1")
             .is_err());
+    }
+
+    #[test]
+    fn duplicate_request_stays_unresolved_while_the_original_is_in_flight() {
+        let journal = Journal::in_memory();
+        assert_eq!(
+            journal
+                .begin_request("request-in-flight", "session/start", "session-a")
+                .unwrap(),
+            RequestDecision::Execute
+        );
+        assert_eq!(
+            journal
+                .begin_request("request-in-flight", "session/start", "session-a")
+                .unwrap(),
+            RequestDecision::UnknownOutcome
+        );
+
+        journal
+            .set_request_phase("request-in-flight", OperationPhase::Dispatched)
+            .unwrap();
+        assert_eq!(
+            journal
+                .begin_request("request-in-flight", "session/start", "session-a")
+                .unwrap(),
+            RequestDecision::UnknownOutcome
+        );
     }
 
     #[test]
