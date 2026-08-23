@@ -7,6 +7,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
 
@@ -32,6 +34,80 @@ fn lock(connection: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
     connection
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(unix)]
+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    value.into()
+}
+
+#[cfg(unix)]
+fn prepare_private_journal_path(path: &Path) -> Result<(), String> {
+    use std::fs::{OpenOptions, Permissions};
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("create Neko data directory failed: {error}"))?;
+        std::fs::set_permissions(parent, Permissions::from_mode(0o700))
+            .map_err(|error| format!("protect Neko data directory failed: {error}"))?;
+    }
+    if path
+        .symlink_metadata()
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("Neko runtime journal must not be a symbolic link".to_string());
+    }
+    OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|error| format!("create private Neko runtime journal failed: {error}"))?;
+    std::fs::set_permissions(path, Permissions::from_mode(0o600))
+        .map_err(|error| format!("protect Neko runtime journal failed: {error}"))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn prepare_private_journal_path(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("create Neko data directory failed: {error}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn protect_sqlite_sidecars(path: &Path) -> Result<(), String> {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    for sidecar in [
+        sqlite_sidecar_path(path, "-wal"),
+        sqlite_sidecar_path(path, "-shm"),
+    ] {
+        match std::fs::set_permissions(&sidecar, Permissions::from_mode(0o600)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "protect Neko SQLite sidecar {} failed: {error}",
+                    sidecar.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn protect_sqlite_sidecars(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -97,13 +173,14 @@ pub enum RequestDecision {
 
 impl Journal {
     pub fn open(path: &Path) -> Result<Self, String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("create Neko data directory failed: {error}"))?;
-        }
+        prepare_private_journal_path(path)?;
         let connection = Connection::open(path)
             .map_err(|error| format!("open Neko runtime journal failed: {error}"))?;
         let journal = Self::from_connection(connection)?;
+        // SQLite normally derives WAL/SHM modes from the main database, but
+        // enforce owner-only access explicitly for upgrades and custom VFSes.
+        // The containing directory is also 0700, covering future sidecars.
+        protect_sqlite_sidecars(path)?;
         journal.recover_incomplete()?;
         journal.run_startup_maintenance()?;
         Ok(journal)
@@ -1351,14 +1428,47 @@ mod tests {
 
     #[test]
     fn file_database_uses_wal() {
-        let path = std::env::temp_dir().join(format!("wiii-neko-{}.sqlite3", Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("wiii-neko-{}", Uuid::new_v4()));
+        let path = directory.join("runtime.sqlite3");
         {
             let journal = Journal::open(&path).unwrap();
             assert_eq!(journal.journal_mode().unwrap().to_ascii_lowercase(), "wal");
         }
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_database_and_sidecars_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!("wiii-neko-{}", Uuid::new_v4()));
+        let path = directory.join("runtime.sqlite3");
+        {
+            let _journal = Journal::open(&path).unwrap();
+            assert_eq!(
+                std::fs::metadata(&directory).unwrap().permissions().mode() & 0o077,
+                0,
+            );
+            for file in [
+                path.clone(),
+                sqlite_sidecar_path(&path, "-wal"),
+                sqlite_sidecar_path(&path, "-shm"),
+            ] {
+                assert!(
+                    file.exists(),
+                    "expected private SQLite file {}",
+                    file.display()
+                );
+                assert_eq!(
+                    std::fs::metadata(&file).unwrap().permissions().mode() & 0o077,
+                    0,
+                    "SQLite file {} must be owner-only",
+                    file.display(),
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

@@ -37,9 +37,12 @@ remain with their existing protocol/session owners. A standalone daemon is a
 later phase and is not implied by this boundary.
 
 Restored local sessions reconcile native state and cursor replay before the UI
-can resume work. An uncertain or still-active native execution without a live
-renderer channel is shown fail-closed instead of being silently started a
-second time.
+can resume work, then re-read native state after replay so a concurrent exit is
+not left displayed as active. An uncertain or still-active native execution
+without a live renderer channel is shown fail-closed instead of being silently
+started a second time. Unresolved starts retain their original execution and
+early transport buffer across renderer retries. Unix journal data is stored in
+an owner-only directory with owner-only SQLite files.
 
 Wiii Knowledge is independent from the selected runtime. When enabled, its
 retrieved evidence and citation metadata cross the same durability barrier as

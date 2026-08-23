@@ -239,9 +239,22 @@ async function reconcileNativeRuntime(
     hasMore = page.hasMore;
   }
 
+  // listSessions() preceded replay, so the process may have transitioned
+  // while pages were being consumed. Re-read the authoritative projection
+  // after the replay barrier; otherwise a terminal event can be checkpointed
+  // while the visible session remains incorrectly locked as "running".
+  const refreshedNative = (await reader.listSessions(native.runId)).find(
+    (candidate) => candidate.agentSessionId === native.agentSessionId,
+  );
+  if (!refreshedNative) {
+    throw new Error(
+      `Native session ${native.agentSessionId} biến mất trong lúc đối soát journal.`,
+    );
+  }
+
   const previous = [...session.events].reverse().find((event) => (
     event.data.type === "native-runtime-reconciled" &&
-    event.data.agentSessionId === native.agentSessionId
+    event.data.agentSessionId === refreshedNative.agentSessionId
   ));
   const previousData = previous?.data.type === "native-runtime-reconciled"
     ? previous.data
@@ -249,25 +262,25 @@ async function reconcileNativeRuntime(
   const changed =
     replayedEventCount > 0 ||
     previousData === null ||
-    previousData.state !== native.state ||
-    previousData.operationPhase !== native.operationPhase ||
-    previousData.continuity !== native.continuity ||
+    previousData.state !== refreshedNative.state ||
+    previousData.operationPhase !== refreshedNative.operationPhase ||
+    previousData.continuity !== refreshedNative.continuity ||
     previousData.replayedThroughSeq !== afterSeq;
   if (changed) {
     appendOwnedSessionEvent(session, "runtime", {
       type: "native-runtime-reconciled",
-      agentSessionId: native.agentSessionId,
-      runId: native.runId,
-      providerId: native.providerId,
-      state: native.state,
-      operationPhase: native.operationPhase,
-      continuity: native.continuity,
+      agentSessionId: refreshedNative.agentSessionId,
+      runId: refreshedNative.runId,
+      providerId: refreshedNative.providerId,
+      state: refreshedNative.state,
+      operationPhase: refreshedNative.operationPhase,
+      continuity: refreshedNative.continuity,
       replayedFromSeq: fromSeq,
       replayedThroughSeq: afterSeq,
       replayedEventCount,
     });
   }
-  reconcileNativeStatus(session, native);
+  reconcileNativeStatus(session, refreshedNative);
   return changed;
 }
 

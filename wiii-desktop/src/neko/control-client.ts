@@ -57,9 +57,26 @@ interface NativeSessionStartResult {
   provider: NekoDetectedProvider;
 }
 
+interface StartTransportState {
+  lineHandlers: Array<(line: string) => void>;
+  exitHandlers: Array<(code: number | null) => void>;
+  pendingLines: string[];
+  exitObserved: boolean;
+  pendingExitCode: number | null;
+  killed: boolean;
+  killPromise: Promise<void> | null;
+  cancelRequestId: string;
+  unresolvedWriteIds: Map<string, string>;
+  unlistenLine: (() => void) | null;
+  unlistenExit: (() => void) | null;
+  listenerSetup: Promise<void> | null;
+}
+
 interface UnresolvedStartIdentity {
   requestId: string;
   agentSessionId: string;
+  execution: NekoExecutionBinding;
+  transport: StartTransportState;
 }
 
 export interface NekoSpawnedProvider {
@@ -175,15 +192,19 @@ class TauriNekoControlClient implements NekoControlClient {
     if (!request.workspacePath) {
       throw new Error("Neko cần một thư mục dự án rõ ràng trước khi khởi động agent.");
     }
-    const execution = request.execution ?? legacyExecution(
+    const requestedExecution = request.execution ?? legacyExecution(
       request.clientSessionId,
       request.clientRunId,
     );
+    // A visible Wiii session is the stable caller identity. RuntimeRegistry
+    // deliberately mints a fresh instanceId for each preparation, so run and
+    // environment IDs cannot participate in the unresolved-operation key.
+    // Until Rust returns a certain outcome, a later preparation must recover
+    // the original logical start rather than create another native process.
     const startKey = JSON.stringify([
       provider.id,
-      execution.taskId,
-      execution.runId,
-      execution.environmentId,
+      requestedExecution.taskId,
+      request.clientSessionId,
       request.workspacePath,
       request.profileId ?? null,
     ]);
@@ -191,50 +212,22 @@ class TauriNekoControlClient implements NekoControlClient {
     const startIdentity = priorStart ?? {
       requestId: uuidv4(),
       agentSessionId: uuidv4(),
+      execution: requestedExecution,
+      transport: createStartTransportState(),
     };
     this.unresolvedStarts.set(startKey, startIdentity);
-    const { requestId, agentSessionId } = startIdentity;
+    const { requestId, agentSessionId, execution, transport: transportState } = startIdentity;
     const { invoke } = await import("@tauri-apps/api/core");
     const { listen } = await import("@tauri-apps/api/event");
 
-    const lineHandlers: Array<(line: string) => void> = [];
-    const exitHandlers: Array<(code: number | null) => void> = [];
-    const pendingLines: string[] = [];
-    let exitObserved = false;
-    let pendingExitCode: number | null = null;
-    let killed = false;
-    let killPromise: Promise<void> | null = null;
-    const cancelRequestId = uuidv4();
-    const unresolvedWriteIds = new Map<string, string>();
-    let unlistenLine: (() => void) | null = null;
-    let unlistenExit: (() => void) | null = null;
-    const detach = () => {
-      unlistenLine?.();
-      unlistenExit?.();
-      unlistenLine = null;
-      unlistenExit = null;
-    };
-
     // Subscribe before the side effect so provider bootstrap output cannot
-    // race ahead of the WebView listener registration.
+    // race ahead of the WebView listener registration. The listener and its
+    // buffers belong to the unresolved logical start, not this one caller;
+    // losing both IPC responses must not discard bootstrap output or exit.
     try {
-      unlistenLine = await listen<string>(`neko-session://line/${agentSessionId}`, (event) => {
-        if (lineHandlers.length === 0) {
-          pendingLines.push(event.payload);
-        } else {
-          for (const handler of lineHandlers) handler(event.payload);
-        }
-      });
-      unlistenExit = await listen<number | null>(`neko-session://exit/${agentSessionId}`, (event) => {
-        exitObserved = true;
-        pendingExitCode = event.payload ?? null;
-        for (const handler of exitHandlers) handler(pendingExitCode);
-        killed = true;
-        unresolvedWriteIds.clear();
-        queueMicrotask(detach);
-      });
+      await ensureStartListeners(transportState, listen, agentSessionId);
     } catch (error) {
-      detach();
+      detachStartListeners(transportState);
       if (this.unresolvedStarts.get(startKey) === startIdentity) {
         this.unresolvedStarts.delete(startKey);
       }
@@ -263,16 +256,18 @@ class TauriNekoControlClient implements NekoControlClient {
         this.unresolvedStarts.delete(startKey);
       }
     } catch (error) {
-      detach();
       // A rejected start may represent unknown_outcome. Never issue a second
       // native side effect as cleanup without an authoritative start result.
       // Native command rejections are deterministic strings. Bridge errors
-      // keep the identity so a caller-level retry cannot spawn twice.
+      // keep the identity, original execution binding, listener, and buffered
+      // transport state so a caller-level retry cannot spawn twice or lose
+      // provider bootstrap events.
       if (
         typeof error === "string" &&
         this.unresolvedStarts.get(startKey) === startIdentity
       ) {
         this.unresolvedStarts.delete(startKey);
+        detachStartListeners(transportState);
       }
       throw error;
     }
@@ -282,8 +277,8 @@ class TauriNekoControlClient implements NekoControlClient {
         // Keep the logical write identity after an unresolved native response.
         // A caller retrying the same provider frame must reach Rust with the
         // same request ID so it cannot repeat a committed side effect.
-        const requestId = unresolvedWriteIds.get(line) ?? uuidv4();
-        unresolvedWriteIds.set(line, requestId);
+        const requestId = transportState.unresolvedWriteIds.get(line) ?? uuidv4();
+        transportState.unresolvedWriteIds.set(line, requestId);
         try {
           await invokeIdempotently(invoke, "neko_control_session_write", {
             request: {
@@ -292,55 +287,58 @@ class TauriNekoControlClient implements NekoControlClient {
               line,
             },
           });
-          if (unresolvedWriteIds.get(line) === requestId) {
-            unresolvedWriteIds.delete(line);
+          if (transportState.unresolvedWriteIds.get(line) === requestId) {
+            transportState.unresolvedWriteIds.delete(line);
           }
         } catch (error) {
           // A full bounded writer queue proves Rust did not enqueue this
           // frame. Only that explicit rejection may mint a fresh identity on
           // retry; all uncertain outcomes retain the original request ID.
-          if (isProviderBusy(error) && unresolvedWriteIds.get(line) === requestId) {
-            unresolvedWriteIds.delete(line);
+          if (
+            isProviderBusy(error) &&
+            transportState.unresolvedWriteIds.get(line) === requestId
+          ) {
+            transportState.unresolvedWriteIds.delete(line);
           }
           throw error;
         }
       },
       onLine(handler: (line: string) => void): void {
-        lineHandlers.push(handler);
-        if (pendingLines.length > 0) {
-          const buffered = pendingLines.splice(0);
+        transportState.lineHandlers.push(handler);
+        if (transportState.pendingLines.length > 0) {
+          const buffered = transportState.pendingLines.splice(0);
           for (const line of buffered) handler(line);
         }
       },
       onExit(handler: (code: number | null) => void): void {
-        exitHandlers.push(handler);
-        if (exitObserved) {
-          queueMicrotask(() => handler(pendingExitCode));
+        transportState.exitHandlers.push(handler);
+        if (transportState.exitObserved) {
+          queueMicrotask(() => handler(transportState.pendingExitCode));
         }
       },
       async kill(): Promise<void> {
-        if (killed) return;
-        if (!killPromise) {
-          killPromise = (async () => {
+        if (transportState.killed) return;
+        if (!transportState.killPromise) {
+          transportState.killPromise = (async () => {
             await invokeIdempotently(invoke, "neko_control_session_cancel", {
               request: {
-                requestId: cancelRequestId,
+                requestId: transportState.cancelRequestId,
                 runId: started.runId,
                 agentSessionId: started.agentSessionId,
               },
             });
-            killed = true;
-            unresolvedWriteIds.clear();
-            detach();
+            transportState.killed = true;
+            transportState.unresolvedWriteIds.clear();
+            detachStartListeners(transportState);
           })();
         }
         try {
-          await killPromise;
+          await transportState.killPromise;
         } catch (error) {
           // A caller may ask again, but it will reuse the same durable request
           // identity and therefore cannot repeat an uncertain cancellation.
-          killPromise = null;
-          detach();
+          transportState.killPromise = null;
+          detachStartListeners(transportState);
           throw error;
         }
       },
@@ -352,6 +350,64 @@ class TauriNekoControlClient implements NekoControlClient {
       transport,
     };
   }
+}
+
+function createStartTransportState(): StartTransportState {
+  return {
+    lineHandlers: [],
+    exitHandlers: [],
+    pendingLines: [],
+    exitObserved: false,
+    pendingExitCode: null,
+    killed: false,
+    killPromise: null,
+    cancelRequestId: uuidv4(),
+    unresolvedWriteIds: new Map(),
+    unlistenLine: null,
+    unlistenExit: null,
+    listenerSetup: null,
+  };
+}
+
+function detachStartListeners(state: StartTransportState): void {
+  state.unlistenLine?.();
+  state.unlistenExit?.();
+  state.unlistenLine = null;
+  state.unlistenExit = null;
+}
+
+async function ensureStartListeners(
+  state: StartTransportState,
+  listen: typeof import("@tauri-apps/api/event").listen,
+  agentSessionId: string,
+): Promise<void> {
+  if (state.listenerSetup) return state.listenerSetup;
+  state.listenerSetup = (async () => {
+    state.unlistenLine = await listen<string>(
+      `neko-session://line/${agentSessionId}`,
+      (event) => {
+        if (state.lineHandlers.length === 0) state.pendingLines.push(event.payload);
+        else for (const handler of state.lineHandlers) handler(event.payload);
+      },
+    );
+    try {
+      state.unlistenExit = await listen<number | null>(
+        `neko-session://exit/${agentSessionId}`,
+        (event) => {
+          state.exitObserved = true;
+          state.pendingExitCode = event.payload ?? null;
+          for (const handler of state.exitHandlers) handler(state.pendingExitCode);
+          state.killed = true;
+          state.unresolvedWriteIds.clear();
+          queueMicrotask(() => detachStartListeners(state));
+        },
+      );
+    } catch (error) {
+      detachStartListeners(state);
+      throw error;
+    }
+  })();
+  return state.listenerSetup;
 }
 
 function hasNativeAuthority(): boolean {

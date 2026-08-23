@@ -33,10 +33,12 @@ effect. Completed requests replay their recorded result. Requests that may
 have crossed the side-effect boundary return `unknown_outcome` and are never
 automatically repeated.
 
-The TypeScript bridge keeps an unresolved start's request and agent-session
-identity across a caller-level retry after both bounded IPC attempts fail.
-Only an authoritative success or deterministic native rejection clears that
-identity.
+The TypeScript bridge keeps an unresolved start's request, agent-session,
+original Run/Environment binding, live listeners and buffered bootstrap/exit
+events across a caller-level retry after both bounded IPC attempts fail. The
+stable key is the visible Task/session launch context, not RuntimeRegistry's
+fresh preparation ID. Only an authoritative success or deterministic native
+rejection clears that unresolved identity.
 
 The journal stores method and logical target identity, not raw request bodies.
 This prevents credential or prompt capture and detects request-ID collisions.
@@ -49,6 +51,10 @@ allocated by `(stream_id, MAX(seq)+1)` inside the same immediate transaction
 that inserts the event. Session creation and every lifecycle state transition
 commit atomically with their matching durable event, so neither half can
 become authoritative alone.
+
+On Unix the application data directory is restricted to `0700`; the main
+journal and existing WAL/SHM sidecars are enforced as `0600`. The database is
+pre-created privately before SQLite opens it, closing the first-create window.
 
 Startup maintenance keeps at most 10,000 lifecycle events per run and removes
 events older than 30 days, while retaining each stream's latest event as its
@@ -112,6 +118,8 @@ the matching run stream from their last persisted cursor. The session snapshot
 stores only a bounded reconciliation checkpoint. Native `unknown_outcome` and
 active sessions that no longer have a live renderer transport are fail-closed;
 React never treats its older snapshot as permission to spawn a replacement.
+After consuming replay, hydration re-reads the native session projection so a
+terminal transition committed during replay is not checkpointed as active.
 
 ## Rejected alternatives
 

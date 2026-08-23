@@ -34,7 +34,8 @@ Expected invariants:
 - lifecycle state and its matching durable event commit or roll back together;
 - provider probing and exit observation never block unrelated lifecycle work;
 - shutdown closes start admission before process cleanup;
-- Unix provider-probe captures are owner-only;
+- Unix provider-probe captures and the journal database/WAL/SHM files are
+  owner-only;
 - stdout EOF alone never releases a still-running provider process;
 - replacing a local runtime preserves Task identity but creates a fresh Run;
 - uncertain recovery becomes `unknown_outcome`, never automatic retry;

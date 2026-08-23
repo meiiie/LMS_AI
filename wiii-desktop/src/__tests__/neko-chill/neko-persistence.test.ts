@@ -418,6 +418,69 @@ describe("neko-chill persistence", () => {
     )).toHaveLength(1);
   });
 
+  it("re-reads native state after replay so a concurrent terminal transition unlocks the session", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await flushDebounce();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+
+    const runId = "legacy-local/run/runtime-finishes-during-replay";
+    const running = {
+      agentSessionId: "native-session-race",
+      taskId: `legacy-local/task/${id}`,
+      runId,
+      environmentId: "legacy-local/environment/runtime-finishes-during-replay",
+      providerId: "neko",
+      providerVersion: "0.25.0",
+      workspacePath: WORKSPACE.path,
+      state: "running",
+      operationPhase: "committed",
+      continuity: "active",
+      pid: 123,
+      createdAt: "2026-08-23T00:00:00.000Z",
+      updatedAt: "2026-08-23T00:01:00.000Z",
+    };
+    const completed = {
+      ...running,
+      state: "completed",
+      operationPhase: "completed",
+      pid: null,
+      updatedAt: "2026-08-23T00:02:00.000Z",
+    };
+    nativeControl.listSessions
+      .mockResolvedValueOnce([running])
+      .mockResolvedValueOnce([completed]);
+    nativeControl.readEvents.mockResolvedValue({
+      streamId: runId,
+      events: [{
+        v: 1,
+        eventId: "native-event-terminal",
+        streamId: runId,
+        seq: 3,
+        at: completed.updatedAt,
+        type: "run.state_changed",
+        runId,
+        agentSessionId: completed.agentSessionId,
+        payload: { state: "completed" },
+      }],
+      nextAfterSeq: 3,
+      hasMore: false,
+    });
+
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions[id];
+    expect(restored.status).toBe("exited");
+    expect(restored.statusDetail).toContain("đã hoàn tất");
+    expect(nativeControl.listSessions).toHaveBeenCalledTimes(2);
+    expect(restored.events.at(-1)?.data).toMatchObject({
+      type: "native-runtime-reconciled",
+      state: "completed",
+      operationPhase: "completed",
+      replayedThroughSeq: 3,
+    });
+  });
+
   it("fails hydration closed when the native journal cannot be reconciled", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await flushDebounce();

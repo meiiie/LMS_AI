@@ -88,9 +88,11 @@ does not receive executable paths, PIDs or argument vectors.
 
 On Workbench hydration, React lists the native records and consumes each
 matching run stream from its last persisted cursor before the restored session
-becomes usable. This is read-model reconciliation, not a second authority:
-native `unknown_outcome` and active sessions without a live renderer transport
-stay locked against automatic respawn.
+becomes usable, then re-reads the native session projection after replay. This
+closes the race where a process becomes terminal during pagination. It is
+read-model reconciliation, not a second authority: native `unknown_outcome`
+and active sessions without a live renderer transport stay locked against
+automatic respawn.
 
 Phase 2A intentionally remains inside `Wiii.exe`. It is **not** a standalone,
 crash-independent daemon: a graceful Wiii exit cancels owned children, while a
@@ -147,8 +149,10 @@ Implemented across the foundation and Phase 2A slices:
 - Rust-owned provider resolution, approved arguments and process/session maps;
 - request-id idempotency for start, provider-frame write and cancellation;
 - caller-level start retry retains the same logical identity after unresolved
-  IPC delivery; completed/failed identities have a 90-day replay window while
-  uncertain identities are not automatically pruned;
+  IPC delivery, including its original Run/Environment binding and buffered
+  bootstrap/exit events across a fresh RuntimeRegistry preparation;
+  completed/failed identities have a 90-day replay window while uncertain
+  identities are not automatically pruned;
 - conservative recovery phases: `accepted`, `dispatched`,
   `side_effect_started`, `committed`, `completed`, `failed` and
   `unknown_outcome`;
@@ -158,7 +162,8 @@ Implemented across the foundation and Phase 2A slices:
   executable, argument vector, PID or unscoped stdin primitives;
 - one TypeScript control client for discovery, replay and live transport;
 - shutdown admission closes before process drain, and Unix provider probes use
-  bounded owner-only capture files;
+  bounded owner-only capture files; the Unix SQLite parent, database and
+  WAL/SHM sidecars are owner-only as well;
 - driver-observed capability facts and durable attach snapshots;
 - backward-compatible loading of pre-snapshot local session events.
 

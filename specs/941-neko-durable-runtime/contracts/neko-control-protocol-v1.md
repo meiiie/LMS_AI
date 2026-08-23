@@ -13,7 +13,9 @@ method and logical target before dispatch.
 - Same request ID with another method or target: return `invalid_request`.
 - The server never retries a side effect merely because a response was lost.
 - A client that exhausts its bounded IPC retry keeps the same logical
-  `requestId` and `agentSessionId` for the caller's next start attempt.
+  `requestId`, `agentSessionId`, original Run/Environment binding, subscribed
+  transport listener and early-event buffer for the caller's next start
+  attempt. A new renderer preparation ID does not create a new logical start.
 - `provider_busy` proves a bounded writer queue rejected the frame before it
   was enqueued. A caller may retry that frame only with a new request ID.
 
@@ -52,6 +54,9 @@ exit; Neko retains ownership and polls non-blockingly until exit or explicit
 release. Runtime shutdown closes start admission before draining children; a
 probe already in flight re-checks that gate before creating a session or
 spawning a process.
+
+On Unix the journal parent is owner-only (`0700`), and the SQLite database,
+WAL and shared-memory sidecars are owner-only (`0600`).
 
 ## Event ordering
 

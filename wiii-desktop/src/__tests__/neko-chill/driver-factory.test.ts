@@ -10,8 +10,12 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
 
 import type { Driver } from "@/neko-chill/drivers/types";
 import { createDriverForAgent } from "@/neko-chill/drivers/factory";
+import { RuntimeRegistry } from "@/neko-chill/runtime-manager";
 import { useNekoAgentStore } from "@/neko-chill/stores/neko-agent-store";
-import { getNekoControlClient } from "@/neko/control-client";
+import {
+  getNekoControlClient,
+  type NekoSpawnedProvider,
+} from "@/neko/control-client";
 
 const PROVIDER = {
   id: "neko",
@@ -202,16 +206,21 @@ describe("Neko driver factory resource ownership", () => {
       };
     });
 
-    const request = {
+    const firstRequest = {
       providerId: "neko",
       clientSessionId: "session-caller-retry",
-      clientRunId: "runtime-caller-retry",
+      clientRunId: "runtime-caller-attempt-1",
       workspacePath: "C:/tmp/project",
     };
-    await expect(getNekoControlClient().spawnProvider(request)).rejects.toThrow(
+    await expect(getNekoControlClient().spawnProvider(firstRequest)).rejects.toThrow(
       "both IPC responses were lost",
     );
-    const spawned = await getNekoControlClient().spawnProvider(request);
+    const spawned = await getNekoControlClient().spawnProvider({
+      ...firstRequest,
+      // RuntimeRegistry creates a new instanceId for this preparation. The
+      // control client must still recover the unresolved first logical start.
+      clientRunId: "runtime-caller-attempt-2",
+    });
 
     const startCalls = tauri.invoke.mock.calls.filter(
       ([command]) => command === "neko_control_session_start",
@@ -227,7 +236,100 @@ describe("Neko driver factory resource ownership", () => {
       startCalls[0][1].request.agentSessionId,
       startCalls[0][1].request.agentSessionId,
     ]);
+    expect(startCalls.map(([, payload]) => payload.request.runId)).toEqual([
+      "legacy-local/run/runtime-caller-attempt-1",
+      "legacy-local/run/runtime-caller-attempt-1",
+      "legacy-local/run/runtime-caller-attempt-1",
+    ]);
     expect(spawned.agentSessionId).toBe(startCalls[0][1].request.agentSessionId);
+  });
+
+  it("recovers a lost start through real RuntimeRegistry retries without losing transport events", async () => {
+    let onLine: ((event: { payload: string }) => void) | null = null;
+    let onExit: ((event: { payload: number | null }) => void) | null = null;
+    const unlistenLine = vi.fn();
+    const unlistenExit = vi.fn();
+    tauri.listen.mockImplementation(async (event: string, handler: any) => {
+      if (event.includes("/line/")) {
+        onLine = handler;
+        return unlistenLine;
+      }
+      onExit = handler;
+      return unlistenExit;
+    });
+    let starts = 0;
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command !== "neko_control_session_start") return undefined;
+      starts += 1;
+      if (starts === 1) onLine?.({ payload: "bootstrap-before-lost-response" });
+      if (starts === 2) {
+        onExit?.({ payload: 17 });
+        throw new Error("both IPC responses were lost");
+      }
+      if (starts === 1) throw new Error("both IPC responses were lost");
+      return {
+        agentSessionId: payload?.request.agentSessionId,
+        runId: payload?.request.runId,
+        provider: PROVIDER,
+      };
+    });
+
+    const registry = new RuntimeRegistry();
+    const instanceIds: string[] = [];
+    let recoveredTransport: NekoSpawnedProvider["transport"] | null = null;
+    const replace = () => registry.replace(
+      "visible-session",
+      "neko",
+      async (instanceId) => {
+        instanceIds.push(instanceId);
+        const spawned = await getNekoControlClient().spawnProvider({
+          providerId: "neko",
+          clientSessionId: "visible-session",
+          clientRunId: instanceId,
+          workspacePath: "C:/tmp/project",
+        });
+        recoveredTransport = spawned.transport;
+        return {
+          kind: "acp",
+          sessionId: "visible-session",
+          runtime: {
+            capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
+            contextContinuity: "process",
+            workspaceIsolation: "advisory",
+          },
+          start: async () => {},
+          prompt: async () => {},
+          cancel: async () => {},
+          resolvePermission: async () => {},
+          setConfigOption: async () => {},
+          dispose: async () => {},
+        } satisfies Driver;
+      },
+    );
+
+    await expect(replace()).rejects.toThrow("both IPC responses were lost");
+    await expect(replace()).resolves.toBeDefined();
+    expect(instanceIds).toHaveLength(2);
+    expect(instanceIds[0]).not.toBe(instanceIds[1]);
+
+    const startCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_start",
+    );
+    expect(startCalls).toHaveLength(3);
+    expect(new Set(startCalls.map(([, payload]) => payload.request.requestId)).size).toBe(1);
+    expect(new Set(startCalls.map(([, payload]) => payload.request.agentSessionId)).size).toBe(1);
+    expect(new Set(startCalls.map(([, payload]) => payload.request.runId)).size).toBe(1);
+    expect(startCalls[0][1].request.runId).toContain(instanceIds[0]);
+    expect(startCalls[2][1].request.runId).not.toContain(instanceIds[1]);
+    expect(tauri.listen).toHaveBeenCalledTimes(2);
+
+    const lines: string[] = [];
+    const exits: Array<number | null> = [];
+    recoveredTransport!.onLine((line) => lines.push(line));
+    recoveredTransport!.onExit((code) => exits.push(code));
+    await Promise.resolve();
+    expect(lines).toEqual(["bootstrap-before-lost-response"]);
+    expect(exits).toEqual([17]);
   });
 
   it("does not retry deterministic native command rejections", async () => {
