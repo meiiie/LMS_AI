@@ -145,13 +145,15 @@ side-effect/committed phases become `unknown_outcome`.
   the Rust authority remains inside the Tauri process.
 - **FR-022**: Slow provider discovery and process-exit observation MUST NOT
   hold the global lifecycle-operation lock. EOF on provider stdout MUST NOT be
-  treated as proof that the child process exited.
-- **FR-023**: Restored Workbench sessions MUST reconcile the matching native
+  treated as proof that the child process exited. Exit observation MUST run
+  independently from stdout consumption, and each live provider frame MUST be
+  byte-bounded before it is decoded or emitted to the renderer.
+- **FR-023**: Restored Workbench sessions MUST reconcile every matching native
   session record and replay cursor before hydration becomes usable, then
-  re-read the native session projection after replay to observe lifecycle
-  transitions committed during that read. Native `unknown_outcome` or an
-  unattached active process MUST fail closed rather than trigger a replacement
-  process.
+  re-read each native session projection after replay to observe lifecycle
+  transitions committed during that read. Any native `unknown_outcome` or
+  unattached active process MUST fail closed rather than trigger a replacement,
+  even when a newer native Run is terminal.
 - **FR-024**: Completed and failed request identities MUST have a documented,
   bounded retry window. Accepted, dispatched, side-effect-started, committed,
   and `unknown_outcome` identities MUST NOT be pruned automatically.

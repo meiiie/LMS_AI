@@ -159,16 +159,16 @@ function nativeTaskId(sessionId: string): string {
   return `legacy-local/task/${sessionId}`;
 }
 
-function latestNativeSession(
+function nativeSessionsForTask(
   sessions: NekoNativeSessionRecord[],
   sessionId: string,
-): NekoNativeSessionRecord | null {
+): NekoNativeSessionRecord[] {
   const candidates = sessions.filter((candidate) => candidate.taskId === nativeTaskId(sessionId));
   candidates.sort((left, right) => {
     const timestamp = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
     return timestamp || right.agentSessionId.localeCompare(left.agentSessionId);
   });
-  return candidates[0] ?? null;
+  return candidates;
 }
 
 function lastNativeCursor(session: NekoSession, runId: string): number {
@@ -184,24 +184,45 @@ function lastNativeCursor(session: NekoSession, runId: string): number {
 function nativeRunBlocksRespawn(session: NekoSession): boolean {
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const data = session.events[index].data;
-    if (data.type === "runtime-attached") return false;
+    if (data.type === "runtime-attached") break;
     if (data.type !== "native-runtime-reconciled") continue;
-    return (
+    if (
       data.state === "unknown_outcome" ||
       data.operationPhase === "unknown_outcome" ||
       !NATIVE_TERMINAL_STATES.has(data.state)
-    );
+    ) {
+      return true;
+    }
   }
   return false;
 }
 
-function reconcileNativeStatus(session: NekoSession, native: NekoNativeSessionRecord): void {
-  if (native.state === "unknown_outcome" || native.operationPhase === "unknown_outcome") {
+function reconcileNativeStatus(
+  session: NekoSession,
+  natives: NekoNativeSessionRecord[],
+): void {
+  const uncertain = natives.find(
+    (native) => native.state === "unknown_outcome" || native.operationPhase === "unknown_outcome",
+  );
+  if (uncertain) {
     session.status = "error";
     session.statusDetail =
       "Lần chạy native có kết quả chưa xác định. Neko không tự chạy lại; hãy kiểm tra trước khi tạo lần chạy mới.";
     return;
   }
+  const nonterminal = natives.find((native) => !NATIVE_TERMINAL_STATES.has(native.state));
+  if (nonterminal) {
+    // Phase 2A cannot reattach a renderer transport to an already-running
+    // native process. One unresolved execution is enough to lock the visible
+    // Task even when a newer execution has already reached a terminal state.
+    session.status = "error";
+    session.statusDetail =
+      `Native journal vẫn ghi nhận agent ở trạng thái ${nonterminal.state}, nhưng UI đã mất kênh live. ` +
+      "Phiên được khóa để tránh khởi động trùng.";
+    return;
+  }
+  const native = natives[0];
+  if (!native) return;
   if (NATIVE_TERMINAL_STATES.has(native.state)) {
     session.status = "exited";
     session.statusDetail = native.state === "completed"
@@ -211,20 +232,13 @@ function reconcileNativeStatus(session: NekoSession, native: NekoNativeSessionRe
         : "Lần chạy native gần nhất đã thất bại. Nhắn tiếp để tạo một lần chạy mới.";
     return;
   }
-  // Phase 2A cannot reattach a renderer transport to an already-running
-  // native process. Keep the visible session closed instead of spawning a
-  // competing process from stale React state.
-  session.status = "error";
-  session.statusDetail =
-    `Native journal vẫn ghi nhận agent ở trạng thái ${native.state}, nhưng UI đã mất kênh live. ` +
-    "Phiên được khóa để tránh khởi động trùng.";
 }
 
 async function reconcileNativeRuntime(
   session: NekoSession,
   native: NekoNativeSessionRecord,
   reader: NativeControlReader,
-): Promise<boolean> {
+): Promise<{ changed: boolean; native: NekoNativeSessionRecord }> {
   const fromSeq = lastNativeCursor(session, native.runId);
   let afterSeq = fromSeq;
   let replayedEventCount = 0;
@@ -280,8 +294,7 @@ async function reconcileNativeRuntime(
       replayedEventCount,
     });
   }
-  reconcileNativeStatus(session, refreshedNative);
-  return changed;
+  return { changed, native: refreshedNative };
 }
 
 async function defaultDriverFactory(
@@ -577,9 +590,16 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const nativeReader = nativeControlReaderFactory();
           const nativeSessions = await nativeReader.listSessions();
           for (const session of Object.values(restored)) {
-            const native = latestNativeSession(nativeSessions, session.id);
-            if (!native) continue;
-            const changed = await reconcileNativeRuntime(session, native, nativeReader);
+            const natives = nativeSessionsForTask(nativeSessions, session.id);
+            if (natives.length === 0) continue;
+            let changed = false;
+            const reconciled: NekoNativeSessionRecord[] = [];
+            for (const native of natives) {
+              const result = await reconcileNativeRuntime(session, native, nativeReader);
+              changed ||= result.changed;
+              reconciled.push(result.native);
+            }
+            reconcileNativeStatus(session, nativeSessionsForTask(reconciled, session.id));
             // The renderer must not become usable from a reconciled read model
             // that exists only in memory. Native truth remains authoritative,
             // and this strict snapshot records the consumed replay cursor.

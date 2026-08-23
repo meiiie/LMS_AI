@@ -55,9 +55,11 @@ src/neko/control-client.ts
 `-- Tauri adapter using provider/session IDs, never program/args/PID
 ```
 
-The runtime stores `Arc`-backed inner state so stdout/reaper threads can update
-the same process table and journal. Tauri setup opens the database and manages
-the runtime. App exit asks the runtime to cancel owned processes.
+The runtime stores `Arc`-backed inner state so bounded stdout readers and
+dedicated process monitors can update the same process table and journal.
+Process exit is observed independently from pipe EOF. Tauri setup opens the
+database and manages the runtime. App exit asks the runtime to cancel owned
+processes.
 
 ## Migration and compatibility
 

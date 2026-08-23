@@ -56,7 +56,9 @@ idempotent by request ID. It does not accept a PID or executable.
 Provider discovery captures are owner-only and output-bounded while the probe
 is running. Probe and agent launches use isolated process groups; timeout,
 output overflow, helper-thread failure and shutdown terminate the owned process
-tree rather than dropping a live child handle.
+tree rather than dropping a live child handle. Live provider stdout is parsed
+with a 4 MiB per-frame ceiling; an oversized, unterminated or invalid UTF-8
+frame is a terminal provider-protocol failure, not an unbounded renderer input.
 
 The legacy Workbench compatibility binding maps its stable visible session to
 one Task. Every `RuntimeRegistry` replacement maps to a fresh Run and
@@ -67,10 +69,15 @@ Provider discovery is read-only and occurs outside the global lifecycle lock
 after request identity is durably accepted. Completed request replay is
 resolved before discovery, so a later provider upgrade or removal cannot
 invalidate a recorded start result. Provider stdout EOF does not prove process
-exit; Neko retains ownership and polls non-blockingly until exit or explicit
-release. Runtime shutdown closes start admission before draining children; a
-probe already in flight re-checks that gate before creating a session or
-spawning a process.
+exit; a dedicated monitor polls the owned child independently of stdout reads.
+If the leader exits while a descendant retains inherited stdio, Neko closes the
+isolated process tree and commits the exit without waiting for pipe EOF. Runtime
+shutdown closes start admission before draining children; a probe already in
+flight re-checks that gate before creating a session or spawning a process.
+
+Workbench hydration reconciles every native AgentSession mapped to the visible
+Task, not only the newest record. Any active or `unknown_outcome` execution
+blocks respawn even when a newer Run is already terminal.
 
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).

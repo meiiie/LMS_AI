@@ -481,6 +481,61 @@ describe("neko-chill persistence", () => {
     });
   });
 
+  it("reconciles every native run so a newer terminal run cannot hide an older uncertain process", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await useNekoSessionStore.getState().sendPrompt("tạo lịch sử native");
+    await flushDebounce();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+
+    const completed = {
+      agentSessionId: "native-session-newer",
+      taskId: `legacy-local/task/${id}`,
+      runId: "legacy-local/run/newer-terminal",
+      environmentId: "legacy-local/environment/newer-terminal",
+      providerId: "neko",
+      providerVersion: "0.25.0",
+      workspacePath: WORKSPACE.path,
+      state: "completed",
+      operationPhase: "completed",
+      continuity: "active",
+      pid: null,
+      createdAt: "2026-08-23T00:02:00.000Z",
+      updatedAt: "2026-08-23T00:03:00.000Z",
+    };
+    const uncertain = {
+      ...completed,
+      agentSessionId: "native-session-older",
+      runId: "legacy-local/run/older-uncertain",
+      environmentId: "legacy-local/environment/older-uncertain",
+      state: "unknown_outcome",
+      operationPhase: "unknown_outcome",
+      continuity: "unknown_outcome",
+      createdAt: "2026-08-23T00:00:00.000Z",
+      updatedAt: "2026-08-23T00:01:00.000Z",
+    };
+    const natives = [completed, uncertain];
+    nativeControl.listSessions.mockImplementation(async (runId?: string) => (
+      runId ? natives.filter((candidate) => candidate.runId === runId) : natives
+    ));
+
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions[id];
+    expect(restored.status).toBe("error");
+    expect(restored.statusDetail).toContain("kết quả chưa xác định");
+    expect(restored.events.filter(
+      (event) => event.data.type === "native-runtime-reconciled",
+    )).toHaveLength(2);
+    expect(nativeControl.readEvents).toHaveBeenCalledWith(completed.runId, 0, 500);
+    expect(nativeControl.readEvents).toHaveBeenCalledWith(uncertain.runId, 0, 500);
+
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().sendPrompt("không được chạy process thứ ba");
+    expect(spawned).toHaveLength(1);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+  });
+
   it("fails hydration closed when the native journal cannot be reconciled", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await flushDebounce();

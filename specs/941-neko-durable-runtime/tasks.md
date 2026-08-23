@@ -47,9 +47,9 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 33 Rust/security
-  tests and the final 102-test regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,886 Vitest,
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 34 Rust/security
+  tests and the final 154-test regression slice passed on 2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,887 Vitest,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
   release check, 15 release tests, 445 self-harness tests and PR harness passed.
@@ -79,6 +79,9 @@
 - [x] T511 Replay durable starts before volatile workspace checks, bound probe
   capture growth during production and terminate its process tree, and make
   provider writer/reader thread creation fallible before ownership commit.
+- [x] T512 Observe provider exit independently from stdout EOF, reject live
+  frames above 4 MiB as a terminal protocol failure, and reconcile every
+  native Run for a visible Task before allowing respawn.
 
 ## Dependencies
 

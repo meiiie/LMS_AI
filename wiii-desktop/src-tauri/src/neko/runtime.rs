@@ -10,7 +10,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, sync_channel, SyncSender, TrySendError};
+use std::sync::mpsc::{channel, sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -18,6 +18,8 @@ use tauri::{AppHandle, Emitter};
 const WRITER_QUEUE_CAPACITY: usize = 32;
 const WRITE_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const PROVIDER_READER_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+const MAX_PROVIDER_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 pub(crate) const UNKNOWN_OUTCOME_PREFIX: &str = "unknown_outcome:";
 
@@ -33,6 +35,11 @@ struct WriteJob {
 struct AgentProc {
     child: Child,
     writer: SyncSender<WriteJob>,
+}
+
+struct ReaderWorker {
+    start: std::sync::mpsc::Sender<()>,
+    finished: Receiver<()>,
 }
 
 enum ProcessPoll {
@@ -380,8 +387,8 @@ impl NekoRuntime {
 
         let runtime = self.clone();
         let session_id = request.agent_session_id.clone();
-        let reader_start = match spawn_reader(runtime, app.clone(), session_id, stdout) {
-            Ok(reader_start) => reader_start,
+        let reader = match spawn_reader(runtime, app.clone(), session_id, stdout) {
+            Ok(reader) => reader,
             Err(error) => {
                 if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id)
                 {
@@ -401,6 +408,33 @@ impl NekoRuntime {
                 );
                 return Err(unknown_outcome_error(format!(
                     "provider reader thread could not start: {error}"
+                )));
+            }
+        };
+        let runtime = self.clone();
+        let session_id = request.agent_session_id.clone();
+        let monitor_start = match spawn_monitor(runtime, app.clone(), session_id, reader.finished) {
+            Ok(monitor_start) => monitor_start,
+            Err(error) => {
+                drop(reader.start);
+                if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id)
+                {
+                    kill_proc(process);
+                }
+                let _ = self.inner.journal.mark_request_unknown(&request.request_id);
+                let _ = self.transition_session_event(
+                    &app,
+                    &request.agent_session_id,
+                    RunState::UnknownOutcome,
+                    OperationPhase::UnknownOutcome,
+                    "unknown_outcome",
+                    None,
+                    resolved.version.as_deref(),
+                    "run.state_changed",
+                    json!({ "state": "unknown_outcome", "reason": "provider_monitor_unavailable" }),
+                );
+                return Err(unknown_outcome_error(format!(
+                    "provider monitor thread could not start: {error}"
                 )));
             }
         };
@@ -446,7 +480,8 @@ impl NekoRuntime {
             Ok(())
         })();
         if let Err(error) = ownership_commit {
-            drop(reader_start);
+            drop(reader.start);
+            drop(monitor_start);
             if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id) {
                 kill_proc(process);
             }
@@ -466,10 +501,12 @@ impl NekoRuntime {
                 "provider spawned but ownership commit failed: {error}"
             )));
         }
-        // The reader exists before ownership becomes committed, but is gated
-        // until the transaction succeeds so it cannot race a starting session
-        // into terminal state. Failure paths drop the gate and kill ownership.
-        let _ = reader_start.send(());
+        // Reader and monitor exist before ownership becomes committed, but are
+        // gated until the transaction succeeds so neither can race a starting
+        // session into terminal state. The monitor owns exit observation;
+        // stdout EOF is deliberately not part of process lifecycle truth.
+        let _ = monitor_start.send(());
+        let _ = reader.start.send(());
 
         Ok(result)
     }
@@ -802,22 +839,37 @@ impl NekoRuntime {
             .set_session_phase(&request.agent_session_id, phase)
     }
 
-    fn poll_process_exit(&self, app: &AppHandle, agent_session_id: &str) -> ProcessPoll {
-        let _operation = lock(&self.inner.operations);
-        let code = {
+    fn poll_process_exit(
+        &self,
+        app: &AppHandle,
+        agent_session_id: &str,
+        reader_finished: &Receiver<()>,
+    ) -> ProcessPoll {
+        let (mut process, code, reason) = {
+            let _operation = lock(&self.inner.operations);
             let mut processes = lock(&self.inner.processes);
             let Some(process) = processes.get_mut(agent_session_id) else {
                 return ProcessPoll::Released;
             };
-            match process.child.try_wait() {
-                Ok(Some(status)) => {
-                    let code = status.code();
-                    processes.remove(agent_session_id);
-                    code
-                }
-                Ok(None) | Err(_) => return ProcessPoll::Running,
-            }
+            let (code, reason) = match process.child.try_wait() {
+                Ok(Some(status)) => (status.code(), "provider_process_exited"),
+                Ok(None) => return ProcessPoll::Running,
+                Err(_) => (None, "provider_process_status_unavailable"),
+            };
+            let process = processes
+                .remove(agent_session_id)
+                .expect("process existed while polling its exit");
+            (process, code, reason)
         };
+        // The provider leader may exit while a descendant retains inherited
+        // stdio. Tear down the isolated process tree so the reader cannot be
+        // stranded and no orphan survives after lifecycle ownership ends.
+        terminate_child_tree(&mut process.child);
+        // Preserve the provider's final bounded frames before notifying the
+        // renderer of exit. A broken descendant may still retain the pipe, so
+        // draining is bounded and happens without the global lifecycle lock.
+        let _ = reader_finished.recv_timeout(PROVIDER_READER_DRAIN_TIMEOUT);
+        let _operation = lock(&self.inner.operations);
         let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
             return ProcessPoll::Exited(code);
         };
@@ -831,7 +883,7 @@ impl NekoRuntime {
                 None,
                 None,
                 "run.state_changed",
-                json!({ "state": "failed", "reason": "provider_process_exited" }),
+                json!({ "state": "failed", "reason": reason }),
             );
         }
         let _ = self.emit_control_event(
@@ -842,6 +894,46 @@ impl NekoRuntime {
             json!({ "exitCode": code }),
         );
         ProcessPoll::Exited(code)
+    }
+
+    fn fail_provider_protocol(&self, app: &AppHandle, agent_session_id: &str) {
+        let _operation = lock(&self.inner.operations);
+        let process = lock(&self.inner.processes).remove(agent_session_id);
+        let Some(process) = process else {
+            return;
+        };
+        kill_proc(process);
+        let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
+            let _ = app.emit(
+                &format!("neko-session://exit/{agent_session_id}"),
+                Option::<i32>::None,
+            );
+            return;
+        };
+        if !session.state.is_terminal() {
+            let _ = self.transition_session_event(
+                app,
+                agent_session_id,
+                RunState::Failed,
+                OperationPhase::Failed,
+                "continuity_lost",
+                None,
+                None,
+                "run.state_changed",
+                json!({ "state": "failed", "reason": "provider_protocol_failure" }),
+            );
+        }
+        let _ = self.emit_control_event(
+            app,
+            &session.run_id,
+            "process.exited",
+            agent_session_id,
+            json!({ "exitCode": null, "reason": "provider_protocol_failure" }),
+        );
+        let _ = app.emit(
+            &format!("neko-session://exit/{agent_session_id}"),
+            Option::<i32>::None,
+        );
     }
 }
 
@@ -935,27 +1027,52 @@ fn spawn_reader(
     app: AppHandle,
     session_id: String,
     stdout: std::process::ChildStdout,
-) -> io::Result<std::sync::mpsc::Sender<()>> {
+) -> io::Result<ReaderWorker> {
     let (start_sender, start_receiver) = channel::<()>();
+    let (finished_sender, finished_receiver) = channel::<()>();
     std::thread::Builder::new()
         .name("neko-provider-reader".into())
         .spawn(move || {
             if start_receiver.recv().is_err() {
                 return;
             }
-            for line in BufReader::new(stdout).lines() {
-                match line {
-                    Ok(line) => {
+            let mut reader = BufReader::new(stdout);
+            let mut frame = Vec::new();
+            loop {
+                match read_bounded_frame(&mut reader, &mut frame, MAX_PROVIDER_FRAME_BYTES) {
+                    Ok(Some(line)) => {
                         let _ = app.emit(&format!("neko-session://line/{session_id}"), line);
                     }
-                    Err(_) => break,
+                    Ok(None) => break,
+                    Err(_) => {
+                        runtime.fail_provider_protocol(&app, &session_id);
+                        break;
+                    }
                 }
             }
-            // EOF does not prove the process exited: a provider may redirect
-            // stdout and remain alive. Poll without holding the lifecycle lock
-            // across a blocking wait, retaining ownership so cancel still works.
+            let _ = finished_sender.send(());
+        })?;
+    Ok(ReaderWorker {
+        start: start_sender,
+        finished: finished_receiver,
+    })
+}
+
+fn spawn_monitor(
+    runtime: NekoRuntime,
+    app: AppHandle,
+    session_id: String,
+    reader_finished: Receiver<()>,
+) -> io::Result<std::sync::mpsc::Sender<()>> {
+    let (start_sender, start_receiver) = channel::<()>();
+    std::thread::Builder::new()
+        .name("neko-provider-monitor".into())
+        .spawn(move || {
+            if start_receiver.recv().is_err() {
+                return;
+            }
             loop {
-                match runtime.poll_process_exit(&app, &session_id) {
+                match runtime.poll_process_exit(&app, &session_id, &reader_finished) {
                     ProcessPoll::Running => std::thread::sleep(PROCESS_EXIT_POLL_INTERVAL),
                     ProcessPoll::Released => break,
                     ProcessPoll::Exited(code) => {
@@ -966,6 +1083,46 @@ fn spawn_reader(
             }
         })?;
     Ok(start_sender)
+}
+
+fn read_bounded_frame<R: BufRead>(
+    reader: &mut R,
+    frame: &mut Vec<u8>,
+    max_bytes: usize,
+) -> io::Result<Option<String>> {
+    frame.clear();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            if frame.is_empty() {
+                return Ok(None);
+            }
+            break;
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let take = newline.map_or(available.len(), |position| position + 1);
+        let payload_bytes = newline.map_or(take, |position| position);
+        if frame.len().saturating_add(payload_bytes) > max_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "provider frame exceeded the byte limit",
+            ));
+        }
+        frame.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if newline.is_some() {
+            break;
+        }
+    }
+    if frame.last() == Some(&b'\n') {
+        frame.pop();
+    }
+    if frame.last() == Some(&b'\r') {
+        frame.pop();
+    }
+    String::from_utf8(frame.clone())
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 fn kill_proc(mut process: AgentProc) {
@@ -993,6 +1150,28 @@ mod tests {
         assert!(validate_identity("runId", "run\n1").is_err());
         assert!(validate_channel_identity("agentSessionId", "session-1").is_ok());
         assert!(validate_channel_identity("agentSessionId", "session/escape").is_err());
+    }
+
+    #[test]
+    fn provider_frames_are_bounded_before_a_newline_or_eof() {
+        let mut frame = Vec::new();
+        let mut valid = BufReader::with_capacity(2, io::Cursor::new(b"1234\nnext\n"));
+        assert_eq!(
+            read_bounded_frame(&mut valid, &mut frame, 4).unwrap(),
+            Some("1234".into())
+        );
+        assert_eq!(
+            read_bounded_frame(&mut valid, &mut frame, 4).unwrap(),
+            Some("next".into())
+        );
+
+        let mut oversized = BufReader::with_capacity(2, io::Cursor::new(b"12345\n"));
+        let error = read_bounded_frame(&mut oversized, &mut frame, 4).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        let mut unterminated = BufReader::with_capacity(2, io::Cursor::new(b"12345"));
+        let error = read_bounded_frame(&mut unterminated, &mut frame, 4).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
