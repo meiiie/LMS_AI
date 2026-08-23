@@ -1,6 +1,6 @@
 use super::journal::{Journal, NewSession, ReplayPage, RequestDecision, SessionRecord};
 use super::lifecycle::{OperationPhase, RunState};
-use super::provider::{self, hidden, AgentInfo, AgentProfile};
+use super::provider::{self, hidden, terminate_child_tree, AgentInfo, AgentProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -159,7 +159,10 @@ impl NekoRuntime {
         app: AppHandle,
         request: SessionStartRequest,
     ) -> Result<SessionStartResult, String> {
-        validate_start(&request)?;
+        // Stable syntax participates in request identity and is safe to check
+        // before replay. Workspace existence is volatile and must be checked
+        // only after a prior completed/uncertain operation has been resolved.
+        validate_start_identity(&request)?;
         let target = digest_target(&[
             &request.agent_session_id,
             &request.task_id,
@@ -197,6 +200,20 @@ impl NekoRuntime {
                     }
                 }
             }
+        }
+
+        if let Err(error) = validate_start_workspace(&request) {
+            let _operation = lock(&self.inner.operations);
+            return match self
+                .inner
+                .journal
+                .fail_request(&request.request_id, "invalid_workspace")
+            {
+                Ok(()) => Err(error),
+                Err(recording_error) => Err(format!(
+                    "{error}; additionally failed to persist rejected start: {recording_error}"
+                )),
+            };
         }
 
         // Version/profile discovery can invoke a slow or broken provider shim.
@@ -316,8 +333,7 @@ impl NekoRuntime {
         let (stdin, stdout) = match (stdin, stdout) {
             (Some(stdin), Some(stdout)) => (stdin, stdout),
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_child_tree(&mut child);
                 let _ = self.inner.journal.mark_request_unknown(&request.request_id);
                 let _ = self.transition_session_event(
                     &app,
@@ -336,11 +352,58 @@ impl NekoRuntime {
             }
         };
         let pid = child.id();
-        let writer = spawn_writer(stdin);
+        let writer = match spawn_writer(stdin) {
+            Ok(writer) => writer,
+            Err(error) => {
+                terminate_child_tree(&mut child);
+                let _ = self.inner.journal.mark_request_unknown(&request.request_id);
+                let _ = self.transition_session_event(
+                    &app,
+                    &request.agent_session_id,
+                    RunState::UnknownOutcome,
+                    OperationPhase::UnknownOutcome,
+                    "unknown_outcome",
+                    None,
+                    resolved.version.as_deref(),
+                    "run.state_changed",
+                    json!({ "state": "unknown_outcome", "reason": "provider_writer_unavailable" }),
+                );
+                return Err(unknown_outcome_error(format!(
+                    "provider writer thread could not start: {error}"
+                )));
+            }
+        };
         lock(&self.inner.processes).insert(
             request.agent_session_id.clone(),
             AgentProc { child, writer },
         );
+
+        let runtime = self.clone();
+        let session_id = request.agent_session_id.clone();
+        let reader_start = match spawn_reader(runtime, app.clone(), session_id, stdout) {
+            Ok(reader_start) => reader_start,
+            Err(error) => {
+                if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id)
+                {
+                    kill_proc(process);
+                }
+                let _ = self.inner.journal.mark_request_unknown(&request.request_id);
+                let _ = self.transition_session_event(
+                    &app,
+                    &request.agent_session_id,
+                    RunState::UnknownOutcome,
+                    OperationPhase::UnknownOutcome,
+                    "unknown_outcome",
+                    None,
+                    resolved.version.as_deref(),
+                    "run.state_changed",
+                    json!({ "state": "unknown_outcome", "reason": "provider_reader_unavailable" }),
+                );
+                return Err(unknown_outcome_error(format!(
+                    "provider reader thread could not start: {error}"
+                )));
+            }
+        };
 
         let result = SessionStartResult {
             agent_session_id: request.agent_session_id.clone(),
@@ -383,6 +446,7 @@ impl NekoRuntime {
             Ok(())
         })();
         if let Err(error) = ownership_commit {
+            drop(reader_start);
             if let Some(process) = lock(&self.inner.processes).remove(&request.agent_session_id) {
                 kill_proc(process);
             }
@@ -402,32 +466,10 @@ impl NekoRuntime {
                 "provider spawned but ownership commit failed: {error}"
             )));
         }
-
-        let runtime = self.clone();
-        let session_id = request.agent_session_id;
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                match line {
-                    Ok(line) => {
-                        let _ = app.emit(&format!("neko-session://line/{session_id}"), line);
-                    }
-                    Err(_) => break,
-                }
-            }
-            // EOF does not prove the process exited: a provider may redirect
-            // stdout and remain alive. Poll without holding the lifecycle lock
-            // across a blocking wait, retaining ownership so cancel still works.
-            loop {
-                match runtime.poll_process_exit(&app, &session_id) {
-                    ProcessPoll::Running => std::thread::sleep(PROCESS_EXIT_POLL_INTERVAL),
-                    ProcessPoll::Released => break,
-                    ProcessPoll::Exited(code) => {
-                        let _ = app.emit(&format!("neko-session://exit/{session_id}"), code);
-                        break;
-                    }
-                }
-            }
-        });
+        // The reader exists before ownership becomes committed, but is gated
+        // until the transaction succeeds so it cannot race a starting session
+        // into terminal state. Failure paths drop the gate and kill ownership.
+        let _ = reader_start.send(());
 
         Ok(result)
     }
@@ -803,7 +845,7 @@ impl NekoRuntime {
     }
 }
 
-fn validate_start(request: &SessionStartRequest) -> Result<(), String> {
+fn validate_start_identity(request: &SessionStartRequest) -> Result<(), String> {
     for (name, value) in [
         ("requestId", request.request_id.as_str()),
         ("agentSessionId", request.agent_session_id.as_str()),
@@ -819,11 +861,18 @@ fn validate_start(request: &SessionStartRequest) -> Result<(), String> {
         return Err(format!("unknown Neko provider '{}'", request.provider_id));
     }
     let workspace = Path::new(&request.workspace_path);
-    if !workspace.is_absolute() || !workspace.is_dir() {
-        return Err("workspace must be an existing absolute directory".into());
+    if !workspace.is_absolute() {
+        return Err("workspace must be an absolute directory".into());
     }
     if let Some(profile_id) = request.profile_id.as_deref() {
         provider::validate_profile_id(profile_id)?;
+    }
+    Ok(())
+}
+
+fn validate_start_workspace(request: &SessionStartRequest) -> Result<(), String> {
+    if !Path::new(&request.workspace_path).is_dir() {
+        return Err("workspace must be an existing absolute directory".into());
     }
     Ok(())
 }
@@ -861,39 +910,66 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn spawn_writer(mut stdin: std::process::ChildStdin) -> SyncSender<WriteJob> {
+fn spawn_writer(mut stdin: std::process::ChildStdin) -> io::Result<SyncSender<WriteJob>> {
     let (sender, receiver) = sync_channel::<WriteJob>(WRITER_QUEUE_CAPACITY);
-    std::thread::spawn(move || {
-        for job in receiver {
-            let result = stdin
-                .write_all(job.line.as_bytes())
-                .and_then(|_| stdin.write_all(b"\n"))
-                .and_then(|_| stdin.flush());
-            let failed = result.is_err();
-            let _ = job.result.send(result);
-            if failed {
-                break;
+    std::thread::Builder::new()
+        .name("neko-provider-writer".into())
+        .spawn(move || {
+            for job in receiver {
+                let result = stdin
+                    .write_all(job.line.as_bytes())
+                    .and_then(|_| stdin.write_all(b"\n"))
+                    .and_then(|_| stdin.flush());
+                let failed = result.is_err();
+                let _ = job.result.send(result);
+                if failed {
+                    break;
+                }
             }
-        }
-    });
-    sender
+        })?;
+    Ok(sender)
+}
+
+fn spawn_reader(
+    runtime: NekoRuntime,
+    app: AppHandle,
+    session_id: String,
+    stdout: std::process::ChildStdout,
+) -> io::Result<std::sync::mpsc::Sender<()>> {
+    let (start_sender, start_receiver) = channel::<()>();
+    std::thread::Builder::new()
+        .name("neko-provider-reader".into())
+        .spawn(move || {
+            if start_receiver.recv().is_err() {
+                return;
+            }
+            for line in BufReader::new(stdout).lines() {
+                match line {
+                    Ok(line) => {
+                        let _ = app.emit(&format!("neko-session://line/{session_id}"), line);
+                    }
+                    Err(_) => break,
+                }
+            }
+            // EOF does not prove the process exited: a provider may redirect
+            // stdout and remain alive. Poll without holding the lifecycle lock
+            // across a blocking wait, retaining ownership so cancel still works.
+            loop {
+                match runtime.poll_process_exit(&app, &session_id) {
+                    ProcessPoll::Running => std::thread::sleep(PROCESS_EXIT_POLL_INTERVAL),
+                    ProcessPoll::Released => break,
+                    ProcessPoll::Exited(code) => {
+                        let _ = app.emit(&format!("neko-session://exit/{session_id}"), code);
+                        break;
+                    }
+                }
+            }
+        })?;
+    Ok(start_sender)
 }
 
 fn kill_proc(mut process: AgentProc) {
-    #[cfg(windows)]
-    {
-        let pid = process.child.id();
-        let mut command = Command::new("taskkill");
-        hidden(
-            command
-                .args(["/T", "/F", "/PID", &pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null()),
-        );
-        let _ = command.status();
-    }
-    let _ = process.child.kill();
-    let _ = process.child.wait();
+    terminate_child_tree(&mut process.child);
 }
 
 #[cfg(test)]
@@ -917,6 +993,25 @@ mod tests {
         assert!(validate_identity("runId", "run\n1").is_err());
         assert!(validate_channel_identity("agentSessionId", "session-1").is_ok());
         assert!(validate_channel_identity("agentSessionId", "session/escape").is_err());
+    }
+
+    #[test]
+    fn volatile_workspace_availability_is_deferred_until_after_replay_lookup() {
+        let missing =
+            std::env::temp_dir().join(format!("wiii-missing-workspace-{}", uuid::Uuid::new_v4()));
+        let request = SessionStartRequest {
+            request_id: "request-1".into(),
+            agent_session_id: "session-1".into(),
+            task_id: "task-1".into(),
+            run_id: "run-1".into(),
+            provider_id: "neko".into(),
+            environment_id: "environment-1".into(),
+            workspace_path: missing.to_string_lossy().into_owned(),
+            profile_id: None,
+        };
+
+        assert!(validate_start_identity(&request).is_ok());
+        assert!(validate_start_workspace(&request).is_err());
     }
 
     #[test]

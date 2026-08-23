@@ -5363,6 +5363,7 @@ version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

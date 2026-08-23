@@ -4,13 +4,15 @@ use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
 
@@ -62,6 +64,20 @@ impl ProbeCapture {
             .read_to_end(&mut captured)?;
         Ok(captured)
     }
+
+    fn len(&self) -> io::Result<u64> {
+        self.file
+            .as_ref()
+            .ok_or_else(|| io::Error::other("provider probe capture is closed"))?
+            .metadata()
+            .map(|metadata| metadata.len())
+    }
+
+    fn truncate_to_limit(&mut self) {
+        if let Some(file) = self.file.as_mut() {
+            let _ = file.set_len(MAX_PROBE_OUTPUT_BYTES as u64);
+        }
+    }
 }
 
 impl Drop for ProbeCapture {
@@ -80,16 +96,61 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
         .stdin(Stdio::null())
         .stdout(capture.stdio()?)
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Provider probes are read-only discovery calls. Apply an inherited
+        // kernel file-size ceiling so a broken producer or descendant cannot
+        // allocate unbounded capture storage between monitor polls.
+        unsafe {
+            command.pre_exec(|| {
+                let limit = libc::rlimit {
+                    rlim_cur: MAX_PROBE_OUTPUT_BYTES as libc::rlim_t,
+                    rlim_max: MAX_PROBE_OUTPUT_BYTES as libc::rlim_t,
+                };
+                if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) == 0 {
+                    Ok(())
+                } else {
+                    Err(io::Error::last_os_error())
+                }
+            });
+        }
+    }
     hidden(&mut command);
     let mut child = command.spawn()?;
     let deadline = Instant::now() + PROBE_TIMEOUT;
     let status = loop {
-        if let Some(status) = child.try_wait()? {
+        let capture_len = match capture.len() {
+            Ok(capture_len) => capture_len,
+            Err(error) => {
+                terminate_child_tree(&mut child);
+                return Err(error);
+            }
+        };
+        if capture_len > MAX_PROBE_OUTPUT_BYTES as u64 {
+            terminate_child_tree(&mut child);
+            capture.truncate_to_limit();
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "provider probe exceeded the output limit",
+            ));
+        }
+        let child_status = match child.try_wait() {
+            Ok(child_status) => child_status,
+            Err(error) => {
+                terminate_child_tree(&mut child);
+                return Err(error);
+            }
+        };
+        if let Some(status) = child_status {
+            // A probe is not allowed to leave descendants behind. On Unix the
+            // dedicated process group remains addressable after its leader
+            // exits; Windows uses taskkill's tree mode on a best-effort basis.
+            terminate_child_tree(&mut child);
             break status;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_child_tree(&mut child);
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "provider probe timed out",
@@ -148,9 +209,37 @@ pub(crate) fn hidden(command: &mut Command) -> &mut Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
     }
     command
+}
+
+pub(crate) fn terminate_child_tree(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let pid = child.id();
+        let mut command = Command::new("taskkill");
+        command
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+        let _ = command.status();
+    }
+    #[cfg(unix)]
+    unsafe {
+        // All approved provider commands are placed in a dedicated process
+        // group by hidden(). A negative PID targets that complete group.
+        let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -436,6 +525,33 @@ mod tests {
         assert_eq!(resolved.len(), 1);
         assert!(resolved[0].is_absolute());
         assert_eq!(resolved[0], std::fs::canonicalize(current).unwrap());
+    }
+
+    #[test]
+    fn probe_capture_never_returns_more_than_the_output_budget() {
+        #[cfg(windows)]
+        let command = {
+            let mut command = Command::new("powershell.exe");
+            command.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Console]::Out.Write('x' * 131072)",
+            ]);
+            command
+        };
+        #[cfg(unix)]
+        let command = {
+            let mut command = Command::new("sh");
+            command.args(["-c", "dd if=/dev/zero bs=131072 count=1 2>/dev/null"]);
+            command
+        };
+
+        match run_probe(command) {
+            Ok(output) => assert!(output.stdout.len() <= MAX_PROBE_OUTPUT_BYTES),
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
+        }
     }
 
     #[cfg(unix)]

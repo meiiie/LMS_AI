@@ -26,6 +26,10 @@ method and logical target before dispatch.
   while the original caller may still be running. Startup recovery, rather than
   a concurrent caller, converts abandoned pre-side-effect requests into
   explicit continuity loss.
+- Stable request syntax is validated before lookup; volatile workspace
+  availability is checked only for a new execution. A recorded or unresolved
+  start therefore remains replayable if its workspace was renamed or is
+  temporarily unavailable.
 
 Completed and failed request identities are replayable for 90 days. Startup
 maintenance may prune them after that window. Requests in `accepted`,
@@ -48,6 +52,11 @@ side effect to be repeated.
 `session/write` exists as a private transport primitive for the current ACP
 and Codex adapters. It is scoped to a Rust-owned agent-session identity and is
 idempotent by request ID. It does not accept a PID or executable.
+
+Provider discovery captures are owner-only and output-bounded while the probe
+is running. Probe and agent launches use isolated process groups; timeout,
+output overflow, helper-thread failure and shutdown terminate the owned process
+tree rather than dropping a live child handle.
 
 The legacy Workbench compatibility binding maps its stable visible session to
 one Task. Every `RuntimeRegistry` replacement maps to a fresh Run and
