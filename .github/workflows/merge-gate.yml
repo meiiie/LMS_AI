@@ -63,7 +63,7 @@ jobs:
 
           {
             echo "backend=$(match '^maritime-ai-service/')"
-            echo "desktop=$(match '^wiii-desktop/')"
+            echo "desktop=$(match '^wiii-desktop/|^\.github/workflows/merge-gate\.yml$')"
             echo "docker=$(match '(^|/)(Dockerfile|Dockerfile\..*)$|^maritime-ai-service/(Dockerfile|nginx/|docker-compose|compose)|^\.dockerignore$')"
             echo "github=$(match '^\.github/|^\.coderabbit\.yaml$')"
             echo "docs=$(match '^docs/|^README\.md$|^CONTRIBUTING\.md$|^CODE_OF_CONDUCT\.md$')"
