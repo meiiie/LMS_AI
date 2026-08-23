@@ -18,7 +18,16 @@ import {
   toCompatibilitySettingsRole,
 } from "@/lib/auth-user";
 import { DEFAULT_SERVER_URL } from "@/lib/constants";
-import { CheckCircle2, ChevronDown, LoaderCircle, Server } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  ChevronDown,
+  Cloud,
+  Database,
+  History,
+  LoaderCircle,
+  Server,
+} from "lucide-react";
 
 // Dynamic import that bypasses Vite static analysis (plugin may not be installed)
 const _oauthMod = "@fabianlars/tauri-plugin-oauth";
@@ -485,97 +494,80 @@ export function LoginScreen({ onOpenLocal }: { onOpenLocal?: () => void }) {
       {/* Frameless window: without this the login surface has no close/
           minimize/drag at all (live smoke finding, 2026-08-13). */}
       <TitleBar minimal />
-      <div className="flex-1 overflow-y-auto flex flex-col items-center pt-[10vh]">
-      <div className="w-full max-w-[360px] mx-auto flex flex-col items-center px-6">
-        {/* Full product mascot; animated conversation avatar remains inside chat. */}
-        <div className="mb-4" data-testid="wiii-mascot-lockup">
-          <WiiiMascot
-            size={108}
-            className="object-contain drop-shadow-[0_14px_24px_rgba(40,38,32,0.14)]"
-          />
-        </div>
-
-        {/* Title */}
-        <h1
-          className="text-[32px] font-normal text-text text-center leading-tight"
-          style={{ fontFamily: "var(--font-serif)" }}
-        >
-          Chào mừng đến Wiii Workbench
-        </h1>
-        <p className="mt-2 mb-7 text-[15px] text-text-tertiary text-center">
-          Không gian AI bền vững cho dự án, tri thức và agent của bạn
-        </p>
-
-        <section className="mb-4 w-full rounded-xl border border-border bg-surface/80" aria-label="Kết nối Wiii server">
-          <button
-            type="button"
-            className="flex h-10 w-full items-center gap-2 px-3 text-left text-xs text-text-secondary transition-colors hover:text-text"
-            aria-expanded={showConnection}
-            onClick={() => setShowConnection((value) => !value)}
-          >
-            <Server aria-hidden="true" size={14} />
-            <span className="min-w-0 flex-1 truncate">
-              {settings.server_url || "Chưa cấu hình Wiii server"}
-            </span>
-            {connectionState === "connected" ? (
-              <CheckCircle2 aria-hidden="true" size={14} className="text-green-600" />
-            ) : null}
-            <ChevronDown
-              aria-hidden="true"
-              size={13}
-              className={`transition-transform ${showConnection ? "rotate-180" : ""}`}
-            />
-          </button>
-          {showConnection ? (
-            <div className="border-t border-border px-3 pb-3 pt-2">
-              <label htmlFor="wiii-server-endpoint" className="text-[11px] font-medium text-text-tertiary">
-                Server URL
-              </label>
-              <div className="mt-1.5 flex gap-2">
-                <input
-                  id="wiii-server-endpoint"
-                  type="url"
-                  value={serverDraft}
-                  onChange={(event) => {
-                    setServerDraft(event.target.value);
-                    setConnectionState("idle");
-                    setConnectionMessage(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void handleSaveServer();
-                  }}
-                  placeholder="https://api.example.com"
-                  className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 text-xs text-text outline-none placeholder:text-text-quaternary focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/15"
-                />
-                <button
-                  type="button"
-                  disabled={!serverDraft.trim() || connectionState === "checking"}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-text px-3 text-xs font-medium text-surface transition-opacity hover:opacity-85 disabled:opacity-40"
-                  onClick={() => void handleSaveServer()}
-                >
-                  {connectionState === "checking" ? (
-                    <LoaderCircle aria-hidden="true" size={13} className="animate-spin" />
-                  ) : null}
-                  Lưu và thử
-                </button>
+      <main className="flex-1 overflow-y-auto px-5 py-8 sm:px-8 lg:py-12">
+        <div className="mx-auto grid min-h-full w-full max-w-[980px] items-start gap-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center lg:gap-16">
+          <section className="max-w-[460px]" aria-labelledby="wiii-service-title">
+            <div className="mb-7 flex items-center gap-4" data-testid="wiii-mascot-lockup">
+              <WiiiMascot
+                size={82}
+                className="object-contain drop-shadow-[0_14px_24px_rgba(40,38,32,0.14)]"
+              />
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">
+                  Wiii Service · Tùy chọn
+                </p>
+                <p className="mt-1 text-sm text-text-secondary">Wiii Service</p>
               </div>
-              {connectionMessage ? (
-                <p
-                  className={`mt-2 text-[10.5px] leading-4 ${connectionState === "error" ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}
-                  role={connectionState === "error" ? "alert" : "status"}
-                >
-                  {connectionMessage}
-                </p>
-              ) : (
-                <p className="mt-2 text-[10px] leading-4 text-text-quaternary">
-                  {onOpenLocal
-                    ? "Bản desktop không dùng địa chỉ nội bộ của WebView làm API endpoint."
-                    : "Bản web kết nối Wiii Service từ xa; không mở tiến trình hoặc tệp cục bộ."}
-                </p>
-              )}
             </div>
-          ) : null}
-        </section>
+
+            <h1
+              id="wiii-service-title"
+              className="max-w-[430px] text-[38px] font-normal leading-[1.08] text-text sm:text-[46px]"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              Kết nối Wiii Service
+            </h1>
+            <p className="mt-4 max-w-[430px] text-[15px] leading-6 text-text-tertiary">
+              Bật đồng bộ, tri thức, bộ nhớ và không gian tổ chức khi bạn cần.
+              Agent và dự án cục bộ của Wiii vẫn hoạt động mà không cần tài khoản.
+            </p>
+
+            <div className="mt-7 grid gap-3" aria-label="Năng lực của Wiii Service">
+              {[
+                { icon: Cloud, title: "Đồng bộ bền vững", detail: "Tiếp tục công việc giữa các thiết bị và môi trường." },
+                { icon: Database, title: "Knowledge & Memory", detail: "Mang tri thức và ngữ cảnh dài hạn vào từng tác vụ." },
+                { icon: History, title: "Tổ chức & kiểm toán", detail: "Chính sách, kết nối và lịch sử cho nhóm của bạn." },
+              ].map(({ icon: Icon, title, detail }) => (
+                <div key={title} className="flex items-start gap-3 rounded-2xl border border-border/70 bg-surface/55 px-4 py-3">
+                  <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-surface-tertiary text-text-secondary">
+                    <Icon aria-hidden="true" size={16} />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-medium text-text">{title}</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-text-tertiary">{detail}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {onOpenLocal ? (
+              <button
+                onClick={onOpenLocal}
+                className="mt-7 flex w-full max-w-[430px] items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3.5 text-left shadow-sm transition-all hover:border-[var(--border-secondary)] hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35"
+                data-testid="login-neko-chill-escape"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-text text-surface">
+                  <ArrowLeft aria-hidden="true" size={17} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-text">Tiếp tục với Wiii cục bộ</span>
+                  <span className="mt-0.5 block text-xs text-text-tertiary">Không cần tài khoản · dữ liệu và agent ở trên máy này</span>
+                </span>
+              </button>
+            ) : (
+              <p className="mt-7 max-w-[430px] rounded-2xl border border-border bg-surface/70 px-4 py-3 text-xs leading-5 text-text-tertiary">
+                Bản web sử dụng Wiii Service để lưu và điều phối công việc; quyền tiến trình và tệp cục bộ không được cấp.
+              </p>
+            )}
+          </section>
+
+          <section className="w-full max-w-[410px] justify-self-center rounded-[28px] border border-border bg-surface/90 p-5 shadow-[0_20px_70px_rgba(40,38,32,0.10)] sm:p-7" aria-label="Đăng nhập Wiii Service">
+            <div className="mb-5">
+              <h2 className="text-lg font-semibold text-text">Đăng nhập để bật dịch vụ</h2>
+              <p className="mt-1 text-xs leading-5 text-text-tertiary">
+                Tài khoản chỉ áp dụng cho các năng lực được quản lý của Wiii Service.
+              </p>
+            </div>
 
         {/* Issue #88: One-click local dev login. Visible only when running
             on localhost AND the backend has enable_dev_login=true. Styled
@@ -719,23 +711,83 @@ export function LoginScreen({ onOpenLocal }: { onOpenLocal?: () => void }) {
           </div>
         )}
 
-        {/* Desktop-only escape hatch. Hosted web has no local process or
-            workspace authority, so it must never advertise this action. */}
-        {onOpenLocal ? (
+        <section className="mt-5 w-full rounded-xl border border-border bg-surface-secondary/45" aria-label="Kết nối nâng cao">
           <button
-            onClick={onOpenLocal}
-            className="mt-4 text-sm text-text-secondary hover:text-text-primary underline underline-offset-4 transition-colors"
-            data-testid="login-neko-chill-escape"
+            type="button"
+            className="flex h-10 w-full items-center gap-2 px-3 text-left text-xs text-text-secondary transition-colors hover:text-text"
+            aria-expanded={showConnection}
+            onClick={() => setShowConnection((value) => !value)}
           >
-            Dùng không cần tài khoản — mở không gian cục bộ
+            <Server aria-hidden="true" size={14} />
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">Kết nối nâng cao</span>
+              <span className="ml-2 text-text-quaternary">{settings.server_url || "Chưa cấu hình endpoint"}</span>
+            </span>
+            {connectionState === "connected" ? (
+              <CheckCircle2 aria-hidden="true" size={14} className="text-green-600" />
+            ) : null}
+            <ChevronDown
+              aria-hidden="true"
+              size={13}
+              className={`transition-transform ${showConnection ? "rotate-180" : ""}`}
+            />
           </button>
-        ) : null}
+          {showConnection ? (
+            <div className="border-t border-border px-3 pb-3 pt-2">
+              <label htmlFor="wiii-server-endpoint" className="text-[11px] font-medium text-text-tertiary">
+                Endpoint Wiii Service
+              </label>
+              <div className="mt-1.5 flex gap-2">
+                <input
+                  id="wiii-server-endpoint"
+                  type="url"
+                  value={serverDraft}
+                  onChange={(event) => {
+                    setServerDraft(event.target.value);
+                    setConnectionState("idle");
+                    setConnectionMessage(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void handleSaveServer();
+                  }}
+                  placeholder="https://api.example.com"
+                  className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 text-xs text-text outline-none placeholder:text-text-quaternary focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/15"
+                />
+                <button
+                  type="button"
+                  disabled={!serverDraft.trim() || connectionState === "checking"}
+                  className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-text px-3 text-xs font-medium text-surface transition-opacity hover:opacity-85 disabled:opacity-40"
+                  onClick={() => void handleSaveServer()}
+                >
+                  {connectionState === "checking" ? (
+                    <LoaderCircle aria-hidden="true" size={13} className="animate-spin" />
+                  ) : null}
+                  Lưu và thử
+                </button>
+              </div>
+              {connectionMessage ? (
+                <p
+                  className={`mt-2 text-[10.5px] leading-4 ${connectionState === "error" ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}
+                  role={connectionState === "error" ? "alert" : "status"}
+                >
+                  {connectionMessage}
+                </p>
+              ) : (
+                <p className="mt-2 text-[10px] leading-4 text-text-quaternary">
+                  {onOpenLocal
+                    ? "Chỉ thay đổi khi bạn dùng một Wiii Service riêng. Wiii cục bộ không cần endpoint này."
+                    : "Bản web kết nối Wiii Service từ xa; không mở tiến trình hoặc tệp cục bộ."}
+                </p>
+              )}
+            </div>
+          ) : null}
+        </section>
 
         {/* Developer mode toggle */}
         {!showDevMode ? (
           <button
             onClick={() => setShowDevMode(true)}
-            className="mt-3 text-[10px] text-text-quaternary hover:text-text-tertiary transition-colors"
+            className="mt-3 w-full text-center text-[10px] text-text-quaternary hover:text-text-tertiary transition-colors"
           >
             Chế độ nhà phát triển
           </button>
@@ -763,7 +815,7 @@ export function LoginScreen({ onOpenLocal }: { onOpenLocal?: () => void }) {
         )}
 
         {/* Footer — Terms & Privacy */}
-        <div className="text-center mt-8 space-y-1.5">
+        <div className="text-center mt-6 space-y-1.5">
           <p className="text-[11px] text-text-tertiary leading-relaxed">
             Bằng việc tiếp tục, bạn đồng ý với{" "}
             <a
@@ -786,8 +838,9 @@ export function LoginScreen({ onOpenLocal }: { onOpenLocal?: () => void }) {
           </p>
           <p className="text-[10px] text-text-quaternary">by The Wiii Lab</p>
         </div>
-      </div>
-      </div>
+          </section>
+        </div>
+      </main>
     </div>
   );
 }

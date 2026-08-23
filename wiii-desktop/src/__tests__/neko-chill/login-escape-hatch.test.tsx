@@ -41,7 +41,7 @@ vi.mock("@/components/common/WiiiAvatar", () => ({
 
 import { LoginScreen } from "@/components/auth/LoginScreen";
 
-describe("LoginScreen — local Workbench escape hatch (#923)", () => {
+describe("LoginScreen — optional Wiii Service gateway (#945)", () => {
   beforeEach(() => {
     cleanup();
     storage.clear();
@@ -50,8 +50,10 @@ describe("LoginScreen — local Workbench escape hatch (#923)", () => {
   it("delegates navigation to the Workbench boundary", async () => {
     const onOpenLocal = vi.fn();
     render(<LoginScreen onOpenLocal={onOpenLocal} />);
+    expect(screen.getByRole("heading", { name: "Kết nối Wiii Service" })).toBeTruthy();
+    expect(screen.getByText(/Agent và dự án cục bộ của Wiii vẫn hoạt động/i)).toBeTruthy();
     const escape = await screen.findByTestId("login-neko-chill-escape");
-    expect(escape.textContent).toContain("không gian cục bộ");
+    expect(escape.textContent).toContain("Tiếp tục với Wiii cục bộ");
 
     fireEvent.click(escape);
     expect(onOpenLocal).toHaveBeenCalledTimes(1);
@@ -60,7 +62,8 @@ describe("LoginScreen — local Workbench escape hatch (#923)", () => {
   it("does not advertise local authority on hosted web", () => {
     render(<LoginScreen />);
     expect(screen.queryByTestId("login-neko-chill-escape")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /localhost:8000/i }));
+    expect(screen.getByText(/Bản web sử dụng Wiii Service/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Kết nối nâng cao/i }));
     expect(screen.getByText(/Bản web kết nối Wiii Service từ xa/i)).toBeTruthy();
   });
 });

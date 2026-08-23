@@ -35,17 +35,20 @@ always `wiii-v<version>` and requires a dated matching section below.
 ### Changed
 
 - Desktop now opens local-first while existing managed-account intent migrates
-  additively; hosted web remains remote-authority-only.
-- Public executable and release artifact metadata now consistently use
-  `Wiii Workbench` while retaining the stable product and package identifiers
-  for in-place upgrades.
+  additively; empty/stale auth metadata no longer opens Wiii Service, while
+  hosted web remains remote-authority-only.
+- Reframed the authentication surface as the optional Wiii Service gateway,
+  with explicit managed-capability benefits, a prominent return to local Wiii,
+  and custom endpoints moved into advanced connection setup.
+- Public release artifacts and manifests now use the product name `Wiii`.
+  Candidate identities include their source commit, and Windows filenames state
+  whether the installer is unsigned or Authenticode-signed; stable internal
+  executable and bundle identifiers remain unchanged for in-place upgrades.
 - Repositioned Wiii as an open AI workbench and runtime. Learning-management
   systems are supported through Wiii Connect adapters rather than defining the
   product itself.
 - Rebuilt the desktop information architecture around sessions, workspaces,
   inspectable artifacts, and resilient local-first interaction.
-- Standardized public release assets under the `Wiii Workbench` name while
-  retaining stable internal identifiers for upgrade compatibility.
 - Unified backend package/runtime and desktop metadata under the repository
   `VERSION` source of truth.
 - Desktop release validation now runs once before a fail-independent platform

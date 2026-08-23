@@ -39,7 +39,7 @@ export function WorkbenchApp({
     return (
       loadingFallback ?? (
         <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground" role="status">
-          Đang mở Wiii Workbench…
+          Đang mở Wiii…
         </div>
       )
     );

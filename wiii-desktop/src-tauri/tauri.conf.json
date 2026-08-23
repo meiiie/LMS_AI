@@ -14,7 +14,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Wiii Workbench",
+        "title": "Wiii",
         "label": "main",
         "width": 1200,
         "height": 800,
@@ -28,7 +28,7 @@
       },
       {
         "label": "splashscreen",
-        "title": "Wiii Workbench",
+        "title": "Wiii",
         "url": "splashscreen.html",
         "width": 480,
         "height": 340,

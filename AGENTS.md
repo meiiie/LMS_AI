@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-08-15
+Last updated: 2026-08-24
 
 Applies to: Codex, Claude Code, CodeRabbit, and other AI-assisted engineering agents working in this repository.
 
@@ -60,6 +60,27 @@ Legacy local agent folders such as `.claude/` and `.Codex/` are not canonical an
 - Preserve Vietnamese-first user-facing copy in UI, prompts, and error messages unless the surrounding product surface is intentionally English.
 - For frontend-visible changes, include screenshots or a clear reason why visual evidence is not applicable.
 - For backend, auth, memory, tenant isolation, migration, provider/runtime, MCP, or deployment changes, include explicit risk and rollback notes.
+
+## Product Entry And Release Truth
+
+- The public product name remains **Wiii** until project leadership approves a
+  rename. `Workbench`, `ADE`, `Neko Chill`, and `Wiii Service` describe
+  surfaces or capabilities; they must not silently replace the product name.
+- Desktop is local-first. A local project or agent session must not require a
+  Wiii Service account. Wiii Service gates only managed capabilities such as
+  sync, organization, managed Knowledge/Memory, policy, audit, and remote runs.
+- Hosted web may require Wiii Service because it has no local process or
+  filesystem authority. Do not project that constraint onto desktop UX.
+- `VERSION` is coordinated source metadata, not proof of publication. A stable
+  release exists only when the governed tag, dated changelog, verified
+  artifacts, trust checks, provenance, and GitHub Release all agree.
+- Never reuse the same public artifact identity for different bytes. Candidate
+  filenames include the channel and source commit; stable filenames include
+  the immutable SemVer and explicit platform trust state where relevant.
+- Keep internal executable/bundle identifiers stable for upgrade compatibility
+  unless a migration plan is approved. Public titles and package names follow
+  `docs/releases/WIII_RELEASE_STANDARD.md` and machine checks in
+  `tools/release/`.
 
 ## Agent and Tool UX Direction
 

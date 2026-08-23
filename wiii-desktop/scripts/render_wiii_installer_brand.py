@@ -65,7 +65,7 @@ def render_header(mascot: Image.Image) -> None:
     character = contain(mascot, 43, 48)
     paste_with_shadow(canvas, character, (6, 4), blur=3, opacity=70)
 
-    draw.text((50, 10), "Wiii Workbench", font=font("seguisb.ttf", 13), fill=GRAPHITE)
+    draw.text((50, 10), "Wiii", font=font("seguisb.ttf", 13), fill=GRAPHITE)
     draw.text((51, 31), "THE WIII LAB", font=font("segoeui.ttf", 7), fill=(98, 96, 90))
     canvas.convert("RGB").save(ICON_DIR / "nsis-header.bmp")
 

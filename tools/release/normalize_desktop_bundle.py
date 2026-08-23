@@ -16,39 +16,56 @@ import wiii_release
 @dataclass(frozen=True)
 class BundleFile:
     source_pattern: str
-    public_suffix: str
+    candidate_suffix: str
+    stable_suffix: str
 
 
 @dataclass(frozen=True)
 class ReleaseTarget:
     files: tuple[BundleFile, ...]
+    candidate_trust_state: str
+    stable_trust_state: str
 
 
 RELEASE_TARGETS = {
     "windows-x64": ReleaseTarget(
-        files=(BundleFile("**/release/bundle/nsis/*-setup.exe", "windows-x64-setup.exe"),)
+        files=(BundleFile(
+            "**/release/bundle/nsis/*-setup.exe",
+            "windows-x64-unsigned-setup.exe",
+            "windows-x64-signed-setup.exe",
+        ),),
+        candidate_trust_state="unsigned",
+        stable_trust_state="authenticode-signed",
     ),
     "linux-x64": ReleaseTarget(
         files=(
-            BundleFile("**/release/bundle/deb/*.deb", "linux-x64.deb"),
-            BundleFile("**/release/bundle/appimage/*.AppImage", "linux-x64.AppImage"),
-        )
+            BundleFile("**/release/bundle/deb/*.deb", "linux-x64.deb", "linux-x64.deb"),
+            BundleFile("**/release/bundle/appimage/*.AppImage", "linux-x64.AppImage", "linux-x64.AppImage"),
+        ),
+        candidate_trust_state="checksummed",
+        stable_trust_state="checksummed",
     ),
     "macos-arm64": ReleaseTarget(
         files=(
             BundleFile(
                 "**/release/bundle/dmg/*.dmg",
                 "macos-arm64-unnotarized.dmg",
+                "macos-arm64-unnotarized.dmg",
             ),
-        )
+        ),
+        candidate_trust_state="ad-hoc-signed-unnotarized",
+        stable_trust_state="ad-hoc-signed-unnotarized",
     ),
     "macos-x64": ReleaseTarget(
         files=(
             BundleFile(
                 "**/release/bundle/dmg/*.dmg",
                 "macos-x64-unnotarized.dmg",
+                "macos-x64-unnotarized.dmg",
             ),
-        )
+        ),
+        candidate_trust_state="ad-hoc-signed-unnotarized",
+        stable_trust_state="ad-hoc-signed-unnotarized",
     ),
 }
 
@@ -70,11 +87,14 @@ def normalize_bundle(
     release_target: str,
     version: str,
     git_sha: str,
+    release_channel: str,
 ) -> dict[str, object]:
     if release_target not in RELEASE_TARGETS:
         choices = ", ".join(sorted(RELEASE_TARGETS))
         raise ValueError(f"unsupported release target {release_target!r}; choose one of: {choices}")
     version = wiii_release.validate_semver(version)
+    release_channel = wiii_release.validate_release_channel(release_channel)
+    identity = wiii_release.build_identity(version, release_channel, git_sha)
     if not source_root.is_dir():
         raise ValueError(f"Tauri target directory does not exist: {source_root}")
 
@@ -82,9 +102,12 @@ def normalize_bundle(
     normalized: list[Path] = []
     for bundle_file in RELEASE_TARGETS[release_target].files:
         source = _find_exactly_one(source_root, bundle_file.source_pattern)
-        destination = output_directory / (
-            f"Wiii-Workbench_{version}_{bundle_file.public_suffix}"
+        suffix = (
+            bundle_file.stable_suffix
+            if release_channel == "stable"
+            else bundle_file.candidate_suffix
         )
+        destination = output_directory / f"Wiii-{identity}-{suffix}"
         shutil.copy2(source, destination)
         checksum = wiii_release.sha256(destination)
         destination.with_name(f"{destination.name}.sha256").write_text(
@@ -92,15 +115,26 @@ def normalize_bundle(
         )
         normalized.append(destination)
 
-    manifest = wiii_release.build_manifest(normalized, version, git_sha)
-    manifest_path = output_directory / (
-        f"Wiii-Workbench_{version}_{release_target}_release-manifest.json"
+    target = RELEASE_TARGETS[release_target]
+    trust_state = (
+        target.stable_trust_state
+        if release_channel == "stable"
+        else target.candidate_trust_state
     )
+    manifest = wiii_release.build_manifest(
+        normalized,
+        version,
+        git_sha,
+        release_channel=release_channel,
+        trust_state=trust_state,
+    )
+    manifest_path = output_directory / f"Wiii-{identity}-{release_target}-release-manifest.json"
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     return {
         "release_target": release_target,
+        "release_channel": release_channel,
         "artifacts": [str(path) for path in normalized],
         "manifest": str(manifest_path),
     }
@@ -113,6 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-target", choices=sorted(RELEASE_TARGETS), required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--git-sha", required=True)
+    parser.add_argument("--release-channel", choices=("candidate", "stable"), required=True)
     return parser
 
 
@@ -125,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             release_target=args.release_target,
             version=args.version,
             git_sha=args.git_sha,
+            release_channel=args.release_channel,
         )
     except (OSError, ValueError) as exc:
         print(f"bundle normalization error: {exc}", file=sys.stderr)

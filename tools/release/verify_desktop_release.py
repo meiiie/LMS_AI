@@ -12,10 +12,17 @@ import wiii_release
 
 
 TARGET_SUFFIXES = {
-    "windows-x64": ("windows-x64-setup.exe",),
+    "windows-x64": ("windows-x64-signed-setup.exe",),
     "linux-x64": ("linux-x64.deb", "linux-x64.AppImage"),
     "macos-arm64": ("macos-arm64-unnotarized.dmg",),
     "macos-x64": ("macos-x64-unnotarized.dmg",),
+}
+
+TARGET_TRUST_STATES = {
+    "windows-x64": "authenticode-signed",
+    "linux-x64": "checksummed",
+    "macos-arm64": "ad-hoc-signed-unnotarized",
+    "macos-x64": "ad-hoc-signed-unnotarized",
 }
 
 RELEASE_SCOPES = {
@@ -25,18 +32,18 @@ RELEASE_SCOPES = {
 
 
 def _binary_name(version: str, suffix: str) -> str:
-    return f"Wiii-Workbench_{version}_{suffix}"
+    return f"Wiii-{version}-{suffix}"
 
 
 def _manifest_name(version: str, target: str) -> str:
-    return f"Wiii-Workbench_{version}_{target}_release-manifest.json"
+    return f"Wiii-{version}-{target}-release-manifest.json"
 
 
 def _release_contract_file(path: Path) -> bool:
     name = path.name
-    return name.startswith("Wiii-Workbench_") and (
+    return name.startswith("Wiii-") and (
         name.endswith((".exe", ".deb", ".AppImage", ".dmg", ".sha256"))
-        or name.endswith("_release-manifest.json")
+        or name.endswith("-release-manifest.json")
     )
 
 
@@ -108,9 +115,12 @@ def verify_release_assets(
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid JSON manifest for {target}: {exc}") from exc
         expected_headers = {
-            "schema": "wiii.release-manifest.v1",
-            "product": "Wiii Workbench",
+            "schema": "wiii.release-manifest.v2",
+            "product": "Wiii",
             "version": version,
+            "release_channel": "stable",
+            "build_identity": version,
+            "trust_state": TARGET_TRUST_STATES[target],
             "tag": wiii_release.canonical_tag(version),
             "git_sha": git_sha,
         }
