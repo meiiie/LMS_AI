@@ -1608,6 +1608,18 @@ fn bounded_error(error: &impl std::fmt::Display) -> String {
 mod tests {
     use super::*;
 
+    fn runtime_test_path() -> std::path::PathBuf {
+        std::env::temp_dir()
+            .join(format!("wiii-runtime-{}", uuid::Uuid::new_v4()))
+            .join("runtime.sqlite3")
+    }
+
+    fn remove_runtime_test_directory(path: &Path) {
+        if let Some(directory) = path.parent() {
+            let _ = std::fs::remove_dir_all(directory);
+        }
+    }
+
     #[test]
     fn logical_target_hashes_frames_without_persisting_them() {
         let a = digest_target(&["session-1", "{\"token\":\"secret-a\"}"]);
@@ -1720,8 +1732,7 @@ mod tests {
 
     #[test]
     fn shutdown_state_fail_closes_future_starts() {
-        let path =
-            std::env::temp_dir().join(format!("wiii-runtime-{}.sqlite3", uuid::Uuid::new_v4()));
+        let path = runtime_test_path();
         {
             let runtime = NekoRuntime::open(&path).unwrap();
             assert!(runtime.ensure_accepting_starts().is_ok());
@@ -1731,16 +1742,12 @@ mod tests {
                 .unwrap_err()
                 .contains("shutting down"));
         }
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3.lock"));
+        remove_runtime_test_directory(&path);
     }
 
     #[test]
     fn in_flight_exit_supervision_blocks_hydration_and_matching_cancellation() {
-        let path =
-            std::env::temp_dir().join(format!("wiii-runtime-{}.sqlite3", uuid::Uuid::new_v4()));
+        let path = runtime_test_path();
         {
             let runtime = NekoRuntime::open(&path).unwrap();
             lock(&runtime.inner.exit_supervisions).insert("session-1".into());
@@ -1756,16 +1763,12 @@ mod tests {
                 .ensure_exit_supervision_complete(Some("session-2"), "session cancellation")
                 .is_ok());
         }
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3.lock"));
+        remove_runtime_test_directory(&path);
     }
 
     #[test]
     fn shutdown_waits_for_published_exit_supervision() {
-        let path =
-            std::env::temp_dir().join(format!("wiii-runtime-{}.sqlite3", uuid::Uuid::new_v4()));
+        let path = runtime_test_path();
         {
             let runtime = NekoRuntime::open(&path).unwrap();
             lock(&runtime.inner.exit_supervisions).insert("session-1".into());
@@ -1778,25 +1781,18 @@ mod tests {
             worker.join().unwrap();
             assert!(lock(&runtime.inner.exit_supervisions).is_empty());
         }
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3.lock"));
+        remove_runtime_test_directory(&path);
     }
 
     #[test]
     fn one_native_runtime_owns_the_local_journal() {
-        let path =
-            std::env::temp_dir().join(format!("wiii-runtime-{}.sqlite3", uuid::Uuid::new_v4()));
+        let path = runtime_test_path();
         {
             let first = NekoRuntime::open(&path).unwrap();
             assert!(NekoRuntime::open(&path).is_err());
             drop(first);
             assert!(NekoRuntime::open(&path).is_ok());
         }
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
-        let _ = std::fs::remove_file(path.with_extension("sqlite3.lock"));
+        remove_runtime_test_directory(&path);
     }
 }

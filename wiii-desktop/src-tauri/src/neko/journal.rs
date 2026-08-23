@@ -63,6 +63,7 @@ fn prepare_private_journal_path(path: &Path) -> Result<(), String> {
     }
     OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .mode(0o600)
@@ -2088,8 +2089,8 @@ mod tests {
 
     #[test]
     fn retained_terminal_fact_survives_a_real_journal_restart() {
-        let path =
-            std::env::temp_dir().join(format!("wiii-neko-retained-{}.sqlite3", Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("wiii-neko-retained-{}", Uuid::new_v4()));
+        let path = directory.join("runtime.sqlite3");
         {
             let journal = Journal::open(&path).unwrap();
             journal
@@ -2133,12 +2134,7 @@ mod tests {
         assert_eq!(session.operation_phase, OperationPhase::Committed);
         assert_eq!(reopened.pending_terminal_facts().unwrap().len(), 1);
         drop(reopened);
-        let _ = std::fs::remove_file(&path);
-        for suffix in ["-wal", "-shm"] {
-            let mut sidecar = path.as_os_str().to_os_string();
-            sidecar.push(suffix);
-            let _ = std::fs::remove_file(std::path::PathBuf::from(sidecar));
-        }
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
