@@ -86,6 +86,12 @@ and arguments, owns the child process, journals lifecycle facts and returns
 replayable state. The TypeScript control client is a thin protocol adapter and
 does not receive executable paths, PIDs or argument vectors.
 
+On Workbench hydration, React lists the native records and consumes each
+matching run stream from its last persisted cursor before the restored session
+becomes usable. This is read-model reconciliation, not a second authority:
+native `unknown_outcome` and active sessions without a live renderer transport
+stay locked against automatic respawn.
+
 Phase 2A intentionally remains inside `Wiii.exe`. It is **not** a standalone,
 crash-independent daemon: a graceful Wiii exit cancels owned children, while a
 hard restart conservatively reports continuity loss or `unknown_outcome` from
@@ -140,6 +146,9 @@ Implemented across the foundation and Phase 2A slices:
 - an in-process Rust runtime with one-writer file lease and SQLite WAL;
 - Rust-owned provider resolution, approved arguments and process/session maps;
 - request-id idempotency for start, provider-frame write and cancellation;
+- caller-level start retry retains the same logical identity after unresolved
+  IPC delivery; completed/failed identities have a 90-day replay window while
+  uncertain identities are not automatically pruned;
 - conservative recovery phases: `accepted`, `dispatched`,
   `side_effect_started`, `committed`, `completed`, `failed` and
   `unknown_outcome`;
@@ -148,6 +157,8 @@ Implemented across the foundation and Phase 2A slices:
 - provider/session/events Tauri commands with no WebView permission for raw
   executable, argument vector, PID or unscoped stdin primitives;
 - one TypeScript control client for discovery, replay and live transport;
+- shutdown admission closes before process drain, and Unix provider probes use
+  bounded owner-only capture files;
 - driver-observed capability facts and durable attach snapshots;
 - backward-compatible loading of pre-snapshot local session events.
 

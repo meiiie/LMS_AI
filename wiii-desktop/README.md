@@ -36,6 +36,11 @@ bounded lifecycle facts only; provider frames, prompts and high-volume output
 remain with their existing protocol/session owners. A standalone daemon is a
 later phase and is not implied by this boundary.
 
+Restored local sessions reconcile native state and cursor replay before the UI
+can resume work. An uncertain or still-active native execution without a live
+renderer channel is shown fail-closed instead of being silently started a
+second time.
+
 Wiii Knowledge is independent from the selected runtime. When enabled, its
 retrieved evidence and citation metadata cross the same durability barrier as
 the user prompt before any model can observe them. A RAG outage degrades that

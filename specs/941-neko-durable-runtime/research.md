@@ -33,6 +33,11 @@ effect. Completed requests replay their recorded result. Requests that may
 have crossed the side-effect boundary return `unknown_outcome` and are never
 automatically repeated.
 
+The TypeScript bridge keeps an unresolved start's request and agent-session
+identity across a caller-level retry after both bounded IPC attempts fail.
+Only an authoritative success or deterministic native rejection clears that
+identity.
+
 The journal stores method and logical target identity, not raw request bodies.
 This prevents credential or prompt capture and detects request-ID collisions.
 
@@ -48,9 +53,10 @@ become authoritative alone.
 Startup maintenance keeps at most 10,000 lifecycle events per run and removes
 events older than 30 days, while retaining each stream's latest event as its
 sequence high-water mark. Terminal session detail is retained for 90 days;
-active sessions and request-identity records are not pruned. The WAL is then
-checkpointed with `TRUNCATE`. A retained stream therefore never reuses a prior
-sequence after history compaction.
+completed/failed request identities are also retained for a 90-day retry
+window. Active and uncertain request identities are never pruned
+automatically. The WAL is then checkpointed with `TRUNCATE`. A retained stream
+therefore never reuses a prior sequence after history compaction.
 
 Large logs, terminal lines, provider frames, prompts, credentials and binary
 artifacts remain outside the database. A later manifested-file store can add
@@ -80,6 +86,11 @@ is durably accepted first and completed idempotent replay is resolved before a
 new probe, so unrelated sessions remain responsive without making replay
 depend on current provider availability.
 
+Shutdown marks the runtime closed while holding the lifecycle lock before it
+drains children. Starts re-check that admission gate after an unlocked probe,
+so an in-flight discovery cannot spawn after graceful cleanup returns. Probe
+capture is bounded, owner-only (`0600`) on Unix, and deleted on completion.
+
 ## Decision 7: Runtime replacement is a new Run
 
 The compatibility UI still uses one visible Neko session as its Task identity.
@@ -92,6 +103,15 @@ Provider stdout EOF is not an exit signal. The Rust reaper retains the child
 in the authority map and uses non-blocking exit polling, so cancellation and
 other lifecycle operations remain available even when a provider closes or
 redirects stdout while continuing to run.
+
+## Decision 8: Hydration reconciles native authority before UI state
+
+The visible Workbench transcript remains authoritative for user-facing
+messages, but restored sessions first list native session records and consume
+the matching run stream from their last persisted cursor. The session snapshot
+stores only a bounded reconciliation checkpoint. Native `unknown_outcome` and
+active sessions that no longer have a live renderer transport are fail-closed;
+React never treats its older snapshot as permission to spawn a replacement.
 
 ## Rejected alternatives
 

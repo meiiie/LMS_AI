@@ -109,6 +109,19 @@ export type NekoSessionEventData =
       reason: string;
     }
   | {
+      /** Durable read-model checkpoint derived from Neko's native journal. */
+      type: "native-runtime-reconciled";
+      agentSessionId: string;
+      runId: string;
+      providerId: string;
+      state: string;
+      operationPhase: string;
+      continuity: string;
+      replayedFromSeq: number;
+      replayedThroughSeq: number;
+      replayedEventCount: number;
+    }
+  | {
       type: "workspace-activity";
       activityId: string;
       title: string;
@@ -270,6 +283,27 @@ function isValidEventData(data: Record<string, unknown>): boolean {
       );
     case "runtime-attach-failed":
       return typeof data.providerId === "string" && typeof data.reason === "string";
+    case "native-runtime-reconciled":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        typeof data.providerId === "string" &&
+        data.providerId.length > 0 &&
+        typeof data.state === "string" &&
+        data.state.length > 0 &&
+        typeof data.operationPhase === "string" &&
+        data.operationPhase.length > 0 &&
+        typeof data.continuity === "string" &&
+        data.continuity.length > 0 &&
+        Number.isSafeInteger(data.replayedFromSeq) &&
+        (data.replayedFromSeq as number) >= 0 &&
+        Number.isSafeInteger(data.replayedThroughSeq) &&
+        (data.replayedThroughSeq as number) >= (data.replayedFromSeq as number) &&
+        Number.isSafeInteger(data.replayedEventCount) &&
+        (data.replayedEventCount as number) >= 0
+      );
     case "workspace-activity":
       return (
         typeof data.activityId === "string" &&

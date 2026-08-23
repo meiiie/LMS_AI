@@ -15,6 +15,9 @@ const MAX_REPLAY_LIMIT: u32 = 500;
 const MAX_EVENTS_PER_STREAM: i64 = 10_000;
 const EVENT_RETENTION_DAYS: i64 = 30;
 const TERMINAL_RECORD_RETENTION_DAYS: i64 = 90;
+/// Completed/failed request IDs remain replayable for this bounded window.
+/// In-flight and unknown outcomes are never pruned automatically.
+const TERMINAL_REQUEST_RETENTION_DAYS: i64 = 90;
 
 #[derive(Clone)]
 pub struct Journal {
@@ -180,6 +183,8 @@ impl Journal {
             .to_rfc3339_opts(SecondsFormat::Millis, true);
         let terminal_cutoff = (Utc::now() - Duration::days(TERMINAL_RECORD_RETENTION_DAYS))
             .to_rfc3339_opts(SecondsFormat::Millis, true);
+        let request_cutoff = (Utc::now() - Duration::days(TERMINAL_REQUEST_RETENTION_DAYS))
+            .to_rfc3339_opts(SecondsFormat::Millis, true);
         let mut connection = lock(&self.connection);
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -204,6 +209,14 @@ impl Journal {
                 params![event_cutoff, MAX_EVENTS_PER_STREAM],
             )
             .map_err(|error| format!("prune Neko control events failed: {error}"))?;
+        transaction
+            .execute(
+                "DELETE FROM control_requests
+                  WHERE phase IN ('completed', 'failed')
+                    AND updated_at < ?1",
+                [request_cutoff.as_str()],
+            )
+            .map_err(|error| format!("prune terminal Neko request identities failed: {error}"))?;
         transaction
             .execute(
                 "DELETE FROM runtime_sessions
@@ -1368,6 +1381,52 @@ mod tests {
                 )
                 .unwrap();
         }
+        for request_id in [
+            "old-completed",
+            "old-failed",
+            "old-unknown",
+            "old-accepted",
+            "fresh-completed",
+        ] {
+            assert_eq!(
+                journal
+                    .begin_request(request_id, "session/start", request_id)
+                    .unwrap(),
+                RequestDecision::Execute
+            );
+        }
+        journal
+            .set_request_phase("old-completed", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_request_phase("old-completed", OperationPhase::SideEffectStarted)
+            .unwrap();
+        journal
+            .set_request_phase("old-completed", OperationPhase::Committed)
+            .unwrap();
+        journal
+            .complete_request("old-completed", &json!({ "ok": true }))
+            .unwrap();
+        journal.fail_request("old-failed", "rejected").unwrap();
+        journal
+            .set_request_phase("old-unknown", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_request_phase("old-unknown", OperationPhase::SideEffectStarted)
+            .unwrap();
+        journal.mark_request_unknown("old-unknown").unwrap();
+        journal
+            .set_request_phase("fresh-completed", OperationPhase::Dispatched)
+            .unwrap();
+        journal
+            .set_request_phase("fresh-completed", OperationPhase::SideEffectStarted)
+            .unwrap();
+        journal
+            .set_request_phase("fresh-completed", OperationPhase::Committed)
+            .unwrap();
+        journal
+            .complete_request("fresh-completed", &json!({ "ok": true }))
+            .unwrap();
         {
             let connection = lock(&journal.connection);
             connection
@@ -1393,12 +1452,41 @@ mod tests {
                     [],
                 )
                 .unwrap();
+            connection
+                .execute(
+                    "UPDATE control_requests
+                        SET updated_at = '2020-01-01T00:00:00.000Z'
+                      WHERE request_id LIKE 'old-%'",
+                    [],
+                )
+                .unwrap();
         }
 
         journal.run_startup_maintenance().unwrap();
 
         assert!(journal.session("stale-terminal").unwrap().is_none());
         assert!(journal.session("stale-active").unwrap().is_some());
+        let request_phase = |request_id: &str| {
+            lock(&journal.connection)
+                .query_row(
+                    "SELECT phase FROM control_requests WHERE request_id = ?1",
+                    [request_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .unwrap()
+        };
+        assert_eq!(request_phase("old-completed"), None);
+        assert_eq!(request_phase("old-failed"), None);
+        assert_eq!(
+            request_phase("old-unknown").as_deref(),
+            Some("unknown_outcome")
+        );
+        assert_eq!(request_phase("old-accepted").as_deref(), Some("accepted"));
+        assert_eq!(
+            request_phase("fresh-completed").as_deref(),
+            Some("completed")
+        );
         let retained = journal.replay("run-a", 0, 10).unwrap();
         assert_eq!(retained.events.len(), 1);
         assert_eq!(retained.events[0].seq, 3);

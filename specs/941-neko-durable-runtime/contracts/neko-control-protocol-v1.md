@@ -12,8 +12,16 @@ method and logical target before dispatch.
 - Same request ID while outcome is uncertain: return `unknown_outcome`.
 - Same request ID with another method or target: return `invalid_request`.
 - The server never retries a side effect merely because a response was lost.
+- A client that exhausts its bounded IPC retry keeps the same logical
+  `requestId` and `agentSessionId` for the caller's next start attempt.
 - `provider_busy` proves a bounded writer queue rejected the frame before it
   was enqueued. A caller may retry that frame only with a new request ID.
+
+Completed and failed request identities are replayable for 90 days. Startup
+maintenance may prune them after that window. Requests in `accepted`,
+`dispatched`, `side_effect_started`, `committed`, or `unknown_outcome` are not
+automatically pruned: deleting those identities could permit an uncertain
+side effect to be repeated.
 
 ## Native methods implemented in Phase 2A
 
@@ -41,7 +49,9 @@ after request identity is durably accepted. Completed request replay is
 resolved before discovery, so a later provider upgrade or removal cannot
 invalidate a recorded start result. Provider stdout EOF does not prove process
 exit; Neko retains ownership and polls non-blockingly until exit or explicit
-release.
+release. Runtime shutdown closes start admission before draining children; a
+probe already in flight re-checks that gate before creating a session or
+spawning a process.
 
 ## Event ordering
 
@@ -90,6 +100,13 @@ Response:
 `nextAfterSeq` equals the last returned sequence or the caller cursor when no
 event is returned.
 
+During Workbench hydration, the compatibility read model lists native
+sessions, matches them to the visible Task, and consumes `events/read` from its
+last recorded cursor before the session becomes usable. It persists a bounded
+reconciliation checkpoint rather than copying native event payloads into the
+visible transcript. `unknown_outcome` and native-active sessions without a
+live renderer transport remain locked against automatic respawn.
+
 Lifecycle replay is retained for 30 days and capped at 10,000 events per run.
 The latest event in every known stream is retained as a sequence high-water
 mark, so compaction may create a historical gap but never resets or reuses a
@@ -116,3 +133,7 @@ Live-only in Phase 2A:
 These live payloads remain owned by current provider adapters and Workbench
 session persistence. Their absence from SQLite is an explicit security and
 volume boundary, not a claim of full daemon replay.
+
+Provider discovery captures only bounded output. On Unix, the temporary
+capture is created with owner-only mode `0600` and removed when the probe
+finishes.

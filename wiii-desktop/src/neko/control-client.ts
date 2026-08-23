@@ -57,6 +57,11 @@ interface NativeSessionStartResult {
   provider: NekoDetectedProvider;
 }
 
+interface UnresolvedStartIdentity {
+  requestId: string;
+  agentSessionId: string;
+}
+
 export interface NekoSpawnedProvider {
   provider: NekoDetectedProvider;
   agentSessionId: string;
@@ -85,6 +90,9 @@ function legacyExecution(
 }
 
 class TauriNekoControlClient implements NekoControlClient {
+  /** Caller retries reuse this identity until Rust gives a certain outcome. */
+  private readonly unresolvedStarts = new Map<string, UnresolvedStartIdentity>();
+
   async listProviders(): Promise<NekoDetectedProvider[]> {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -171,8 +179,21 @@ class TauriNekoControlClient implements NekoControlClient {
       request.clientSessionId,
       request.clientRunId,
     );
-    const requestId = uuidv4();
-    const agentSessionId = uuidv4();
+    const startKey = JSON.stringify([
+      provider.id,
+      execution.taskId,
+      execution.runId,
+      execution.environmentId,
+      request.workspacePath,
+      request.profileId ?? null,
+    ]);
+    const priorStart = this.unresolvedStarts.get(startKey);
+    const startIdentity = priorStart ?? {
+      requestId: uuidv4(),
+      agentSessionId: uuidv4(),
+    };
+    this.unresolvedStarts.set(startKey, startIdentity);
+    const { requestId, agentSessionId } = startIdentity;
     const { invoke } = await import("@tauri-apps/api/core");
     const { listen } = await import("@tauri-apps/api/event");
 
@@ -214,6 +235,9 @@ class TauriNekoControlClient implements NekoControlClient {
       });
     } catch (error) {
       detach();
+      if (this.unresolvedStarts.get(startKey) === startIdentity) {
+        this.unresolvedStarts.delete(startKey);
+      }
       throw error;
     }
 
@@ -235,10 +259,21 @@ class TauriNekoControlClient implements NekoControlClient {
         throw new Error("Neko trả về kết quả khởi động phiên không hợp lệ.");
       }
       started = result;
+      if (this.unresolvedStarts.get(startKey) === startIdentity) {
+        this.unresolvedStarts.delete(startKey);
+      }
     } catch (error) {
       detach();
       // A rejected start may represent unknown_outcome. Never issue a second
       // native side effect as cleanup without an authoritative start result.
+      // Native command rejections are deterministic strings. Bridge errors
+      // keep the identity so a caller-level retry cannot spawn twice.
+      if (
+        typeof error === "string" &&
+        this.unresolvedStarts.get(startKey) === startIdentity
+      ) {
+        this.unresolvedStarts.delete(startKey);
+      }
       throw error;
     }
 

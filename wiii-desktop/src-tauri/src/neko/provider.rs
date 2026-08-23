@@ -27,11 +27,16 @@ struct ProbeCapture {
 impl ProbeCapture {
     fn create() -> io::Result<Self> {
         let path = std::env::temp_dir().join(format!("wiii-neko-probe-{}.tmp", Uuid::new_v4()));
-        let file = OpenOptions::new()
-            .create_new(true)
-            .read(true)
-            .write(true)
-            .open(&path)?;
+        let mut options = OpenOptions::new();
+        options.create_new(true).read(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Provider version/profile output may expose local configuration.
+            // Do not inherit a permissive process umask for this capture file.
+            options.mode(0o600);
+        }
+        let file = options.open(&path)?;
         Ok(Self {
             path,
             file: Some(file),
@@ -431,5 +436,19 @@ mod tests {
         assert_eq!(resolved.len(), 1);
         assert!(resolved[0].is_absolute());
         assert_eq!(resolved[0], std::fs::canonicalize(current).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_capture_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let capture = ProbeCapture::create().unwrap();
+        let mode = std::fs::metadata(&capture.path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }

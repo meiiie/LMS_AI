@@ -9,6 +9,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, sync_channel, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -38,6 +39,7 @@ struct RuntimeInner {
     journal: Journal,
     processes: Mutex<HashMap<String, AgentProc>>,
     operations: Mutex<()>,
+    shutting_down: AtomicBool,
     _lease: File,
 }
 
@@ -112,6 +114,7 @@ impl NekoRuntime {
                 journal: Journal::open(path)?,
                 processes: Mutex::new(HashMap::new()),
                 operations: Mutex::new(()),
+                shutting_down: AtomicBool::new(false),
                 _lease: lease,
             }),
         })
@@ -179,7 +182,14 @@ impl NekoRuntime {
                         "session start has unknown_outcome; automatic replay is forbidden".into(),
                     );
                 }
-                RequestDecision::Execute => {}
+                RequestDecision::Execute => {
+                    if let Err(error) = self.ensure_accepting_starts() {
+                        self.inner
+                            .journal
+                            .fail_request(&request.request_id, "runtime_shutting_down")?;
+                        return Err(error);
+                    }
+                }
             }
         }
 
@@ -222,6 +232,18 @@ impl NekoRuntime {
             }
         };
         let _operation = lock(&self.inner.operations);
+        if let Err(error) = self.ensure_accepting_starts() {
+            return match self
+                .inner
+                .journal
+                .fail_request(&request.request_id, "runtime_shutting_down")
+            {
+                Ok(()) => Err(error),
+                Err(recording_error) => Err(format!(
+                    "{error}; additionally failed to persist rejected start: {recording_error}"
+                )),
+            };
+        }
 
         let created = self.inner.journal.insert_session_with_event(
             NewSession {
@@ -590,6 +612,9 @@ impl NekoRuntime {
 
     pub fn kill_all(&self, app: &AppHandle) {
         let _operation = lock(&self.inner.operations);
+        // Starts release the lifecycle lock while probing providers. Mark the
+        // authority closed before draining so a probe cannot spawn afterward.
+        self.inner.shutting_down.store(true, Ordering::Release);
         let processes = {
             let mut processes = lock(&self.inner.processes);
             processes.drain().collect::<Vec<_>>()
@@ -612,6 +637,13 @@ impl NekoRuntime {
                 }
             }
         }
+    }
+
+    fn ensure_accepting_starts(&self) -> Result<(), String> {
+        if self.inner.shutting_down.load(Ordering::Acquire) {
+            return Err("Neko runtime is shutting down; new sessions are rejected".to_string());
+        }
+        Ok(())
     }
 
     fn emit_control_event(
@@ -879,6 +911,25 @@ mod tests {
         assert!(validate_identity("runId", "run\n1").is_err());
         assert!(validate_channel_identity("agentSessionId", "session-1").is_ok());
         assert!(validate_channel_identity("agentSessionId", "session/escape").is_err());
+    }
+
+    #[test]
+    fn shutdown_state_fail_closes_future_starts() {
+        let path =
+            std::env::temp_dir().join(format!("wiii-runtime-{}.sqlite3", uuid::Uuid::new_v4()));
+        {
+            let runtime = NekoRuntime::open(&path).unwrap();
+            assert!(runtime.ensure_accepting_starts().is_ok());
+            runtime.inner.shutting_down.store(true, Ordering::Release);
+            assert!(runtime
+                .ensure_accepting_starts()
+                .unwrap_err()
+                .contains("shutting down"));
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3.lock"));
     }
 
     #[test]

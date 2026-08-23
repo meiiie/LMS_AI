@@ -66,9 +66,11 @@ driver factory supplies namespaced `legacy-local/*` execution references to
 the native service. This is a compatibility binding only and does not create
 or claim Wiii ADE entities.
 
-No existing Workbench transcript or provider session is rewritten. The new
-database starts as an additive local lifecycle journal. Unknown or corrupt
-journal state fails local Neko startup instead of silently deleting data.
+No visible message or provider session is rewritten. The new database starts
+as an additive local lifecycle journal. Hydration may append a bounded
+runtime-only reconciliation checkpoint to the Workbench snapshot after it
+consumes native replay. Unknown, unavailable or corrupt journal state fails
+local Neko hydration instead of silently deleting data or respawning an agent.
 
 ## Risk and rollback
 

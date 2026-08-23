@@ -100,6 +100,19 @@ describe("Neko session event validation", () => {
       providerInstanceId: "provider-1",
       delivery: "staged",
     }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "native-runtime-reconciled",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      state: "unknown_outcome",
+      operationPhase: "unknown_outcome",
+      continuity: "unknown_outcome",
+      replayedFromSeq: 2,
+      replayedThroughSeq: 7,
+      replayedEventCount: 5,
+    }))).toBe(true);
   });
 
   it.each([
@@ -113,6 +126,18 @@ describe("Neko session event validation", () => {
     { type: "runtime-attached", provider: { instanceId: "provider-1" } },
     { type: "runtime-detached", providerId: "neko", instanceId: "provider-1" },
     { type: "runtime-attach-failed", providerId: "neko" },
+    {
+      type: "native-runtime-reconciled",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      providerId: "neko",
+      state: "running",
+      operationPhase: "committed",
+      continuity: "active",
+      replayedFromSeq: 5,
+      replayedThroughSeq: 4,
+      replayedEventCount: 0,
+    },
   ])("rejects a malformed $type payload", (data) => {
     expect(isNekoSessionEvent({
       v: 1,

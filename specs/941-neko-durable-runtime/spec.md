@@ -146,6 +146,21 @@ side-effect/committed phases become `unknown_outcome`.
 - **FR-022**: Slow provider discovery and process-exit observation MUST NOT
   hold the global lifecycle-operation lock. EOF on provider stdout MUST NOT be
   treated as proof that the child process exited.
+- **FR-023**: Restored Workbench sessions MUST reconcile the matching native
+  session record and replay cursor before hydration becomes usable. Native
+  `unknown_outcome` or an unattached active process MUST fail closed rather
+  than trigger a replacement process.
+- **FR-024**: Completed and failed request identities MUST have a documented,
+  bounded retry window. Accepted, dispatched, side-effect-started, committed,
+  and `unknown_outcome` identities MUST NOT be pruned automatically.
+- **FR-025**: Runtime shutdown MUST close admission before draining owned
+  processes. A provider probe already in flight MUST re-check admission before
+  session creation or spawn.
+- **FR-026**: If both bounded IPC attempts lose a `session/start` response,
+  the TypeScript client MUST retain the same request and agent-session IDs for
+  a caller-level retry of that logical Run.
+- **FR-027**: Provider probe capture files MUST be created owner-only on Unix;
+  capture contents remain bounded and are deleted after the probe.
 
 ### Non-goals
 
@@ -167,3 +182,7 @@ side-effect/committed phases become `unknown_outcome`.
   TypeScript, Rust tests and desktop builds pass.
 - **SC-005**: Documentation states exactly which lifecycle events are durable
   and which high-volume/provider payloads remain live-only.
+- **SC-006**: Tests prove hydration consumes native replay before enabling a
+  restored session, shutdown rejects late starts, terminal request retention
+  is bounded without pruning uncertain identities, caller-level start retry
+  reuses one identity, and Unix probe captures use mode `0600`.

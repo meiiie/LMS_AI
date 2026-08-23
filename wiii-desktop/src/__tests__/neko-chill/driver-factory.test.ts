@@ -188,6 +188,48 @@ describe("Neko driver factory resource ownership", () => {
     expect(spawned.agentSessionId).toBe(startsCalls[0][1].request.agentSessionId);
   });
 
+  it("preserves an unresolved start identity across caller-level retries", async () => {
+    tauri.listen.mockResolvedValue(vi.fn());
+    let starts = 0;
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command !== "neko_control_session_start") return undefined;
+      starts += 1;
+      if (starts <= 2) throw new Error("both IPC responses were lost");
+      return {
+        agentSessionId: payload?.request.agentSessionId,
+        runId: payload?.request.runId,
+        provider: PROVIDER,
+      };
+    });
+
+    const request = {
+      providerId: "neko",
+      clientSessionId: "session-caller-retry",
+      clientRunId: "runtime-caller-retry",
+      workspacePath: "C:/tmp/project",
+    };
+    await expect(getNekoControlClient().spawnProvider(request)).rejects.toThrow(
+      "both IPC responses were lost",
+    );
+    const spawned = await getNekoControlClient().spawnProvider(request);
+
+    const startCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_start",
+    );
+    expect(startCalls).toHaveLength(3);
+    expect(startCalls.map(([, payload]) => payload.request.requestId)).toEqual([
+      startCalls[0][1].request.requestId,
+      startCalls[0][1].request.requestId,
+      startCalls[0][1].request.requestId,
+    ]);
+    expect(startCalls.map(([, payload]) => payload.request.agentSessionId)).toEqual([
+      startCalls[0][1].request.agentSessionId,
+      startCalls[0][1].request.agentSessionId,
+      startCalls[0][1].request.agentSessionId,
+    ]);
+    expect(spawned.agentSessionId).toBe(startCalls[0][1].request.agentSessionId);
+  });
+
   it("does not retry deterministic native command rejections", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     tauri.invoke.mockRejectedValue("invalid workspace");

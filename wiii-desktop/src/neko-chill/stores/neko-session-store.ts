@@ -45,6 +45,11 @@ import {
   useKnowledgeConnectionStore,
   type KnowledgeContext,
 } from "@/workbench/knowledge";
+import {
+  getNekoControlClient,
+  type NekoControlClient,
+  type NekoNativeSessionRecord,
+} from "@/neko/control-client";
 
 export interface NekoMessage {
   id: string;
@@ -142,6 +147,129 @@ type DriverFactory = (
   onEvent: (event: DriverEvent) => void,
   ownDriver: (driver: Driver) => void,
 ) => Promise<Driver>;
+
+type NativeControlReader = Pick<NekoControlClient, "listSessions" | "readEvents">;
+let nativeControlReaderFactory: () => NativeControlReader = getNekoControlClient;
+
+const NATIVE_REPLAY_PAGE_SIZE = 500;
+const MAX_NATIVE_REPLAY_EVENTS = 10_000;
+const NATIVE_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
+
+function nativeTaskId(sessionId: string): string {
+  return `legacy-local/task/${sessionId}`;
+}
+
+function latestNativeSession(
+  sessions: NekoNativeSessionRecord[],
+  sessionId: string,
+): NekoNativeSessionRecord | null {
+  const candidates = sessions.filter((candidate) => candidate.taskId === nativeTaskId(sessionId));
+  candidates.sort((left, right) => {
+    const timestamp = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+    return timestamp || right.agentSessionId.localeCompare(left.agentSessionId);
+  });
+  return candidates[0] ?? null;
+}
+
+function lastNativeCursor(session: NekoSession, runId: string): number {
+  for (let index = session.events.length - 1; index >= 0; index -= 1) {
+    const data = session.events[index].data;
+    if (data.type === "native-runtime-reconciled" && data.runId === runId) {
+      return data.replayedThroughSeq;
+    }
+  }
+  return 0;
+}
+
+function nativeRunBlocksRespawn(session: NekoSession): boolean {
+  for (let index = session.events.length - 1; index >= 0; index -= 1) {
+    const data = session.events[index].data;
+    if (data.type === "runtime-attached") return false;
+    if (data.type !== "native-runtime-reconciled") continue;
+    return (
+      data.state === "unknown_outcome" ||
+      data.operationPhase === "unknown_outcome" ||
+      !NATIVE_TERMINAL_STATES.has(data.state)
+    );
+  }
+  return false;
+}
+
+function reconcileNativeStatus(session: NekoSession, native: NekoNativeSessionRecord): void {
+  if (native.state === "unknown_outcome" || native.operationPhase === "unknown_outcome") {
+    session.status = "error";
+    session.statusDetail =
+      "Lần chạy native có kết quả chưa xác định. Neko không tự chạy lại; hãy kiểm tra trước khi tạo lần chạy mới.";
+    return;
+  }
+  if (NATIVE_TERMINAL_STATES.has(native.state)) {
+    session.status = "exited";
+    session.statusDetail = native.state === "completed"
+      ? "Lần chạy native gần nhất đã hoàn tất. Nhắn tiếp để tạo một lần chạy mới."
+      : native.state === "cancelled"
+        ? "Lần chạy native gần nhất đã được hủy. Nhắn tiếp để tạo một lần chạy mới."
+        : "Lần chạy native gần nhất đã thất bại. Nhắn tiếp để tạo một lần chạy mới.";
+    return;
+  }
+  // Phase 2A cannot reattach a renderer transport to an already-running
+  // native process. Keep the visible session closed instead of spawning a
+  // competing process from stale React state.
+  session.status = "error";
+  session.statusDetail =
+    `Native journal vẫn ghi nhận agent ở trạng thái ${native.state}, nhưng UI đã mất kênh live. ` +
+    "Phiên được khóa để tránh khởi động trùng.";
+}
+
+async function reconcileNativeRuntime(
+  session: NekoSession,
+  native: NekoNativeSessionRecord,
+  reader: NativeControlReader,
+): Promise<boolean> {
+  const fromSeq = lastNativeCursor(session, native.runId);
+  let afterSeq = fromSeq;
+  let replayedEventCount = 0;
+  let hasMore = true;
+  while (hasMore) {
+    const page = await reader.readEvents(native.runId, afterSeq, NATIVE_REPLAY_PAGE_SIZE);
+    replayedEventCount += page.events.length;
+    if (replayedEventCount > MAX_NATIVE_REPLAY_EVENTS) {
+      throw new Error("Native replay vượt quá giới hạn an toàn 10.000 sự kiện.");
+    }
+    afterSeq = page.nextAfterSeq;
+    hasMore = page.hasMore;
+  }
+
+  const previous = [...session.events].reverse().find((event) => (
+    event.data.type === "native-runtime-reconciled" &&
+    event.data.agentSessionId === native.agentSessionId
+  ));
+  const previousData = previous?.data.type === "native-runtime-reconciled"
+    ? previous.data
+    : null;
+  const changed =
+    replayedEventCount > 0 ||
+    previousData === null ||
+    previousData.state !== native.state ||
+    previousData.operationPhase !== native.operationPhase ||
+    previousData.continuity !== native.continuity ||
+    previousData.replayedThroughSeq !== afterSeq;
+  if (changed) {
+    appendOwnedSessionEvent(session, "runtime", {
+      type: "native-runtime-reconciled",
+      agentSessionId: native.agentSessionId,
+      runId: native.runId,
+      providerId: native.providerId,
+      state: native.state,
+      operationPhase: native.operationPhase,
+      continuity: native.continuity,
+      replayedFromSeq: fromSeq,
+      replayedThroughSeq: afterSeq,
+      replayedEventCount,
+    });
+  }
+  reconcileNativeStatus(session, native);
+  return changed;
+}
 
 async function defaultDriverFactory(
   agent: DetectedAgent,
@@ -432,6 +560,19 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 : "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
           };
         }
+        if (Object.keys(restored).length > 0) {
+          const nativeReader = nativeControlReaderFactory();
+          const nativeSessions = await nativeReader.listSessions();
+          for (const session of Object.values(restored)) {
+            const native = latestNativeSession(nativeSessions, session.id);
+            if (!native) continue;
+            const changed = await reconcileNativeRuntime(session, native, nativeReader);
+            // The renderer must not become usable from a reconciled read model
+            // that exists only in memory. Native truth remains authoritative,
+            // and this strict snapshot records the consumed replay cursor.
+            if (changed) await persistSessionStrict(session);
+          }
+        }
         set((state) => {
           state.sessions = { ...restored, ...state.sessions };
           state.hydrated = true;
@@ -676,6 +817,16 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         session.closePending ||
         session.deletePending
       ) {
+        return;
+      }
+      if (!runtimes.get(sessionId) && nativeRunBlocksRespawn(session)) {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (!current) return;
+          current.status = "error";
+          current.statusDetail =
+            "Lần chạy native trước chưa có kết quả an toàn để chạy lại. Hãy khởi động lại Wiii để đối soát journal hoặc kiểm tra thủ công.";
+        });
         return;
       }
       if (!session.workspace) {
@@ -1386,6 +1537,16 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     closeSession: (sessionId) => {
       const current = get().sessions[sessionId];
       if (!current || current.deletePending) return Promise.resolve();
+      if (!current.runtime && !runtimes.get(sessionId) && nativeRunBlocksRespawn(current)) {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return;
+          session.status = "error";
+          session.statusDetail =
+            "Neko chưa thể xác nhận runtime native đã dừng; thao tác đóng bị chặn để không ghi sai sự thật lifecycle.";
+        });
+        return Promise.resolve();
+      }
       if (current.closePending) {
         return closeOperations.get(sessionId) ?? Promise.resolve();
       }
@@ -1448,6 +1609,16 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const current = get().sessions[sessionId];
       // Acquire the lifecycle lock before awaiting a close or runtime teardown.
       if (!current || current.deletePending) return;
+      if (!current.runtime && !runtimes.get(sessionId) && nativeRunBlocksRespawn(current)) {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return;
+          session.status = "error";
+          session.statusDetail =
+            "Neko chưa thể xác nhận runtime native đã dừng; không xóa phiên khi kết quả execution còn chưa chắc chắn.";
+        });
+        return;
+      }
       set((state) => {
         const session = state.sessions[sessionId];
         if (session) {
@@ -1984,6 +2155,13 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
 /** Test hook: swap the driver factory (kept off the public interface). */
 export function _setDriverFactoryForTests(factory: DriverFactory | undefined): void {
   useNekoSessionStore.setState({ _driverFactory: factory } as never);
+}
+
+/** Test hook: replace native journal reads without constructing a Tauri host. */
+export function _setNativeControlReaderForTests(
+  factory: (() => NativeControlReader) | undefined,
+): void {
+  nativeControlReaderFactory = factory ?? getNekoControlClient;
 }
 
 /** Test hook: drop live runtimes, simulating an app restart. */

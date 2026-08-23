@@ -25,6 +25,10 @@
 The tuple `(requestId, method, targetId)` identifies one operation. A request
 ID reused with any other method/target is a collision.
 
+Completed and failed records have a 90-day replay window. Non-terminal and
+`unknown_outcome` records are retained until an explicit future policy can
+prove deletion cannot permit a repeated side effect.
+
 ### ControlEvent
 
 - `eventId`: UUID
@@ -36,6 +40,14 @@ ID reused with any other method/target is a collision.
 - bounded Neko-generated payload
 
 No raw provider frame or terminal line is a `ControlEvent` in Phase 2A.
+
+### Workbench reconciliation checkpoint
+
+The visible session snapshot may contain a runtime-only
+`native-runtime-reconciled` event with native session/run identity, state,
+operation phase, continuity and consumed replay cursor/count. It is a bounded
+read-model checkpoint; it does not copy native event payloads or replace the
+native journal.
 
 ## SQLite schema direction
 
