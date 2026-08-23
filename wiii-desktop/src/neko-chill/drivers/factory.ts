@@ -13,6 +13,8 @@ import { isAbsoluteWorkspacePath, type WorkspaceRef } from "../workspace";
 
 export interface DriverLaunchConfig {
   workspace: WorkspaceRef;
+  /** One RuntimeRegistry replacement attempt; creates a fresh Neko Run. */
+  executionId?: string;
   profileId?: string;
   backendSessionId?: string | null;
 }
@@ -33,6 +35,7 @@ export async function createDriverForAgent(
   const spawned = await control.spawnProvider({
     providerId: agent.id,
     clientSessionId: sessionId,
+    ...(launch.executionId ? { clientRunId: launch.executionId } : {}),
     workspacePath: launch.workspace.path,
     ...(launch.profileId ? { profileId: launch.profileId } : {}),
   });

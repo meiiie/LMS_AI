@@ -23,6 +23,8 @@ export interface NekoExecutionBinding {
 export interface NekoProviderSpawnRequest {
   providerId: string;
   clientSessionId: string;
+  /** Fresh local runtime identity. The visible session remains the Task. */
+  clientRunId?: string;
   workspacePath: string;
   profileId?: string;
   execution?: NekoExecutionBinding;
@@ -71,11 +73,14 @@ export interface NekoControlClient {
   spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider>;
 }
 
-function legacyExecution(clientSessionId: string): NekoExecutionBinding {
+function legacyExecution(
+  clientSessionId: string,
+  clientRunId: string = clientSessionId,
+): NekoExecutionBinding {
   return {
     taskId: `legacy-local/task/${clientSessionId}`,
-    runId: `legacy-local/run/${clientSessionId}`,
-    environmentId: `legacy-local/environment/${clientSessionId}`,
+    runId: `legacy-local/run/${clientRunId}`,
+    environmentId: `legacy-local/environment/${clientRunId}`,
   };
 }
 
@@ -162,7 +167,10 @@ class TauriNekoControlClient implements NekoControlClient {
     if (!request.workspacePath) {
       throw new Error("Neko cần một thư mục dự án rõ ràng trước khi khởi động agent.");
     }
-    const execution = request.execution ?? legacyExecution(request.clientSessionId);
+    const execution = request.execution ?? legacyExecution(
+      request.clientSessionId,
+      request.clientRunId,
+    );
     const requestId = uuidv4();
     const agentSessionId = uuidv4();
     const { invoke } = await import("@tauri-apps/api/core");

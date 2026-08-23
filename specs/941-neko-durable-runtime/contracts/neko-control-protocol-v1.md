@@ -31,6 +31,18 @@ method and logical target before dispatch.
 and Codex adapters. It is scoped to a Rust-owned agent-session identity and is
 idempotent by request ID. It does not accept a PID or executable.
 
+The legacy Workbench compatibility binding maps its stable visible session to
+one Task. Every `RuntimeRegistry` replacement maps to a fresh Run and
+Environment, even when the adapter resumes the same provider-owned
+conversation ID. A terminal Run is never reopened to represent a new process.
+
+Provider discovery is read-only and occurs outside the global lifecycle lock
+after request identity is durably accepted. Completed request replay is
+resolved before discovery, so a later provider upgrade or removal cannot
+invalidate a recorded start result. Provider stdout EOF does not prove process
+exit; Neko retains ownership and polls non-blockingly until exit or explicit
+release.
+
 ## Event ordering
 
 ```json

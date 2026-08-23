@@ -139,8 +139,13 @@ side-effect/committed phases become `unknown_outcome`.
   does not parse provider reasoning or transcript payloads.
 - **FR-020**: Current local Neko sessions MUST keep working through a
   compatibility binding until the ADE task UI supplies native Task/Run IDs.
+  The visible session identity remains the Task, while every runtime
+  replacement MUST receive a fresh Run and Environment identity.
 - **FR-021**: A standalone `neko-daemon` MUST NOT be claimed by this phase;
   the Rust authority remains inside the Tauri process.
+- **FR-022**: Slow provider discovery and process-exit observation MUST NOT
+  hold the global lifecycle-operation lock. EOF on provider stdout MUST NOT be
+  treated as proof that the child process exited.
 
 ### Non-goals
 

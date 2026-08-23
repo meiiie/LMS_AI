@@ -140,6 +140,27 @@ describe("Neko driver factory resource ownership", () => {
     )).toHaveLength(1);
   });
 
+  it("keeps the visible session as Task while each runtime replacement gets a fresh Run", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+
+    const { transport } = await getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-1",
+      clientRunId: "runtime-instance-2",
+      workspacePath: "C:/tmp/project",
+    });
+
+    const start = tauri.invoke.mock.calls.find(
+      ([command]) => command === "neko_control_session_start",
+    );
+    expect(start?.[1].request).toMatchObject({
+      taskId: "legacy-local/task/session-1",
+      runId: "legacy-local/run/runtime-instance-2",
+      environmentId: "legacy-local/environment/runtime-instance-2",
+    });
+    await transport.kill();
+  });
+
   it("retries a lost start response with the same request and session identities", async () => {
     tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
     let starts = 0;

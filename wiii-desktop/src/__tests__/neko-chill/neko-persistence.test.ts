@@ -191,7 +191,7 @@ class FakeDriver implements Driver {
 }
 
 let spawned: FakeDriver[] = [];
-let launches: Array<{ backendSessionId?: string | null }> = [];
+let launches: Array<{ executionId?: string; backendSessionId?: string | null }> = [];
 
 function useFakeFactory(): void {
   _setDriverFactoryForTests(async (agent, sessionId, launch, onEvent) => {
@@ -1775,6 +1775,9 @@ describe("neko-chill persistence", () => {
     await useNekoSessionStore.getState().sendPrompt("còn nhớ mình không?");
     // Fresh process (spec US3-2), prompt delivered, session live again.
     expect(spawned).toHaveLength(2);
+    expect(launches[0].executionId).toEqual(expect.any(String));
+    expect(launches[1].executionId).toEqual(expect.any(String));
+    expect(launches[1].executionId).not.toBe(launches[0].executionId);
     expect(launches[0].backendSessionId).toBeNull();
     expect(launches[1].backendSessionId).toBe(`backend-${id}`);
     expect(spawned[1].prompts).toEqual(["còn nhớ mình không?"]);

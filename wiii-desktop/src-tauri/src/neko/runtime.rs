@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 
 const WRITER_QUEUE_CAPACITY: usize = 32;
 const WRITE_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
+const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 struct WriteJob {
     line: String,
@@ -25,6 +26,12 @@ struct WriteJob {
 struct AgentProc {
     child: Child,
     writer: SyncSender<WriteJob>,
+}
+
+enum ProcessPoll {
+    Running,
+    Released,
+    Exited(Option<i32>),
 }
 
 struct RuntimeInner {
@@ -144,7 +151,6 @@ impl NekoRuntime {
         request: SessionStartRequest,
     ) -> Result<SessionStartResult, String> {
         validate_start(&request)?;
-        let _operation = lock(&self.inner.operations);
         let target = digest_target(&[
             &request.agent_session_id,
             &request.task_id,
@@ -154,25 +160,68 @@ impl NekoRuntime {
             &request.workspace_path,
             request.profile_id.as_deref().unwrap_or(""),
         ]);
-        match self
-            .inner
-            .journal
-            .begin_request(&request.request_id, "session/start", &target)?
         {
-            RequestDecision::Replay(value) => {
-                return serde_json::from_value(value)
-                    .map_err(|error| format!("decode recorded session start failed: {error}"));
+            let _operation = lock(&self.inner.operations);
+            match self
+                .inner
+                .journal
+                .begin_request(&request.request_id, "session/start", &target)?
+            {
+                RequestDecision::Replay(value) => {
+                    return serde_json::from_value(value)
+                        .map_err(|error| format!("decode recorded session start failed: {error}"));
+                }
+                RequestDecision::RecordedError(code) => {
+                    return Err(format!("recorded session start failed: {code}"));
+                }
+                RequestDecision::UnknownOutcome => {
+                    return Err(
+                        "session start has unknown_outcome; automatic replay is forbidden".into(),
+                    );
+                }
+                RequestDecision::Execute => {}
             }
-            RequestDecision::RecordedError(code) => {
-                return Err(format!("recorded session start failed: {code}"));
-            }
-            RequestDecision::UnknownOutcome => {
-                return Err(
-                    "session start has unknown_outcome; automatic replay is forbidden".into(),
-                );
-            }
-            RequestDecision::Execute => {}
         }
+
+        // Version/profile discovery can invoke a slow or broken provider shim.
+        // The request identity is durable first, but this read-only probe must
+        // not block lifecycle traffic for live agents.
+        let resolved = match provider::resolve(&request.provider_id) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                let _operation = lock(&self.inner.operations);
+                return match self
+                    .inner
+                    .journal
+                    .fail_request(&request.request_id, "provider_unavailable")
+                {
+                    Ok(()) => Err(error),
+                    Err(recording_error) => Err(format!(
+                        "{error}; additionally failed to persist rejected start: {recording_error}"
+                    )),
+                };
+            }
+        };
+        let args = match resolved
+            .definition
+            .launch_args(request.profile_id.as_deref())
+        {
+            Ok(args) => args,
+            Err(error) => {
+                let _operation = lock(&self.inner.operations);
+                return match self
+                    .inner
+                    .journal
+                    .fail_request(&request.request_id, "invalid_request")
+                {
+                    Ok(()) => Err(error),
+                    Err(recording_error) => Err(format!(
+                        "{error}; additionally failed to persist rejected start: {recording_error}"
+                    )),
+                };
+            }
+        };
+        let _operation = lock(&self.inner.operations);
 
         let created = self.inner.journal.insert_session_with_event(
             NewSession {
@@ -202,34 +251,6 @@ impl NekoRuntime {
         if let Err(error) = self.advance_start_phase(&request, OperationPhase::Dispatched) {
             return Err(self.reject_start_error(&app, &request, "journal_error", None, error));
         }
-
-        let resolved = match provider::resolve(&request.provider_id) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                return Err(self.reject_start_error(
-                    &app,
-                    &request,
-                    "provider_unavailable",
-                    None,
-                    error,
-                ));
-            }
-        };
-        let args = match resolved
-            .definition
-            .launch_args(request.profile_id.as_deref())
-        {
-            Ok(args) => args,
-            Err(error) => {
-                return Err(self.reject_start_error(
-                    &app,
-                    &request,
-                    "invalid_request",
-                    resolved.version.as_deref(),
-                    error,
-                ));
-            }
-        };
 
         if let Err(error) = self.advance_start_phase(&request, OperationPhase::SideEffectStarted) {
             return Err(self.reject_start_error(
@@ -365,8 +386,19 @@ impl NekoRuntime {
                     Err(_) => break,
                 }
             }
-            let code = runtime.finish_process(&app, &session_id);
-            let _ = app.emit(&format!("neko-session://exit/{session_id}"), code);
+            // EOF does not prove the process exited: a provider may redirect
+            // stdout and remain alive. Poll without holding the lifecycle lock
+            // across a blocking wait, retaining ownership so cancel still works.
+            loop {
+                match runtime.poll_process_exit(&app, &session_id) {
+                    ProcessPoll::Running => std::thread::sleep(PROCESS_EXIT_POLL_INTERVAL),
+                    ProcessPoll::Released => break,
+                    ProcessPoll::Exited(code) => {
+                        let _ = app.emit(&format!("neko-session://exit/{session_id}"), code);
+                        break;
+                    }
+                }
+            }
         });
 
         Ok(result)
@@ -690,14 +722,24 @@ impl NekoRuntime {
             .set_session_phase(&request.agent_session_id, phase)
     }
 
-    fn finish_process(&self, app: &AppHandle, agent_session_id: &str) -> Option<i32> {
+    fn poll_process_exit(&self, app: &AppHandle, agent_session_id: &str) -> ProcessPoll {
         let _operation = lock(&self.inner.operations);
-        let code = lock(&self.inner.processes)
-            .remove(agent_session_id)
-            .and_then(|mut process| process.child.wait().ok())
-            .and_then(|status| status.code());
+        let code = {
+            let mut processes = lock(&self.inner.processes);
+            let Some(process) = processes.get_mut(agent_session_id) else {
+                return ProcessPoll::Released;
+            };
+            match process.child.try_wait() {
+                Ok(Some(status)) => {
+                    let code = status.code();
+                    processes.remove(agent_session_id);
+                    code
+                }
+                Ok(None) | Err(_) => return ProcessPoll::Running,
+            }
+        };
         let Ok(Some(session)) = self.inner.journal.session(agent_session_id) else {
-            return code;
+            return ProcessPoll::Exited(code);
         };
         if !session.state.is_terminal() {
             let _ = self.transition_session_event(
@@ -719,7 +761,7 @@ impl NekoRuntime {
             agent_session_id,
             json!({ "exitCode": code }),
         );
-        code
+        ProcessPoll::Exited(code)
     }
 }
 

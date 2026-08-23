@@ -75,6 +75,23 @@ metadata and adapter selection but no executable path or launch argument
 table. Detection does not reveal resolved paths to the WebView. Rust resolves
 and probes an absolute canonical executable and launches that exact path; a
 later workspace `cwd` therefore cannot change which executable is selected.
+Slow provider probes run outside the global lifecycle lock. Request identity
+is durably accepted first and completed idempotent replay is resolved before a
+new probe, so unrelated sessions remain responsive without making replay
+depend on current provider availability.
+
+## Decision 7: Runtime replacement is a new Run
+
+The compatibility UI still uses one visible Neko session as its Task identity.
+Each `RuntimeRegistry` instance ID becomes a fresh Run and Environment ID.
+Provider continuation remains the opaque `backendSessionId`; it never makes a
+new OS process reopen a terminal Run. This preserves the invariant
+`Task != Run != AgentSession != process` before the full ADE task UI exists.
+
+Provider stdout EOF is not an exit signal. The Rust reaper retains the child
+in the authority map and uses non-blocking exit polling, so cancellation and
+other lifecycle operations remain available even when a provider closes or
+redirects stdout while continuing to run.
 
 ## Rejected alternatives
 

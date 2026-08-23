@@ -133,7 +133,12 @@ async function waitForHolds(registry: Map<string, Set<Promise<void>>>, sessionId
 type DriverFactory = (
   agent: DetectedAgent,
   sessionId: string,
-  launch: { workspace: WorkspaceRef; profileId?: string; backendSessionId?: string | null },
+  launch: {
+    workspace: WorkspaceRef;
+    executionId?: string;
+    profileId?: string;
+    backendSessionId?: string | null;
+  },
   onEvent: (event: DriverEvent) => void,
   ownDriver: (driver: Driver) => void,
 ) => Promise<Driver>;
@@ -141,7 +146,12 @@ type DriverFactory = (
 async function defaultDriverFactory(
   agent: DetectedAgent,
   sessionId: string,
-  launch: { workspace: WorkspaceRef; profileId?: string; backendSessionId?: string | null },
+  launch: {
+    workspace: WorkspaceRef;
+    executionId?: string;
+    profileId?: string;
+    backendSessionId?: string | null;
+  },
   onEvent: (event: DriverEvent) => void,
   ownDriver: (driver: Driver) => void,
 ): Promise<Driver> {
@@ -525,6 +535,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             sessionId,
             {
               workspace,
+              executionId: instanceId,
               ...(launchProfile?.id ? { profileId: launchProfile.id } : {}),
               backendSessionId: null,
             },
@@ -710,6 +721,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 sessionId,
                 {
                   workspace: session.workspace!,
+                  executionId: instanceId,
                   ...(session.launchProfile?.id ? { profileId: session.launchProfile.id } : {}),
                   backendSessionId: session.backendSessionId,
                 },

@@ -88,6 +88,7 @@ class FakeDriver implements Driver {
 let driver: FakeDriver;
 let launchConfig: {
   workspace: typeof WORKSPACE;
+  executionId?: string;
   profileId?: string;
   backendSessionId?: string | null;
 } | undefined;
@@ -118,6 +119,8 @@ describe("neko-session-store", () => {
     expect(useNekoSessionStore.getState().activeSessionId).toBe(id);
     expect(session(id).workspace).toEqual(WORKSPACE);
     expect(launchConfig?.workspace).toEqual(WORKSPACE);
+    expect(launchConfig?.executionId).toEqual(expect.any(String));
+    expect(launchConfig?.executionId).not.toBe(id);
     expect(launchConfig?.backendSessionId).toBeNull();
     expect(session(id).backendSessionId).toBe(`backend-${id}`);
 

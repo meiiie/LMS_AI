@@ -28,5 +28,8 @@ Expected invariants:
 - a proven `provider_busy` rejection retries only with a fresh request ID;
 - event sequence is monotonic within a run stream and replay is cursor-based;
 - lifecycle state and its matching durable event commit or roll back together;
+- provider probing and exit observation never block unrelated lifecycle work;
+- stdout EOF alone never releases a still-running provider process;
+- replacing a local runtime preserves Task identity but creates a fresh Run;
 - uncertain recovery becomes `unknown_outcome`, never automatic retry;
 - provider frames and credentials are absent from the SQLite lifecycle schema.
