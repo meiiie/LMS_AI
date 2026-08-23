@@ -211,10 +211,11 @@ side-effect/committed phases become `unknown_outcome`.
   Job Object before their suspended leader begins execution. Cleanup MUST query
   that Job Object until no active member remains; PID ancestry is not proof of
   cleanup because an intermediate process may exit first.
-- **FR-035**: A live exit notice MUST carry `terminationProven`. The renderer
-  MUST NOT treat leader exit alone as completed cleanup or skip an explicit
-  cancellation/reconciliation attempt when process-tree termination is
-  unproven.
+- **FR-035**: A live exit notice MUST carry `terminationProven` and
+  `terminalStatePersisted`. The renderer MUST NOT treat leader exit alone as
+  completed cleanup or skip an explicit cancellation/reconciliation attempt
+  unless both complete process-tree termination and the durable terminal
+  lifecycle transition are proven.
 - **FR-036**: Post-spawn setup or ownership-commit failure MAY become ordinary
   `failed` only after native cleanup proves the complete process tree stopped.
   `unknown_outcome` is reserved for unproven cleanup or an uncertain persisted
@@ -223,6 +224,17 @@ side-effect/committed phases become `unknown_outcome`.
   the host treats as the same path. In particular, Windows drive and UNC paths
   MUST normalize separator and casing differences without collapsing distinct
   case-sensitive POSIX paths.
+- **FR-038**: A native cancellation response with `cancelled: false` MUST be
+  reconciled against the durable session projection. A remaining active or
+  uncertain record MUST fail closed and MUST NOT release renderer ownership.
+- **FR-039**: Provider launch MUST use non-escapable OS containment. Windows
+  MUST use a pre-execution Job Object; Linux MUST use a delegated cgroup v2
+  leaf with `cgroup.kill`; a host without an approved primitive MUST reject
+  before spawn and MUST NOT downgrade to an escapable POSIX process group.
+- **FR-040**: A verified native exit whose terminal lifecycle transaction
+  fails MUST remain pending inside the runtime authority. The renderer MUST be
+  told that terminal persistence is unproven, and cancellation MUST retry that
+  exact terminal fact before it may return a safe no-op result.
 
 ### Non-goals
 

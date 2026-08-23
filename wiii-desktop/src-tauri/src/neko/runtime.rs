@@ -57,11 +57,22 @@ enum ProcessPoll {
 struct ProcessExitNotice {
     exit_code: Option<i32>,
     termination_proven: bool,
+    terminal_state_persisted: bool,
+}
+
+#[derive(Clone, Debug)]
+struct PendingTerminalFact {
+    next_state: RunState,
+    phase: OperationPhase,
+    continuity: &'static str,
+    event_type: &'static str,
+    payload: Value,
 }
 
 struct RuntimeInner {
     journal: Journal,
     processes: Mutex<HashMap<String, AgentProc>>,
+    pending_terminal_facts: Mutex<HashMap<String, PendingTerminalFact>>,
     operations: Mutex<()>,
     shutting_down: AtomicBool,
     _lease: File,
@@ -137,6 +148,7 @@ impl NekoRuntime {
             inner: Arc::new(RuntimeInner {
                 journal: Journal::open(path)?,
                 processes: Mutex::new(HashMap::new()),
+                pending_terminal_facts: Mutex::new(HashMap::new()),
                 operations: Mutex::new(()),
                 shutting_down: AtomicBool::new(false),
                 _lease: lease,
@@ -585,6 +597,11 @@ impl NekoRuntime {
         validate_identity("runId", &request.run_id)?;
         validate_identity("agentSessionId", &request.agent_session_id)?;
         let _operation = lock(&self.inner.operations);
+        if let Err(error) = self.flush_pending_terminal_fact(app, &request.agent_session_id) {
+            return Err(unknown_outcome_error(format!(
+                "verified process exit is awaiting durable lifecycle commit; cancellation is blocked: {error}"
+            )));
+        }
         let target = digest_target(&[&request.run_id, &request.agent_session_id]);
         match self
             .inner
@@ -912,6 +929,50 @@ impl NekoRuntime {
             .set_session_phase(&request.agent_session_id, phase)
     }
 
+    fn persist_terminal_fact(
+        &self,
+        app: &AppHandle,
+        agent_session_id: &str,
+        fact: PendingTerminalFact,
+    ) -> Result<(), String> {
+        let result = self.transition_session_event(
+            app,
+            agent_session_id,
+            fact.next_state,
+            fact.phase,
+            fact.continuity,
+            None,
+            None,
+            fact.event_type,
+            fact.payload.clone(),
+        );
+        match result {
+            Ok(()) => {
+                lock(&self.inner.pending_terminal_facts).remove(agent_session_id);
+                Ok(())
+            }
+            Err(error) => {
+                lock(&self.inner.pending_terminal_facts).insert(agent_session_id.to_string(), fact);
+                Err(error)
+            }
+        }
+    }
+
+    fn flush_pending_terminal_fact(
+        &self,
+        app: &AppHandle,
+        agent_session_id: &str,
+    ) -> Result<bool, String> {
+        let fact = lock(&self.inner.pending_terminal_facts)
+            .get(agent_session_id)
+            .cloned();
+        let Some(fact) = fact else {
+            return Ok(false);
+        };
+        self.persist_terminal_fact(app, agent_session_id, fact)?;
+        Ok(true)
+    }
+
     fn poll_process_exit(
         &self,
         app: &AppHandle,
@@ -948,48 +1009,50 @@ impl NekoRuntime {
             return ProcessPoll::Exited(ProcessExitNotice {
                 exit_code: code,
                 termination_proven: termination.is_ok(),
+                terminal_state_persisted: false,
             });
         };
-        if !session.state.is_terminal() {
-            let _ = match &termination {
-                Ok(()) => self.transition_session_event(
-                    app,
-                    agent_session_id,
-                    RunState::Failed,
-                    OperationPhase::Failed,
-                    "continuity_lost",
-                    None,
-                    None,
-                    "run.state_changed",
-                    json!({ "state": "failed", "reason": reason }),
-                ),
-                Err(error) => self.transition_session_event(
-                    app,
-                    agent_session_id,
-                    RunState::UnknownOutcome,
-                    OperationPhase::UnknownOutcome,
-                    "unknown_outcome",
-                    None,
-                    None,
-                    "run.state_changed",
-                    json!({
+        let terminal_state_persisted = if session.state.is_terminal() {
+            true
+        } else {
+            let fact = match &termination {
+                Ok(()) => PendingTerminalFact {
+                    next_state: RunState::Failed,
+                    phase: OperationPhase::Failed,
+                    continuity: "continuity_lost",
+                    event_type: "run.state_changed",
+                    payload: json!({ "state": "failed", "reason": reason }),
+                },
+                Err(error) => PendingTerminalFact {
+                    next_state: RunState::UnknownOutcome,
+                    phase: OperationPhase::UnknownOutcome,
+                    continuity: "unknown_outcome",
+                    event_type: "run.state_changed",
+                    payload: json!({
                         "state": "unknown_outcome",
                         "reason": "exit_termination_unproven",
                         "detail": error,
                     }),
-                ),
+                },
             };
-        }
+            self.persist_terminal_fact(app, agent_session_id, fact)
+                .is_ok()
+        };
         let _ = self.emit_control_event(
             app,
             &session.run_id,
             "process.exited",
             agent_session_id,
-            json!({ "exitCode": code, "terminationProven": termination.is_ok() }),
+            json!({
+                "exitCode": code,
+                "terminationProven": termination.is_ok(),
+                "terminalStatePersisted": terminal_state_persisted,
+            }),
         );
         ProcessPoll::Exited(ProcessExitNotice {
             exit_code: code,
             termination_proven: termination.is_ok(),
+            terminal_state_persisted,
         })
     }
 
@@ -1006,40 +1069,37 @@ impl NekoRuntime {
                 ProcessExitNotice {
                     exit_code: None,
                     termination_proven: termination.is_ok(),
+                    terminal_state_persisted: false,
                 },
             );
             return;
         };
-        if !session.state.is_terminal() {
-            let _ = match &termination {
-                Ok(()) => self.transition_session_event(
-                    app,
-                    agent_session_id,
-                    RunState::Failed,
-                    OperationPhase::Failed,
-                    "continuity_lost",
-                    None,
-                    None,
-                    "run.state_changed",
-                    json!({ "state": "failed", "reason": "provider_protocol_failure" }),
-                ),
-                Err(error) => self.transition_session_event(
-                    app,
-                    agent_session_id,
-                    RunState::UnknownOutcome,
-                    OperationPhase::UnknownOutcome,
-                    "unknown_outcome",
-                    None,
-                    None,
-                    "run.state_changed",
-                    json!({
+        let terminal_state_persisted = if session.state.is_terminal() {
+            true
+        } else {
+            let fact = match &termination {
+                Ok(()) => PendingTerminalFact {
+                    next_state: RunState::Failed,
+                    phase: OperationPhase::Failed,
+                    continuity: "continuity_lost",
+                    event_type: "run.state_changed",
+                    payload: json!({ "state": "failed", "reason": "provider_protocol_failure" }),
+                },
+                Err(error) => PendingTerminalFact {
+                    next_state: RunState::UnknownOutcome,
+                    phase: OperationPhase::UnknownOutcome,
+                    continuity: "unknown_outcome",
+                    event_type: "run.state_changed",
+                    payload: json!({
                         "state": "unknown_outcome",
                         "reason": "protocol_failure_termination_unproven",
                         "detail": error,
                     }),
-                ),
+                },
             };
-        }
+            self.persist_terminal_fact(app, agent_session_id, fact)
+                .is_ok()
+        };
         let _ = self.emit_control_event(
             app,
             &session.run_id,
@@ -1049,6 +1109,7 @@ impl NekoRuntime {
                 "exitCode": null,
                 "reason": "provider_protocol_failure",
                 "terminationProven": termination.is_ok(),
+                "terminalStatePersisted": terminal_state_persisted,
             }),
         );
         let _ = app.emit(
@@ -1056,6 +1117,7 @@ impl NekoRuntime {
             ProcessExitNotice {
                 exit_code: None,
                 termination_proven: termination.is_ok(),
+                terminal_state_persisted,
             },
         );
     }

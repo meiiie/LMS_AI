@@ -42,7 +42,7 @@ Expected invariants:
 - Windows provider descendants remain owned by one Job Object even after an
   intermediate and leader exit;
 - live exit delivery cannot mark cleanup complete without
-  `terminationProven: true`;
+  `terminationProven: true` and `terminalStatePersisted: true`;
 - Windows drive/UNC casing aliases derive one bootstrap identity while POSIX
   case distinctions remain intact;
 - replacing a local runtime preserves Task identity but creates a fresh Run;

@@ -33,15 +33,16 @@ struct ProbeOutput {
     stdout: Vec<u8>,
 }
 
-/// An approved provider process plus its host-level containment primitive.
-/// On Windows the Job Object is assigned before the suspended leader runs, so
-/// membership survives exited intermediates and cannot be reconstructed from
-/// lossy PID ancestry. Unix uses the dedicated process group configured by
-/// `hidden()`.
+/// An approved provider process plus its non-escapable host containment.
+/// Windows uses a Job Object and Linux requires a delegated cgroup v2 leaf.
+/// Platforms without an equivalent primitive reject the launch before spawn;
+/// a POSIX process group is never treated as proof because `setsid()` escapes it.
 pub(crate) struct OwnedChild {
     pub(crate) child: Child,
     #[cfg(windows)]
     job: WindowsJob,
+    #[cfg(target_os = "linux")]
+    cgroup: LinuxCgroup,
 }
 
 #[cfg(windows)]
@@ -67,6 +68,88 @@ impl Drop for WindowsJob {
                 windows_sys::Win32::Foundation::CloseHandle(self.raw());
             }
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct LinuxCgroup {
+    path: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxCgroup {
+    fn create() -> io::Result<Self> {
+        let membership = std::fs::read_to_string("/proc/self/cgroup")?;
+        let relative = membership
+            .lines()
+            .find_map(|line| line.strip_prefix("0::"))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "unified cgroup v2 membership is unavailable",
+                )
+            })?;
+        let mount = std::fs::canonicalize("/sys/fs/cgroup")?;
+        let parent = std::fs::canonicalize(mount.join(relative.trim_start_matches('/')))?;
+        if !parent.starts_with(&mount) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "current cgroup resolves outside the cgroup v2 mount",
+            ));
+        }
+        let path = parent.join(format!("wiii-neko-{}", Uuid::new_v4()));
+        std::fs::create_dir(&path).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "strong Linux containment requires a delegated writable cgroup v2: {error}"
+                ),
+            )
+        })?;
+        let cgroup = Self { path };
+        if !cgroup.path.join("cgroup.kill").exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "strong Linux containment requires cgroup.kill",
+            ));
+        }
+        // Opening the membership file before spawn proves delegation. The
+        // inherited descriptor is used from pre_exec with async-signal-safe
+        // write(2), closing the fork-before-containment race.
+        OpenOptions::new()
+            .write(true)
+            .open(cgroup.path.join("cgroup.procs"))?;
+        Ok(cgroup)
+    }
+
+    fn open_membership(&self) -> io::Result<File> {
+        OpenOptions::new()
+            .write(true)
+            .open(self.path.join("cgroup.procs"))
+    }
+
+    fn kill(&self) -> io::Result<()> {
+        let mut control = OpenOptions::new()
+            .write(true)
+            .open(self.path.join("cgroup.kill"))?;
+        std::io::Write::write_all(&mut control, b"1")
+    }
+
+    fn populated(&self) -> io::Result<bool> {
+        let events = std::fs::read_to_string(self.path.join("cgroup.events"))?;
+        events
+            .lines()
+            .find_map(|line| line.strip_prefix("populated "))
+            .map(|value| value == "1")
+            .ok_or_else(|| io::Error::other("cgroup.events omitted populated state"))
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for LinuxCgroup {
+    fn drop(&mut self) {
+        let _ = self.kill();
+        let _ = std::fs::remove_dir(&self.path);
     }
 }
 
@@ -202,9 +285,9 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
             }
         };
         if let Some(status) = child_status {
-            // A probe is not allowed to leave descendants behind. On Unix the
-            // dedicated process group remains addressable after its leader
-            // exits. Cleanup is checked before the output becomes trusted.
+            // A probe is not allowed to leave descendants behind. Its strong
+            // OS containment remains addressable after the leader exits, and
+            // cleanup is checked before the output becomes trusted.
             terminate_child_tree(&mut child)?;
             break status;
         }
@@ -358,13 +441,6 @@ fn candidate_paths(candidate: &str) -> Vec<PathBuf> {
     resolved
 }
 
-#[cfg(unix)]
-fn hidden(command: &mut Command) -> &mut Command {
-    use std::os::unix::process::CommandExt;
-    command.process_group(0);
-    command
-}
-
 #[cfg(windows)]
 fn create_windows_job() -> io::Result<WindowsJob> {
     use windows_sys::Win32::System::JobObjects::{
@@ -482,10 +558,35 @@ pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
         }
         Ok(OwnedChild { child, job })
     }
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
-        hidden(command);
-        command.spawn().map(|child| OwnedChild { child })
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+
+        let cgroup = LinuxCgroup::create()?;
+        let membership = cgroup.open_membership()?;
+        let membership_fd = membership.as_raw_fd();
+        unsafe {
+            command.pre_exec(move || {
+                let written = libc::write(membership_fd, b"0".as_ptr().cast(), 1);
+                if written == 1 {
+                    Ok(())
+                } else {
+                    Err(io::Error::last_os_error())
+                }
+            });
+        }
+        let child = command.spawn()?;
+        drop(membership);
+        Ok(OwnedChild { child, cgroup })
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let _ = command;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "local Neko providers require non-escapable process containment; this host does not expose an approved primitive",
+        ))
     }
 }
 
@@ -543,37 +644,35 @@ pub(crate) fn terminate_child_tree(owned: &mut OwnedChild) -> io::Result<()> {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(crate) fn terminate_child_tree(owned: &mut OwnedChild) -> io::Result<()> {
-    // All approved provider commands are placed in a dedicated process group
-    // by hidden(). A negative PID targets that complete group. ESRCH is the
-    // only safe non-success result: it proves the isolated group is absent.
-    let result = unsafe { libc::kill(-(owned.child.id() as i32), libc::SIGKILL) };
-    if result != 0 {
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            return Err(error);
-        }
-    }
+    // cgroup.kill atomically kills the cgroup and its descendants and prevents
+    // concurrent forks/migrations from escaping the kill operation. Do not
+    // downgrade to killpg: a provider can escape a process group with setsid().
     let deadline = Instant::now() + PROCESS_TERMINATION_TIMEOUT;
+    owned.cgroup.kill()?;
     reap_child_before(&mut owned.child, deadline)?;
     loop {
-        let group = unsafe { libc::kill(-(owned.child.id() as i32), 0) };
-        if group != 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                return Ok(());
-            }
-            return Err(error);
+        if !owned.cgroup.populated()? {
+            let _ = std::fs::remove_dir(&owned.cgroup.path);
+            return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "provider process group did not disappear before the deadline",
+                "provider cgroup did not become empty before the deadline",
             ));
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
     }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+pub(crate) fn terminate_child_tree(_owned: &mut OwnedChild) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "non-escapable provider containment is unavailable on this host",
+    ))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -884,7 +983,12 @@ mod tests {
 
         match run_probe(command) {
             Ok(output) => assert!(output.stdout.len() <= MAX_PROBE_OUTPUT_BYTES),
-            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
+            Err(error) => {
+                #[cfg(windows)]
+                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                #[cfg(unix)]
+                let _ = error;
+            }
         }
     }
 
@@ -908,10 +1012,44 @@ mod tests {
             command.args(["-c", "sleep 30"]);
             command
         };
-        let mut child = spawn_owned(&mut command).unwrap();
+        let Ok(mut child) = spawn_owned(&mut command) else {
+            // Unix hosts without a delegated non-escapable primitive reject
+            // before spawn instead of silently downgrading to killpg.
+            #[cfg(unix)]
+            return;
+            #[cfg(windows)]
+            panic!("Windows Job Object containment unexpectedly failed");
+        };
 
         terminate_child_tree(&mut child).unwrap();
         assert!(child.child.try_wait().unwrap().is_some());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cgroup_containment_covers_a_descendant_that_calls_setsid() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "setsid sh -c 'sleep 30' & wait"]);
+        let Ok(mut child) = spawn_owned(&mut command) else {
+            // CI containers commonly do not delegate cgroup creation. That is
+            // an explicit unavailable capability, never a weaker fallback.
+            return;
+        };
+
+        terminate_child_tree(&mut child).unwrap();
+        assert!(child.child.try_wait().unwrap().is_some());
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    #[test]
+    fn unix_without_non_escapable_containment_rejects_before_spawn() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let error = match spawn_owned(&mut command) {
+            Ok(_) => panic!("provider launch unexpectedly bypassed strong containment"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
     }
 
     #[cfg(windows)]

@@ -102,10 +102,14 @@ owner and cannot infer that the Task is idle. Cancellation is terminal only afte
 termination succeeds; an unavailable process owner or failed OS tree kill is
 recorded as `unknown_outcome`, never as permission to launch a replacement.
 Windows launches are assigned to a kill-on-close Job Object while the leader is
-still suspended; only then is execution resumed. This keeps indirect
-descendants under authority after intermediate processes exit. Live exit IPC
-also carries `terminationProven`, so the renderer cannot mistake leader exit
-for complete tree cleanup.
+still suspended; only then is execution resumed. Linux launches require a
+delegated cgroup v2 leaf with `cgroup.kill`. Other Unix hosts currently reject
+local provider launch before spawn rather than downgrade to an escapable POSIX
+process group. Live exit IPC carries both `terminationProven` and
+`terminalStatePersisted`, so the renderer cannot mistake leader exit—or an
+uncommitted journal transition—for complete cleanup. A verified exit whose
+terminal transaction temporarily fails is retained by native authority and
+retried on explicit cancellation.
 
 The compatibility client also bounds bootstrap output before a provider
 adapter attaches: at most 256 frames and 8 MiB are retained. Overflow detaches

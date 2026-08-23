@@ -102,11 +102,18 @@ proves that tree stopped; otherwise Neko records `unknown_outcome`. Runtime
 shutdown closes start admission before draining children; a probe already in
 flight re-checks that gate before spawning a process.
 
-The live `neko-session://exit/<agentSessionId>` notice carries both `exitCode`
-and `terminationProven`. A renderer may notify its adapter about leader exit,
-but it cannot mark transport cleanup complete when native authority reports an
-unproven tree outcome. An explicit cancel/reconciliation remains required and
-fail-closed.
+The live `neko-session://exit/<agentSessionId>` notice carries `exitCode`,
+`terminationProven`, and `terminalStatePersisted`. A renderer may notify its
+adapter about leader exit, but it cannot mark transport cleanup complete until
+native authority proves both the tree stopped and the terminal lifecycle fact
+committed. A `cancelled: false` response is also reconciled against
+`session/list`; an active or uncertain projection remains fail-closed.
+
+Windows containment is a pre-execution Job Object. Linux containment is a
+delegated cgroup v2 leaf terminated with `cgroup.kill`. Hosts without an
+approved non-escapable primitive reject provider launch before spawn; POSIX
+process groups are not accepted as cleanup proof because a child can call
+`setsid()`.
 
 Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution

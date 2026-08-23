@@ -65,6 +65,7 @@ interface NativeSessionCancelResult {
 interface NativeProcessExitNotice {
   exitCode: number | null;
   terminationProven: boolean;
+  terminalStatePersisted: boolean;
 }
 
 interface StartTransportState {
@@ -311,23 +312,34 @@ class TauriNekoControlClient implements NekoControlClient {
         },
       },
     );
-    if (
-      !isNativeSessionCancelResult(result) ||
-      result.agentSessionId !== identity.agentSessionId
-    ) {
-      throw new Error("Neko returned an invalid retained-start cancellation response.");
+    await this.requireSafeCancellation(
+      result,
+      identity.execution.runId,
+      identity.agentSessionId,
+      "retained native start",
+    );
+  }
+
+  private async requireSafeCancellation(
+    result: unknown,
+    runId: string,
+    agentSessionId: string,
+    operation: string,
+  ): Promise<void> {
+    if (!isNativeSessionCancelResult(result) || result.agentSessionId !== agentSessionId) {
+      throw new Error(`Neko returned an invalid ${operation} cancellation response.`);
     }
     if (result.cancelled) return;
 
-    const current = (await this.listSessions(identity.execution.runId)).find(
-      (candidate) => candidate.agentSessionId === identity.agentSessionId,
+    const current = (await this.listSessions(runId)).find(
+      (candidate) => candidate.agentSessionId === agentSessionId,
     );
     if (
       current &&
       (isNativeOutcomeUncertain(current) || !NATIVE_TERMINAL_STATES.has(current.state))
     ) {
       throw new Error(
-        "unknown_outcome: Neko could not prove the retained native start reached a safe terminal state.",
+        `unknown_outcome: Neko could not prove the ${operation} reached a safe terminal state.`,
       );
     }
   }
@@ -457,6 +469,7 @@ class TauriNekoControlClient implements NekoControlClient {
       throw error;
     }
 
+    const requireSafeCancellation = this.requireSafeCancellation.bind(this);
     const transport: AcpTransport = {
       async send(line: string): Promise<void> {
         // Keep the logical write identity after an unresolved native response.
@@ -506,13 +519,23 @@ class TauriNekoControlClient implements NekoControlClient {
         if (transportState.killed) return;
         if (!transportState.killPromise) {
           transportState.killPromise = (async () => {
-            await invokeIdempotently(invoke, "neko_control_session_cancel", {
-              request: {
-                requestId: transportState.cancelRequestId,
-                runId: started.runId,
-                agentSessionId: started.agentSessionId,
+            const result = await invokeIdempotently<unknown>(
+              invoke,
+              "neko_control_session_cancel",
+              {
+                request: {
+                  requestId: transportState.cancelRequestId,
+                  runId: started.runId,
+                  agentSessionId: started.agentSessionId,
+                },
               },
-            });
+            );
+            await requireSafeCancellation(
+              result,
+              started.runId,
+              started.agentSessionId,
+              "native session cancellation",
+            );
             transportState.killed = true;
             transportState.unresolvedWriteIds.clear();
             detachStartListeners(transportState);
@@ -624,14 +647,14 @@ async function ensureStartListeners(
         (event) => {
           const notice = isNativeProcessExitNotice(event.payload)
             ? event.payload
-            : { exitCode: null, terminationProven: false };
+            : { exitCode: null, terminationProven: false, terminalStatePersisted: false };
           state.exitObserved = true;
           state.pendingExitCode = notice.exitCode;
           state.exitTerminationProven = notice.terminationProven;
           for (const handler of state.exitHandlers) handler(state.pendingExitCode);
           // A leader exit is not proof that its process tree disappeared.
           // Keep cancellation live until native authority certifies cleanup.
-          state.killed = notice.terminationProven;
+          state.killed = notice.terminationProven && notice.terminalStatePersisted;
           state.unresolvedWriteIds.clear();
           queueMicrotask(() => detachStartListeners(state));
         },
@@ -713,7 +736,8 @@ function isNativeProcessExitNotice(value: unknown): value is NativeProcessExitNo
   const notice = value as Record<string, unknown>;
   return (
     (notice.exitCode === null || typeof notice.exitCode === "number") &&
-    typeof notice.terminationProven === "boolean"
+    typeof notice.terminationProven === "boolean" &&
+    typeof notice.terminalStatePersisted === "boolean"
   );
 }
 
