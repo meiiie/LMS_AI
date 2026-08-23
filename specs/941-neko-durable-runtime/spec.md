@@ -328,7 +328,8 @@ side-effect/committed phases become `unknown_outcome`.
   unproven cleanup. Proven post-spawn cleanup MUST use the retained terminal
   fact path rather than the pre-spawn rejection path. Provider discovery MUST
   propagate both post-spawn outcomes instead of misreporting them as
-  `not_installed`.
+  `not_installed`, including delayed reader failure, drain timeout, or output
+  overflow observed after process-tree termination was proven.
 
 ### Non-goals
 

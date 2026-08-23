@@ -245,9 +245,9 @@ fn run_probe(mut command: Command) -> Result<ProbeOutput, SpawnOwnedError> {
         Some(output) => output,
         None => match receiver.recv_timeout(PROBE_READER_DRAIN_TIMEOUT) {
             Ok(Ok(output)) => output,
-            Ok(Err(error)) => return Err(SpawnOwnedError::safe(error)),
+            Ok(Err(error)) => return Err(SpawnOwnedError::after_proven_cleanup(error)),
             Err(error) => {
-                return Err(SpawnOwnedError::safe(io::Error::new(
+                return Err(SpawnOwnedError::after_proven_cleanup(io::Error::new(
                     io::ErrorKind::TimedOut,
                     format!("provider probe output did not close after termination: {error}"),
                 )));
@@ -255,7 +255,7 @@ fn run_probe(mut command: Command) -> Result<ProbeOutput, SpawnOwnedError> {
         },
     };
     if stdout.len() > MAX_PROBE_OUTPUT_BYTES {
-        return Err(SpawnOwnedError::safe(io::Error::new(
+        return Err(SpawnOwnedError::after_proven_cleanup(io::Error::new(
             io::ErrorKind::InvalidData,
             "provider probe exceeded the output limit",
         )));
@@ -892,7 +892,10 @@ mod tests {
 
         match run_probe(command) {
             Ok(output) => assert!(output.stdout.len() <= MAX_PROBE_OUTPUT_BYTES),
-            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
+            Err(error) => {
+                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                assert!(error.post_spawn_cleanup_proven());
+            }
         }
     }
 
