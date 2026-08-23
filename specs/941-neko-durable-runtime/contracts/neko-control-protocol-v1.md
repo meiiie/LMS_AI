@@ -16,6 +16,16 @@ method and logical target before dispatch.
   `requestId`, `agentSessionId`, original Run/Environment binding, subscribed
   transport listener and early-event buffer for the caller's next start
   attempt. A new renderer preparation ID does not create a new logical start.
+- The pre-handler bootstrap buffer is bounded to 256 frames and 8 MiB in
+  aggregate. Overflow is terminal for that client transport: listeners are
+  detached and Neko cancels the retained logical start with its original
+  cancellation identity. The identity remains unresolved if cancellation
+  cannot be confirmed, and close/delete fails closed rather than forgetting it.
+- Before deleting any other retained start, the client first replays its exact
+  original `session/start` identity when no native projection is visible. A
+  still-accepted/dispatched request returns `unknown_outcome` and keeps deletion
+  blocked; a completed replay is cancelled, while a recorded pre-side-effect
+  failure proves there is no process to cancel.
 - `provider_busy` proves a bounded writer queue rejected the frame before it
   was enqueued. A caller may retry that frame only with a new request ID.
 - Native start errors prefixed with `unknown_outcome:` are authoritative but
@@ -59,6 +69,7 @@ output overflow, helper-thread failure and shutdown terminate the owned process
 tree rather than dropping a live child handle. Live provider stdout is parsed
 with a 4 MiB per-frame ceiling; an oversized, unterminated or invalid UTF-8
 frame is a terminal provider-protocol failure, not an unbounded renderer input.
+EOF never acts as an implicit delimiter for a short partial frame.
 
 The legacy Workbench compatibility binding maps its stable visible session to
 one Task. Every `RuntimeRegistry` replacement maps to a fresh Run and
@@ -77,7 +88,10 @@ flight re-checks that gate before creating a session or spawning a process.
 
 Workbench hydration reconciles every native AgentSession mapped to the visible
 Task, not only the newest record. Any active or `unknown_outcome` execution
-blocks respawn even when a newer Run is already terminal.
+blocks respawn even when a newer Run is already terminal. Native `session/list`
+is the complete retained projection catalog: when a formerly reconciled
+terminal projection has been pruned, Workbench appends a retirement fact and
+stops treating that historical checkpoint as a live respawn barrier.
 
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).

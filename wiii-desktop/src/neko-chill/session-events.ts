@@ -122,6 +122,13 @@ export type NekoSessionEventData =
       replayedEventCount: number;
     }
   | {
+      /** The complete native catalog no longer contains this checkpoint. */
+      type: "native-runtime-retired";
+      agentSessionId: string;
+      runId: string;
+      reason: "projection-pruned";
+    }
+  | {
       type: "workspace-activity";
       activityId: string;
       title: string;
@@ -303,6 +310,14 @@ function isValidEventData(data: Record<string, unknown>): boolean {
         (data.replayedThroughSeq as number) >= (data.replayedFromSeq as number) &&
         Number.isSafeInteger(data.replayedEventCount) &&
         (data.replayedEventCount as number) >= 0
+      );
+    case "native-runtime-retired":
+      return (
+        typeof data.agentSessionId === "string" &&
+        data.agentSessionId.length > 0 &&
+        typeof data.runId === "string" &&
+        data.runId.length > 0 &&
+        data.reason === "projection-pruned"
       );
     case "workspace-activity":
       return (

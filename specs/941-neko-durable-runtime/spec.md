@@ -147,13 +147,18 @@ side-effect/committed phases become `unknown_outcome`.
   hold the global lifecycle-operation lock. EOF on provider stdout MUST NOT be
   treated as proof that the child process exited. Exit observation MUST run
   independently from stdout consumption, and each live provider frame MUST be
-  byte-bounded before it is decoded or emitted to the renderer.
+  byte-bounded before it is decoded or emitted to the renderer. EOF before a
+  newline delimiter is a protocol failure even when the partial frame is below
+  the byte ceiling.
 - **FR-023**: Restored Workbench sessions MUST reconcile every matching native
   session record and replay cursor before hydration becomes usable, then
   re-read each native session projection after replay to observe lifecycle
   transitions committed during that read. Any native `unknown_outcome` or
   unattached active process MUST fail closed rather than trigger a replacement,
-  even when a newer native Run is terminal.
+  even when a newer native Run is terminal. When the complete native catalog
+  no longer contains a previously reconciled projection because terminal
+  retention pruned it, Workbench MUST durably retire that checkpoint so it
+  cannot block respawn forever.
 - **FR-024**: Completed and failed request identities MUST have a documented,
   bounded retry window. Accepted, dispatched, side-effect-started, committed,
   and `unknown_outcome` identities MUST NOT be pruned automatically.
@@ -163,7 +168,11 @@ side-effect/committed phases become `unknown_outcome`.
 - **FR-026**: If both bounded IPC attempts lose a `session/start` response,
   the TypeScript client MUST retain the same request, agent-session, Run,
   Environment, listener and early transport buffer for a caller-level retry,
-  even when `RuntimeRegistry` gives that retry a fresh preparation ID.
+  even when `RuntimeRegistry` gives that retry a fresh preparation ID. The
+  retained bootstrap buffer MUST have aggregate frame and byte ceilings;
+  overflow MUST detach listeners, request cancellation with the retained
+  identity, and remain fail-closed until cancellation is confirmed. Session
+  deletion MUST reconcile or cancel retained unresolved starts first.
 - **FR-027**: Provider probe capture files MUST be created owner-only on Unix;
   capture contents remain bounded and are deleted after the probe.
 - **FR-028**: On Unix, the durable journal directory MUST be owner-only and

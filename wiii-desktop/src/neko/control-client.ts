@@ -57,10 +57,18 @@ interface NativeSessionStartResult {
   provider: NekoDetectedProvider;
 }
 
+interface NativeSessionCancelResult {
+  agentSessionId: string;
+  cancelled: boolean;
+}
+
 interface StartTransportState {
   lineHandlers: Array<(line: string) => void>;
   exitHandlers: Array<(code: number | null) => void>;
   pendingLines: string[];
+  pendingLineBytes: number;
+  terminalError: string | null;
+  overflowCancellation: Promise<boolean> | null;
   exitObserved: boolean;
   pendingExitCode: number | null;
   killed: boolean;
@@ -73,9 +81,13 @@ interface StartTransportState {
 }
 
 interface UnresolvedStartIdentity {
+  clientSessionId: string;
   requestId: string;
   agentSessionId: string;
   execution: NekoExecutionBinding;
+  providerId: string;
+  workspacePath: string;
+  profileId: string | null;
   transport: StartTransportState;
 }
 
@@ -92,8 +104,13 @@ export interface NekoControlClient {
   listProfiles(request: NekoProviderProfileRequest): Promise<NekoLaunchProfile[]>;
   listSessions(runId?: string): Promise<NekoNativeSessionRecord[]>;
   readEvents(streamId: string, afterSeq?: number, limit?: number): Promise<NekoControlReplayPage>;
+  cancelUnresolvedStarts(clientSessionId: string): Promise<number>;
   spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider>;
 }
+
+const MAX_PENDING_BOOTSTRAP_FRAMES = 256;
+const MAX_PENDING_BOOTSTRAP_BYTES = 8 * 1024 * 1024;
+const NATIVE_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
 
 function legacyExecution(
   clientSessionId: string,
@@ -187,6 +204,128 @@ class TauriNekoControlClient implements NekoControlClient {
     }
   }
 
+  async cancelUnresolvedStarts(clientSessionId: string): Promise<number> {
+    const retained = [...this.unresolvedStarts.entries()].filter(
+      ([, identity]) => identity.clientSessionId === clientSessionId,
+    );
+    for (const [startKey, identity] of retained) {
+      if (identity.transport.overflowCancellation) {
+        const cancelled = await this.confirmOverflowCancellation(identity);
+        if (!cancelled) {
+          throw new Error(identity.transport.terminalError ?? "Không thể dừng runtime native chưa đối soát.");
+        }
+      } else {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const sessions = await this.listSessions(identity.execution.runId);
+        let native = sessions.find(
+          (candidate) => candidate.agentSessionId === identity.agentSessionId,
+        );
+        if (!native) {
+          try {
+            const replayed = await invokeIdempotently<unknown>(
+              invoke,
+              "neko_control_session_start",
+              { request: nativeStartRequest(identity) },
+            );
+            if (!isNativeSessionStartResult(replayed)) {
+              throw new Error("Neko returned an invalid retained-start replay response.");
+            }
+            native = {
+              agentSessionId: replayed.agentSessionId,
+              taskId: identity.execution.taskId,
+              runId: replayed.runId,
+              environmentId: identity.execution.environmentId,
+              providerId: replayed.provider.id,
+              providerVersion: replayed.provider.version,
+              workspacePath: identity.workspacePath,
+              state: "running",
+              operationPhase: "committed",
+              continuity: "active",
+              pid: null,
+              createdAt: new Date(0).toISOString(),
+              updatedAt: new Date(0).toISOString(),
+            };
+          } catch (error) {
+            if (!isRecordedStartFailure(error)) throw error;
+          }
+        }
+        if (native && isNativeOutcomeUncertain(native)) {
+          throw new Error(
+            "unknown_outcome: retained native start cannot be forgotten or cancelled automatically.",
+          );
+        }
+        if (native && !NATIVE_TERMINAL_STATES.has(native.state)) {
+          await this.cancelStartIdentity(invoke, identity);
+        }
+      }
+      identity.transport.killed = true;
+      identity.transport.pendingLines.length = 0;
+      identity.transport.pendingLineBytes = 0;
+      identity.transport.unresolvedWriteIds.clear();
+      detachStartListeners(identity.transport);
+      if (this.unresolvedStarts.get(startKey) === identity) {
+        this.unresolvedStarts.delete(startKey);
+      }
+    }
+    return retained.length;
+  }
+
+  private async confirmOverflowCancellation(
+    identity: UnresolvedStartIdentity,
+  ): Promise<boolean> {
+    if (await identity.transport.overflowCancellation) return true;
+    const current = (await this.listSessions(identity.execution.runId)).find(
+      (candidate) => candidate.agentSessionId === identity.agentSessionId,
+    );
+    if (!current || NATIVE_TERMINAL_STATES.has(current.state)) {
+      return !current || !isNativeOutcomeUncertain(current);
+    }
+    if (isNativeOutcomeUncertain(current)) return false;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await this.cancelStartIdentity(invoke, identity);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async cancelStartIdentity(
+    invoke: <R>(command: string, args?: Record<string, unknown>) => Promise<R>,
+    identity: UnresolvedStartIdentity,
+  ): Promise<void> {
+    const result = await invokeIdempotently<unknown>(
+      invoke,
+      "neko_control_session_cancel",
+      {
+        request: {
+          requestId: identity.transport.cancelRequestId,
+          runId: identity.execution.runId,
+          agentSessionId: identity.agentSessionId,
+        },
+      },
+    );
+    if (
+      !isNativeSessionCancelResult(result) ||
+      result.agentSessionId !== identity.agentSessionId
+    ) {
+      throw new Error("Neko returned an invalid retained-start cancellation response.");
+    }
+    if (result.cancelled) return;
+
+    const current = (await this.listSessions(identity.execution.runId)).find(
+      (candidate) => candidate.agentSessionId === identity.agentSessionId,
+    );
+    if (
+      current &&
+      (isNativeOutcomeUncertain(current) || !NATIVE_TERMINAL_STATES.has(current.state))
+    ) {
+      throw new Error(
+        "unknown_outcome: Neko could not prove the retained native start reached a safe terminal state.",
+      );
+    }
+  }
+
   async spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider> {
     const provider = requireProviderDefinition(request.providerId);
     if (!request.workspacePath) {
@@ -209,14 +348,26 @@ class TauriNekoControlClient implements NekoControlClient {
       request.profileId ?? null,
     ]);
     const priorStart = this.unresolvedStarts.get(startKey);
+    if (priorStart?.transport.terminalError) {
+      const cancelled = await this.confirmOverflowCancellation(priorStart);
+      const message = priorStart.transport.terminalError;
+      if (cancelled && this.unresolvedStarts.get(startKey) === priorStart) {
+        this.unresolvedStarts.delete(startKey);
+      }
+      throw new Error(message);
+    }
     const startIdentity = priorStart ?? {
+      clientSessionId: request.clientSessionId,
       requestId: uuidv4(),
       agentSessionId: uuidv4(),
       execution: requestedExecution,
+      providerId: provider.id,
+      workspacePath: request.workspacePath,
+      profileId: request.profileId ?? null,
       transport: createStartTransportState(),
     };
     this.unresolvedStarts.set(startKey, startIdentity);
-    const { requestId, agentSessionId, execution, transport: transportState } = startIdentity;
+    const { agentSessionId, transport: transportState } = startIdentity;
     const { invoke } = await import("@tauri-apps/api/core");
     const { listen } = await import("@tauri-apps/api/event");
 
@@ -225,7 +376,25 @@ class TauriNekoControlClient implements NekoControlClient {
     // buffers belong to the unresolved logical start, not this one caller;
     // losing both IPC responses must not discard bootstrap output or exit.
     try {
-      await ensureStartListeners(transportState, listen, agentSessionId);
+      await ensureStartListeners(
+        transportState,
+        listen,
+        agentSessionId,
+        async () => {
+          try {
+            await this.cancelStartIdentity(invoke, startIdentity);
+            transportState.killed = true;
+            transportState.unresolvedWriteIds.clear();
+            return true;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            transportState.terminalError =
+              `${transportState.terminalError ?? "Bootstrap buffer vượt giới hạn an toàn."} ` +
+              `Không thể xác nhận runtime đã dừng: ${message}`;
+            return false;
+          }
+        },
+      );
     } catch (error) {
       detachStartListeners(transportState);
       if (this.unresolvedStarts.get(startKey) === startIdentity) {
@@ -237,21 +406,19 @@ class TauriNekoControlClient implements NekoControlClient {
     let started: NativeSessionStartResult;
     try {
       const result = await invokeIdempotently<unknown>(invoke, "neko_control_session_start", {
-        request: {
-          requestId,
-          agentSessionId,
-          taskId: execution.taskId,
-          runId: execution.runId,
-          providerId: provider.id,
-          environmentId: execution.environmentId,
-          workspacePath: request.workspacePath,
-          ...(request.profileId ? { profileId: request.profileId } : {}),
-        },
+        request: nativeStartRequest(startIdentity),
       });
       if (!isNativeSessionStartResult(result)) {
         throw new Error("Neko trả về kết quả khởi động phiên không hợp lệ.");
       }
       started = result;
+      if (transportState.terminalError) {
+        const cancelled = await this.confirmOverflowCancellation(startIdentity);
+        if (cancelled && this.unresolvedStarts.get(startKey) === startIdentity) {
+          this.unresolvedStarts.delete(startKey);
+        }
+        throw new Error(transportState.terminalError);
+      }
       if (this.unresolvedStarts.get(startKey) === startIdentity) {
         this.unresolvedStarts.delete(startKey);
       }
@@ -308,6 +475,7 @@ class TauriNekoControlClient implements NekoControlClient {
         transportState.lineHandlers.push(handler);
         if (transportState.pendingLines.length > 0) {
           const buffered = transportState.pendingLines.splice(0);
+          transportState.pendingLineBytes = 0;
           for (const line of buffered) handler(line);
         }
       },
@@ -358,6 +526,9 @@ function createStartTransportState(): StartTransportState {
     lineHandlers: [],
     exitHandlers: [],
     pendingLines: [],
+    pendingLineBytes: 0,
+    terminalError: null,
+    overflowCancellation: null,
     exitObserved: false,
     pendingExitCode: null,
     killed: false,
@@ -367,6 +538,19 @@ function createStartTransportState(): StartTransportState {
     unlistenLine: null,
     unlistenExit: null,
     listenerSetup: null,
+  };
+}
+
+function nativeStartRequest(identity: UnresolvedStartIdentity): Record<string, string> {
+  return {
+    requestId: identity.requestId,
+    agentSessionId: identity.agentSessionId,
+    taskId: identity.execution.taskId,
+    runId: identity.execution.runId,
+    providerId: identity.providerId,
+    environmentId: identity.execution.environmentId,
+    workspacePath: identity.workspacePath,
+    ...(identity.profileId ? { profileId: identity.profileId } : {}),
   };
 }
 
@@ -381,18 +565,43 @@ async function ensureStartListeners(
   state: StartTransportState,
   listen: typeof import("@tauri-apps/api/event").listen,
   agentSessionId: string,
+  cancelOverflow: () => Promise<boolean>,
 ): Promise<void> {
   if (state.listenerSetup) return state.listenerSetup;
   state.listenerSetup = (async () => {
-    state.unlistenLine = await listen<string>(
+    const unlistenLine = await listen<string>(
       `neko-session://line/${agentSessionId}`,
       (event) => {
-        if (state.lineHandlers.length === 0) state.pendingLines.push(event.payload);
-        else for (const handler of state.lineHandlers) handler(event.payload);
+        if (state.lineHandlers.length > 0) {
+          for (const handler of state.lineHandlers) handler(event.payload);
+          return;
+        }
+        const frameBytes = new TextEncoder().encode(event.payload).byteLength;
+        if (
+          state.pendingLines.length >= MAX_PENDING_BOOTSTRAP_FRAMES ||
+          state.pendingLineBytes + frameBytes > MAX_PENDING_BOOTSTRAP_BYTES
+        ) {
+          if (!state.terminalError) {
+            state.terminalError =
+              "Bootstrap output vượt giới hạn an toàn; Neko đã yêu cầu dừng runtime thay vì giữ dữ liệu vô hạn.";
+            state.pendingLines.length = 0;
+            state.pendingLineBytes = 0;
+            detachStartListeners(state);
+            state.overflowCancellation = cancelOverflow();
+          }
+          return;
+        }
+        state.pendingLines.push(event.payload);
+        state.pendingLineBytes += frameBytes;
       },
     );
+    state.unlistenLine = unlistenLine;
+    if (state.terminalError) {
+      detachStartListeners(state);
+      return;
+    }
     try {
-      state.unlistenExit = await listen<number | null>(
+      const unlistenExit = await listen<number | null>(
         `neko-session://exit/${agentSessionId}`,
         (event) => {
           state.exitObserved = true;
@@ -403,6 +612,8 @@ async function ensureStartListeners(
           queueMicrotask(() => detachStartListeners(state));
         },
       );
+      state.unlistenExit = unlistenExit;
+      if (state.terminalError) detachStartListeners(state);
     } catch (error) {
       detachStartListeners(state);
       throw error;
@@ -422,6 +633,10 @@ function isProviderBusy(error: unknown): boolean {
 
 function isUnknownStartOutcome(error: string): boolean {
   return error.startsWith("unknown_outcome:");
+}
+
+function isRecordedStartFailure(error: unknown): boolean {
+  return typeof error === "string" && error.startsWith("recorded session start failed:");
 }
 
 function isDetectedProvider(value: unknown): value is NekoDetectedProvider {
@@ -476,6 +691,20 @@ function isNativeSessionStartResult(value: unknown): value is NativeSessionStart
     typeof result.agentSessionId === "string" &&
     typeof result.runId === "string" &&
     isDetectedProvider(result.provider)
+  );
+}
+
+function isNativeSessionCancelResult(value: unknown): value is NativeSessionCancelResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  return typeof result.agentSessionId === "string" && typeof result.cancelled === "boolean";
+}
+
+function isNativeOutcomeUncertain(session: NekoNativeSessionRecord): boolean {
+  return (
+    session.state === "unknown_outcome" ||
+    session.operationPhase === "unknown_outcome" ||
+    session.continuity === "unknown_outcome"
   );
 }
 

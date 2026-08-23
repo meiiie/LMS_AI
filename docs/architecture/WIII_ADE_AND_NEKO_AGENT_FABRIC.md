@@ -94,6 +94,14 @@ read-model reconciliation, not a second authority: native `unknown_outcome`
 and active sessions without a live renderer transport stay locked against
 automatic respawn.
 
+The compatibility client also bounds bootstrap output before a provider
+adapter attaches: at most 256 frames and 8 MiB are retained. Overflow detaches
+the renderer listeners and asks the native authority to cancel the same
+logical start; a visible session cannot be deleted while that cancellation is
+uncertain. When terminal native projections age out of the complete catalog,
+Workbench records an explicit checkpoint-retirement fact instead of leaving a
+permanent phantom respawn lock.
+
 Phase 2A intentionally remains inside `Wiii.exe`. It is **not** a standalone,
 crash-independent daemon: a graceful Wiii exit cancels owned children, while a
 hard restart conservatively reports continuity loss or `unknown_outcome` from
@@ -161,6 +169,9 @@ Implemented across the foundation and Phase 2A slices:
 - provider/session/events Tauri commands with no WebView permission for raw
   executable, argument vector, PID or unscoped stdin primitives;
 - one TypeScript control client for discovery, replay and live transport;
+- bounded aggregate bootstrap buffering, retained-start cancellation before
+  deletion, explicit stale-checkpoint retirement, and strict newline-delimited
+  provider frames even at EOF;
 - shutdown admission closes before process drain, and Unix provider probes use
   bounded owner-only capture files; the Unix SQLite parent, database and
   WAL/SHM sidecars are owner-only as well;

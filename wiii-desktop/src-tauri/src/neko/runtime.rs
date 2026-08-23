@@ -1097,7 +1097,10 @@ fn read_bounded_frame<R: BufRead>(
             if frame.is_empty() {
                 return Ok(None);
             }
-            break;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "provider frame ended before its newline delimiter",
+            ));
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let take = newline.map_or(available.len(), |position| position + 1);
@@ -1171,6 +1174,10 @@ mod tests {
 
         let mut unterminated = BufReader::with_capacity(2, io::Cursor::new(b"12345"));
         let error = read_bounded_frame(&mut unterminated, &mut frame, 4).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        let mut short_unterminated = BufReader::with_capacity(2, io::Cursor::new(b"1234"));
+        let error = read_bounded_frame(&mut short_unterminated, &mut frame, 4).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 

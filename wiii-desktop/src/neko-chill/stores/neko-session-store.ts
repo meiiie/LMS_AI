@@ -148,7 +148,10 @@ type DriverFactory = (
   ownDriver: (driver: Driver) => void,
 ) => Promise<Driver>;
 
-type NativeControlReader = Pick<NekoControlClient, "listSessions" | "readEvents">;
+type NativeControlReader = Pick<
+  NekoControlClient,
+  "listSessions" | "readEvents" | "cancelUnresolvedStarts"
+>;
 let nativeControlReaderFactory: () => NativeControlReader = getNekoControlClient;
 
 const NATIVE_REPLAY_PAGE_SIZE = 500;
@@ -182,10 +185,16 @@ function lastNativeCursor(session: NekoSession, runId: string): number {
 }
 
 function nativeRunBlocksRespawn(session: NekoSession): boolean {
+  const retired = new Set<string>();
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const data = session.events[index].data;
     if (data.type === "runtime-attached") break;
+    if (data.type === "native-runtime-retired") {
+      retired.add(data.agentSessionId);
+      continue;
+    }
     if (data.type !== "native-runtime-reconciled") continue;
+    if (retired.has(data.agentSessionId)) continue;
     if (
       data.state === "unknown_outcome" ||
       data.operationPhase === "unknown_outcome" ||
@@ -195,6 +204,36 @@ function nativeRunBlocksRespawn(session: NekoSession): boolean {
     }
   }
   return false;
+}
+
+function retireAbsentNativeCheckpoints(
+  session: NekoSession,
+  natives: NekoNativeSessionRecord[],
+): boolean {
+  const present = new Set(natives.map((native) => native.agentSessionId));
+  const resolved = new Set<string>();
+  const retire: Array<{ agentSessionId: string; runId: string }> = [];
+  for (let index = session.events.length - 1; index >= 0; index -= 1) {
+    const data = session.events[index].data;
+    if (data.type === "runtime-attached") break;
+    if (data.type === "native-runtime-retired") {
+      resolved.add(data.agentSessionId);
+      continue;
+    }
+    if (data.type !== "native-runtime-reconciled" || resolved.has(data.agentSessionId)) continue;
+    resolved.add(data.agentSessionId);
+    if (!present.has(data.agentSessionId)) {
+      retire.push({ agentSessionId: data.agentSessionId, runId: data.runId });
+    }
+  }
+  for (const checkpoint of retire) {
+    appendOwnedSessionEvent(session, "runtime", {
+      type: "native-runtime-retired",
+      ...checkpoint,
+      reason: "projection-pruned",
+    });
+  }
+  return retire.length > 0;
 }
 
 function reconcileNativeStatus(
@@ -591,8 +630,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const nativeSessions = await nativeReader.listSessions();
           for (const session of Object.values(restored)) {
             const natives = nativeSessionsForTask(nativeSessions, session.id);
-            if (natives.length === 0) continue;
-            let changed = false;
+            let changed = retireAbsentNativeCheckpoints(session, natives);
             const reconciled: NekoNativeSessionRecord[] = [];
             for (const native of natives) {
               const result = await reconcileNativeRuntime(session, native, nativeReader);
@@ -1591,6 +1629,18 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         }
       });
       const operation = (async () => {
+        try {
+          await nativeControlReaderFactory().cancelUnresolvedStarts(sessionId);
+        } catch (error) {
+          set((state) => {
+            const session = state.sessions[sessionId];
+            if (!session) return;
+            session.status = "error";
+            session.statusDetail =
+              `Không thể đóng phiên vì một runtime native chưa được đối soát: ${error instanceof Error ? error.message : String(error)}`;
+          });
+          return;
+        }
         await waitForHolds(dispatchBarriers, sessionId);
         const provider = runtimes.get(sessionId) ?? get().sessions[sessionId]?.runtime ?? null;
         const disposeError = await runtimes.detach(sessionId).then(
@@ -1642,16 +1692,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const current = get().sessions[sessionId];
       // Acquire the lifecycle lock before awaiting a close or runtime teardown.
       if (!current || current.deletePending) return;
-      if (!current.runtime && !runtimes.get(sessionId) && nativeRunBlocksRespawn(current)) {
-        set((state) => {
-          const session = state.sessions[sessionId];
-          if (!session) return;
-          session.status = "error";
-          session.statusDetail =
-            "Neko chưa thể xác nhận runtime native đã dừng; không xóa phiên khi kết quả execution còn chưa chắc chắn.";
-        });
-        return;
-      }
       set((state) => {
         const session = state.sessions[sessionId];
         if (session) {
@@ -1659,6 +1699,36 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           session.status = "stopping";
         }
       });
+      try {
+        await nativeControlReaderFactory().cancelUnresolvedStarts(sessionId);
+      } catch (error) {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return;
+          session.deletePending = false;
+          session.status = "error";
+          session.statusDetail =
+            `Không thể xóa phiên vì một runtime native chưa được đối soát: ${error instanceof Error ? error.message : String(error)}`;
+        });
+        return;
+      }
+      const refreshed = get().sessions[sessionId];
+      if (
+        refreshed &&
+        !refreshed.runtime &&
+        !runtimes.get(sessionId) &&
+        nativeRunBlocksRespawn(refreshed)
+      ) {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return;
+          session.deletePending = false;
+          session.status = "error";
+          session.statusDetail =
+            "Neko chưa thể xác nhận runtime native đã dừng; không xóa phiên khi kết quả execution còn chưa chắc chắn.";
+        });
+        return;
+      }
       const provider = runtimes.get(sessionId) ?? current.runtime;
       await closeOperations.get(sessionId)?.catch(() => {});
       await waitForHolds(dispatchBarriers, sessionId);

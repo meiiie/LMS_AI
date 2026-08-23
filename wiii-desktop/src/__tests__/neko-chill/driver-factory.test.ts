@@ -244,6 +244,130 @@ describe("Neko driver factory resource ownership", () => {
     expect(spawned.agentSessionId).toBe(startCalls[0][1].request.agentSessionId);
   });
 
+  it("bounds aggregate bootstrap output and cancels the unresolved native start", async () => {
+    let onLine: ((event: { payload: string }) => void) | null = null;
+    const unlistenLine = vi.fn();
+    const unlistenExit = vi.fn();
+    tauri.listen.mockImplementation(async (event: string, handler: any) => {
+      if (event.includes("/line/")) {
+        onLine = handler;
+        return unlistenLine;
+      }
+      return unlistenExit;
+    });
+    let starts = 0;
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command === "neko_control_session_start") {
+        starts += 1;
+        if (starts === 1) {
+          for (let index = 0; index < 257; index += 1) {
+            onLine?.({ payload: `bootstrap-${index}` });
+          }
+        }
+        throw new Error("start response bridge interrupted");
+      }
+      if (command === "neko_control_session_cancel") {
+        return { agentSessionId: payload?.request.agentSessionId, cancelled: true };
+      }
+      return undefined;
+    });
+    const request = {
+      providerId: "neko",
+      clientSessionId: "session-bootstrap-overflow",
+      workspacePath: "C:/tmp/project",
+    };
+
+    await expect(getNekoControlClient().spawnProvider(request)).rejects.toThrow(
+      "start response bridge interrupted",
+    );
+    await expect(getNekoControlClient().spawnProvider(request)).rejects.toThrow(
+      "Bootstrap output",
+    );
+
+    expect(tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_start",
+    )).toHaveLength(2);
+    expect(tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_cancel",
+    )).toHaveLength(1);
+    expect(unlistenLine).toHaveBeenCalledOnce();
+    expect(unlistenExit).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a retained unresolved start before its visible session is deleted", async () => {
+    tauri.listen.mockResolvedValue(vi.fn());
+    let retainedStart: Record<string, any> | null = null;
+    let exposeNativeSession = false;
+    let nativeState = "running";
+    let starts = 0;
+    tauri.invoke.mockImplementation(async (command: string, payload?: Record<string, any>) => {
+      if (command === "neko_control_session_start") {
+        starts += 1;
+        retainedStart = payload?.request;
+        if (starts <= 2) throw new Error("both start responses were lost");
+        throw "unknown_outcome: original start is still running";
+      }
+      if (command === "neko_control_session_list") {
+        return exposeNativeSession ? [{
+          agentSessionId: retainedStart?.agentSessionId,
+          taskId: retainedStart?.taskId,
+          runId: retainedStart?.runId,
+          environmentId: retainedStart?.environmentId,
+          providerId: "neko",
+          providerVersion: "0.25.0",
+          workspacePath: "C:/tmp/project",
+          state: nativeState,
+          operationPhase: nativeState === "unknown_outcome" ? "unknown_outcome" : "committed",
+          continuity: nativeState === "unknown_outcome" ? "unknown_outcome" : "active",
+          pid: 123,
+          createdAt: "2026-08-23T00:00:00.000Z",
+          updatedAt: "2026-08-23T00:01:00.000Z",
+        }] : [];
+      }
+      if (command === "neko_control_session_cancel") {
+        return { agentSessionId: payload?.request.agentSessionId, cancelled: true };
+      }
+      return undefined;
+    });
+
+    await expect(getNekoControlClient().spawnProvider({
+      providerId: "neko",
+      clientSessionId: "session-retained-delete",
+      workspacePath: "C:/tmp/project",
+    })).rejects.toThrow("both start responses were lost");
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts("session-retained-delete"),
+    ).rejects.toContain("unknown_outcome");
+    exposeNativeSession = true;
+    nativeState = "unknown_outcome";
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts("session-retained-delete"),
+    ).rejects.toThrow("unknown_outcome");
+    nativeState = "running";
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts("session-retained-delete"),
+    ).resolves.toBe(1);
+    await expect(
+      getNekoControlClient().cancelUnresolvedStarts("session-retained-delete"),
+    ).resolves.toBe(0);
+
+    const startCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_start",
+    );
+    const cancelCalls = tauri.invoke.mock.calls.filter(
+      ([command]) => command === "neko_control_session_cancel",
+    );
+    expect(startCalls).toHaveLength(3);
+    expect(new Set(startCalls.map(([, payload]) => payload.request.requestId)).size).toBe(1);
+    expect(new Set(startCalls.map(([, payload]) => payload.request.agentSessionId)).size).toBe(1);
+    expect(cancelCalls).toHaveLength(1);
+    expect(cancelCalls[0][1].request).toMatchObject({
+      runId: startCalls[0][1].request.runId,
+      agentSessionId: startCalls[0][1].request.agentSessionId,
+      requestId: expect.any(String),
+    });
+  });
+
   it("recovers a lost start through real RuntimeRegistry retries without losing transport events", async () => {
     let onLine: ((event: { payload: string }) => void) | null = null;
     let onExit: ((event: { payload: number | null }) => void) | null = null;

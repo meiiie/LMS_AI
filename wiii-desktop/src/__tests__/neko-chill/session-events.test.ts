@@ -113,6 +113,13 @@ describe("Neko session event validation", () => {
       replayedThroughSeq: 7,
       replayedEventCount: 5,
     }))).toBe(true);
+
+    expect(isNekoSessionEvent(event({
+      type: "native-runtime-retired",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      reason: "projection-pruned",
+    }))).toBe(true);
   });
 
   it.each([
@@ -137,6 +144,12 @@ describe("Neko session event validation", () => {
       replayedFromSeq: 5,
       replayedThroughSeq: 4,
       replayedEventCount: 0,
+    },
+    {
+      type: "native-runtime-retired",
+      agentSessionId: "native-session-1",
+      runId: "run-1",
+      reason: "forgotten",
     },
   ])("rejects a malformed $type payload", (data) => {
     expect(isNekoSessionEvent({
