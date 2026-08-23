@@ -150,7 +150,7 @@ type DriverFactory = (
 
 type NativeControlReader = Pick<
   NekoControlClient,
-  "listSessions" | "readEvents" | "cancelUnresolvedStarts"
+  "listSessions" | "readEvents" | "unresolvedStartSessionIds" | "cancelUnresolvedStarts"
 >;
 let nativeControlReaderFactory: () => NativeControlReader = getNekoControlClient;
 
@@ -2258,11 +2258,14 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
   if (modeExitOperation) return modeExitOperation;
 
   const state = useNekoSessionStore.getState();
+  const nativeControl = nativeControlReaderFactory();
+  const unresolvedStartSessionIds = new Set(nativeControl.unresolvedStartSessionIds());
   const sessionIds = new Set([
     ...runtimes.ownedSessionIds(),
     ...dispatchBarriers.keys(),
     ...runtimeOperations.keys(),
     ...closeOperations.keys(),
+    ...unresolvedStartSessionIds,
     ...Object.values(state.sessions)
       .filter((session) => session.runtime !== null || session.status === "connecting")
       .map((session) => session.id),
@@ -2285,6 +2288,21 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     await Promise.all([...sessionIds].map((sessionId) => waitForHolds(dispatchBarriers, sessionId)));
     const results = await runtimes.disposeAll();
     await Promise.all([...sessionIds].map((sessionId) => waitForHolds(runtimeOperations, sessionId)));
+    // A provider preparation can become unresolved while RuntimeRegistry is
+    // joining it. Refresh after every preparation has settled so teardown
+    // cannot miss a native start retained after the initial snapshot.
+    for (const sessionId of nativeControl.unresolvedStartSessionIds()) {
+      unresolvedStartSessionIds.add(sessionId);
+      sessionIds.add(sessionId);
+    }
+    const unresolvedStartFailures = new Map<string, unknown>();
+    await Promise.all([...unresolvedStartSessionIds].map(async (sessionId) => {
+      try {
+        await nativeControl.cancelUnresolvedStarts(sessionId);
+      } catch (error) {
+        unresolvedStartFailures.set(sessionId, error);
+      }
+    }));
 
     const resultsBySession = new Map(results.map((result) => [result.sessionId, result] as const));
     const sessionIdsToPersist: string[] = [];
@@ -2294,14 +2312,20 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         if (!session || session.deletePending) continue;
         const result = resultsBySession.get(sessionId);
         const provider = result?.provider ?? session.runtime;
-        const cleanup = result
+        const unresolvedStartFailure = unresolvedStartFailures.get(sessionId);
+        const runtimeCleanup: RuntimeCleanupOutcome = result
           ? runtimeDisposalOutcome(result)
-          : {
+          : unresolvedStartSessionIds.has(sessionId)
+            ? { failed: false }
+            : {
               failed: true,
               error: new Error(
                 "Runtime không thuộc registry khi rời Neko Chill; cleanup không được quan sát.",
               ),
             };
+        const cleanup: RuntimeCleanupOutcome = unresolvedStartFailure === undefined
+          ? runtimeCleanup
+          : { failed: true, error: unresolvedStartFailure };
         session.runtime = null;
         session.status = cleanup.failed ? "error" : "exited";
         session.pendingPermission = null;
@@ -2325,7 +2349,8 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     await Promise.all(
       sessionIdsToPersist.map(async (sessionId) => {
         const result = resultsBySession.get(sessionId);
-        const failed = result ? result.cleanupFailed : true;
+        const failed = unresolvedStartFailures.has(sessionId)
+          || (result ? result.cleanupFailed : !unresolvedStartSessionIds.has(sessionId));
         await persistSessionNowOrReport(sessionId, "trạng thái rời Neko Chill", {
           fatal: failed,
           strict: failed,

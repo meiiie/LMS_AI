@@ -273,6 +273,18 @@ side-effect/committed phases become `unknown_outcome`.
   component lifetime. Failed cleanup MUST remain retryable and block a
   replacement bootstrap until the prior App Server reaches a proven terminal
   result.
+- **FR-048**: Provider spawn and discovery MUST preserve a machine-readable
+  distinction between a safe rejection and post-spawn cleanup that was not
+  proven. The latter MUST become `unknown_outcome` for an admitted start and
+  MUST NOT authorize an automatic replacement process.
+- **FR-049**: Graceful shutdown MUST wait for every published process-exit
+  supervisor to finish its exact terminal reconciliation after lifecycle
+  serialization is released. Application exit MUST NOT abandon a supervisor
+  between process-map hand-off and durable terminal commit.
+- **FR-050**: Neko mode teardown MUST enumerate retained control-client starts,
+  refresh that enumeration after in-flight runtime preparation settles, request
+  authoritative cancellation before recording exit, and persist cleanup
+  uncertainty when cancellation cannot be proven.
 
 ### Non-goals
 
@@ -308,3 +320,6 @@ side-effect/committed phases become `unknown_outcome`.
   recovery, cancellation result commits atomically, embedded frame delimiters
   are rejected, host-unsupported discovery is explicit, and failed Codex
   bootstrap cleanup prevents replacement until a successful retry.
+- **SC-009**: Tests prove post-spawn cleanup uncertainty remains structured,
+  shutdown waits for published exit supervision, and mode exit fails closed
+  when a retained native start cannot be cancelled.

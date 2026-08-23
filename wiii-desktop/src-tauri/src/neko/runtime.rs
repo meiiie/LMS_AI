@@ -15,7 +15,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -82,6 +82,7 @@ struct RuntimeInner {
     journal: Journal,
     processes: Mutex<HashMap<String, AgentProc>>,
     exit_supervisions: Mutex<HashSet<String>>,
+    exit_supervision_changed: Condvar,
     pending_terminal_facts: Mutex<HashMap<String, PendingTerminalFact>>,
     operations: Mutex<()>,
     shutting_down: AtomicBool,
@@ -169,6 +170,7 @@ impl NekoRuntime {
                 journal,
                 processes: Mutex::new(HashMap::new()),
                 exit_supervisions: Mutex::new(HashSet::new()),
+                exit_supervision_changed: Condvar::new(),
                 pending_terminal_facts: Mutex::new(pending_terminal_facts),
                 operations: Mutex::new(()),
                 shutting_down: AtomicBool::new(false),
@@ -177,7 +179,7 @@ impl NekoRuntime {
         })
     }
 
-    pub fn list_providers(&self) -> Vec<AgentInfo> {
+    pub fn list_providers(&self) -> Result<Vec<AgentInfo>, String> {
         provider::list()
     }
 
@@ -293,6 +295,16 @@ impl NekoRuntime {
         // read-only probe must not block lifecycle traffic for live agents.
         let resolved = match provider::resolve(&request.provider_id) {
             Ok(resolved) => resolved,
+            Err(error) if error.cleanup_unproven() => {
+                let _operation = lock(&self.inner.operations);
+                return Err(self.mark_termination_unknown(
+                    &app,
+                    &request.request_id,
+                    &request.agent_session_id,
+                    "provider_probe_cleanup_unproven",
+                    error.to_string(),
+                ));
+            }
             Err(error) => {
                 let _operation = lock(&self.inner.operations);
                 return Err(self.reject_start_error(
@@ -300,7 +312,7 @@ impl NekoRuntime {
                     &request,
                     "provider_unavailable",
                     None,
-                    error,
+                    error.to_string(),
                 ));
             }
         };
@@ -374,6 +386,15 @@ impl NekoRuntime {
             .stderr(Stdio::null());
         let mut child = match spawn_owned(&mut command) {
             Ok(child) => child,
+            Err(error) if error.cleanup_unproven() => {
+                return Err(self.mark_termination_unknown(
+                    &app,
+                    &request.request_id,
+                    &request.agent_session_id,
+                    "spawn_cleanup_unproven",
+                    format!("spawn approved provider failed: {error}"),
+                ));
+            }
             Err(error) => {
                 return Err(self.reject_start_error(
                     &app,
@@ -740,15 +761,18 @@ impl NekoRuntime {
     }
 
     pub fn kill_all(&self, app: &AppHandle) {
-        let _operation = lock(&self.inner.operations);
-        // Starts release the lifecycle lock while probing providers. Mark the
-        // authority closed before draining so a probe cannot spawn afterward.
-        self.inner.shutting_down.store(true, Ordering::Release);
         let processes = {
+            let _operation = lock(&self.inner.operations);
+            // Starts release the lifecycle lock while probing providers. Mark
+            // the authority closed before draining so a probe cannot spawn
+            // afterward, then release serialization so an already-published
+            // exit supervisor can finish its exact terminal commit.
+            self.inner.shutting_down.store(true, Ordering::Release);
             let mut processes = lock(&self.inner.processes);
             processes.drain().collect::<Vec<_>>()
         };
         for (agent_session_id, mut process) in processes {
+            let _operation = lock(&self.inner.operations);
             let termination = kill_proc(&mut process);
             let fact = match termination {
                 Ok(()) => PendingTerminalFact {
@@ -780,6 +804,7 @@ impl NekoRuntime {
                 }
             }
         }
+        self.wait_for_exit_supervisions();
     }
 
     fn ensure_accepting_starts(&self) -> Result<(), String> {
@@ -804,6 +829,24 @@ impl NekoRuntime {
             )));
         }
         Ok(())
+    }
+
+    fn wait_for_exit_supervisions(&self) {
+        let mut supervisions = lock(&self.inner.exit_supervisions);
+        while !supervisions.is_empty() {
+            supervisions = self
+                .inner
+                .exit_supervision_changed
+                .wait(supervisions)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    fn complete_exit_supervision(&self, agent_session_id: &str) {
+        let mut supervisions = lock(&self.inner.exit_supervisions);
+        supervisions.remove(agent_session_id);
+        drop(supervisions);
+        self.inner.exit_supervision_changed.notify_all();
     }
 
     fn emit_control_event(
@@ -1145,7 +1188,7 @@ impl NekoRuntime {
                 }),
             );
         }
-        lock(&self.inner.exit_supervisions).remove(agent_session_id);
+        self.complete_exit_supervision(agent_session_id);
         ProcessPoll::Exited(ProcessExitNotice {
             exit_code: code,
             termination_proven: termination.is_ok(),
@@ -1621,6 +1664,28 @@ mod tests {
             assert!(runtime
                 .ensure_exit_supervision_complete(Some("session-2"), "session cancellation")
                 .is_ok());
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3.lock"));
+    }
+
+    #[test]
+    fn shutdown_waits_for_published_exit_supervision() {
+        let path =
+            std::env::temp_dir().join(format!("wiii-runtime-{}.sqlite3", uuid::Uuid::new_v4()));
+        {
+            let runtime = NekoRuntime::open(&path).unwrap();
+            lock(&runtime.inner.exit_supervisions).insert("session-1".into());
+            let completing = runtime.clone();
+            let worker = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(25));
+                completing.complete_exit_supervision("session-1");
+            });
+            runtime.wait_for_exit_supervisions();
+            worker.join().unwrap();
+            assert!(lock(&runtime.inner.exit_supervisions).is_empty());
         }
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));

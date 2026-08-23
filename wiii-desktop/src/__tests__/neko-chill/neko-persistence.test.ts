@@ -140,6 +140,7 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 const nativeControl = {
   listSessions: vi.fn(),
   readEvents: vi.fn(),
+  unresolvedStartSessionIds: vi.fn(),
   cancelUnresolvedStarts: vi.fn(),
 };
 
@@ -258,6 +259,7 @@ describe("neko-chill persistence", () => {
     launches = [];
     nativeControl.listSessions.mockReset();
     nativeControl.readEvents.mockReset();
+    nativeControl.unresolvedStartSessionIds.mockReset();
     nativeControl.cancelUnresolvedStarts.mockReset();
     nativeControl.listSessions.mockResolvedValue([]);
     nativeControl.readEvents.mockImplementation(async (streamId: string, afterSeq = 0) => ({
@@ -266,6 +268,7 @@ describe("neko-chill persistence", () => {
       nextAfterSeq: afterSeq,
       hasMore: false,
     }));
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([]);
     nativeControl.cancelUnresolvedStarts.mockResolvedValue(0);
     _setNativeControlReaderForTests(() => nativeControl);
     useNekoSessionStore.setState({
@@ -1368,6 +1371,44 @@ describe("neko-chill persistence", () => {
     expect(session.events.at(-1)?.data).toMatchObject({
       type: "runtime-detached",
       reason: "mode-exit",
+    });
+  });
+
+  it("fails mode exit closed when a retained native start cannot be cancelled", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    nativeControl.unresolvedStartSessionIds.mockReturnValue([id]);
+    nativeControl.cancelUnresolvedStarts.mockRejectedValueOnce(
+      new Error("retained start cancellation unavailable"),
+    );
+
+    await disposeAllNekoRuntimes();
+
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "error",
+      closePending: false,
+    });
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
+      "báo lỗi khi thu hồi tài nguyên",
+    );
+  });
+
+  it("cancels a native start retained while mode-exit joins runtime preparation", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    nativeControl.unresolvedStartSessionIds
+      .mockReturnValueOnce([])
+      .mockReturnValue([id]);
+
+    await disposeAllNekoRuntimes();
+
+    expect(nativeControl.unresolvedStartSessionIds).toHaveBeenCalledTimes(2);
+    expect(nativeControl.cancelUnresolvedStarts).toHaveBeenCalledWith(id);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "exited",
+      closePending: false,
     });
   });
 

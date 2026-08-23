@@ -47,9 +47,10 @@
 
 ## Phase 6: Verification and delivery
 
-- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 47 Rust/security
-  tests and the latest 135-test review regression slice passed on 2026-08-23.
-- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,926 Vitest
+- [x] T501 Run focused Rust and Vitest suites plus TypeScript: 49 Rust/security
+  tests and the latest 135-test and 100-test review regression slices passed on
+  2026-08-23.
+- [x] T502 Run full Rust/desktop suites and web/embed builds: 2,928 Vitest
   across 173 files,
   TypeScript, Clippy `-D warnings`, native release build, web and embed passed.
 - [x] T503 Update architecture/operational docs and task evidence truthfully;
@@ -130,6 +131,10 @@
   failure and restart, bound every suspended-launch cleanup, reject multi-frame
   writes before dispatch, expose host-unsupported providers truthfully, and
   keep failed Codex bootstrap cleanup owned outside React until retry succeeds.
+- [x] T526 Preserve structured uncertainty when spawn/probe cleanup is
+  unproven, wait for published exit supervisors during shutdown, and cancel
+  retained control-client starts, including identities retained while teardown
+  joins runtime preparation, before mode exit can persist completion.
 
 ## Dependencies
 

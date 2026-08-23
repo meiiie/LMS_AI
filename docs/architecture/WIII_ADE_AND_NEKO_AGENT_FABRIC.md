@@ -216,6 +216,9 @@ Implemented across the foundation and Phase 2A slices:
   durable respawn lock;
 - exit supervision is published before the process-map hand-off, so hydration
   and cancellation fail closed instead of inventing missing ownership;
+- shutdown releases lifecycle serialization and waits for every published exit
+  supervisor to finish exact terminal reconciliation before native authority
+  exits;
 - shutdown admission closes before process drain; Windows probes use a
   producer-bounded pipe, and checked tree cleanup plus bounded reaping gate
   successful discovery; Unix provider discovery and execution both reject
@@ -224,8 +227,14 @@ Implemented across the foundation and Phase 2A slices:
   mislabelling every Unix provider as not installed; one renderer write is one
   delimiter-free frame, and suspended Windows setup cleanup is checked and
   deadline-bounded;
+- provider launch and discovery preserve post-spawn cleanup uncertainty as a
+  machine-readable outcome; an admitted start becomes `unknown_outcome` rather
+  than a retryable provider rejection when cleanup cannot be proven;
 - Codex account bootstrap cleanup is serialized by a module-level owner outside
   React; failed cleanup remains retryable and blocks replacement launch;
+- leaving Neko Chill enumerates retained control-client starts, refreshes that
+  set after runtime preparation settles, and requires authoritative
+  cancellation before recording a clean mode exit;
 - the Unix SQLite parent, database and WAL/SHM sidecars remain owner-only even
   though Windows is currently the only host authorized to probe or launch local
   providers;

@@ -152,6 +152,12 @@ Matching cancellation and session hydration fail closed until that exact
 supervision finishes; a temporarily empty process map is never interpreted as
 lost ownership.
 
+Graceful shutdown releases lifecycle serialization after closing admission and
+draining the live process map, then waits for every previously published exit
+supervisor to finish durable terminal reconciliation. Provider launch and
+discovery preserve whether a failure happened before spawn/after proven cleanup
+or after cleanup became unproven; only the former is a safe rejection.
+
 On Unix the journal parent is owner-only (`0700`), and the SQLite database,
 WAL and shared-memory sidecars are owner-only (`0600`).
 
@@ -159,6 +165,10 @@ The Codex account bootstrap has a module-level serialized owner outside React.
 A rejected App Server cleanup remains retryable and blocks replacement; a
 workspace change or component remount cannot clear the owner and launch another
 bootstrap until the previous cleanup reaches a proven terminal result.
+Mode teardown also enumerates retained start identities owned by the control
+client, refreshes that set after in-flight preparations settle, and requires
+their authoritative cancellation before it may persist a clean exit; a
+cancellation failure remains a blocking cleanup uncertainty.
 
 ## Event ordering
 

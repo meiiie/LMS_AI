@@ -109,6 +109,7 @@ export interface NekoControlClient {
   listProfiles(request: NekoProviderProfileRequest): Promise<NekoLaunchProfile[]>;
   listSessions(runId?: string): Promise<NekoNativeSessionRecord[]>;
   readEvents(streamId: string, afterSeq?: number, limit?: number): Promise<NekoControlReplayPage>;
+  unresolvedStartSessionIds(): string[];
   cancelUnresolvedStarts(clientSessionId: string): Promise<number>;
   spawnProvider(request: NekoProviderSpawnRequest): Promise<NekoSpawnedProvider>;
 }
@@ -131,6 +132,12 @@ function legacyExecution(
 class TauriNekoControlClient implements NekoControlClient {
   /** Caller retries reuse this identity until Rust gives a certain outcome. */
   private readonly unresolvedStarts = new Map<string, UnresolvedStartIdentity>();
+
+  unresolvedStartSessionIds(): string[] {
+    return [...new Set(
+      [...this.unresolvedStarts.values()].map((identity) => identity.clientSessionId),
+    )].sort();
+  }
 
   async listProviders(): Promise<NekoDetectedProvider[]> {
     try {

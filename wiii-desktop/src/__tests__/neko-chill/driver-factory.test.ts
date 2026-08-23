@@ -397,6 +397,9 @@ describe("Neko driver factory resource ownership", () => {
       clientSessionId: "session-retained-delete",
       workspacePath: "C:/tmp/project",
     })).rejects.toThrow("both start responses were lost");
+    expect(getNekoControlClient().unresolvedStartSessionIds()).toEqual([
+      "session-retained-delete",
+    ]);
     await expect(
       getNekoControlClient().cancelUnresolvedStarts("session-retained-delete"),
     ).rejects.toContain("unknown_outcome");
@@ -412,6 +415,7 @@ describe("Neko driver factory resource ownership", () => {
     await expect(
       getNekoControlClient().cancelUnresolvedStarts("session-retained-delete"),
     ).resolves.toBe(0);
+    expect(getNekoControlClient().unresolvedStartSessionIds()).toEqual([]);
 
     const startCalls = tauri.invoke.mock.calls.filter(
       ([command]) => command === "neko_control_session_start",

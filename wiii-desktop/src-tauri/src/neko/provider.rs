@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use std::ffi::OsString;
+use std::fmt;
 use std::io;
 #[cfg(windows)]
 use std::io::Read;
@@ -47,6 +48,58 @@ pub(crate) struct OwnedChild {
     job: WindowsJob,
 }
 
+/// Distinguishes a launch rejection that leaves no child behind from a
+/// post-spawn cleanup whose outcome could not be proven. Callers must never
+/// turn the latter into permission to retry the side effect.
+#[derive(Debug)]
+pub(crate) struct SpawnOwnedError {
+    error: io::Error,
+    cleanup_unproven: bool,
+}
+
+impl SpawnOwnedError {
+    fn safe(error: io::Error) -> Self {
+        Self {
+            error,
+            cleanup_unproven: false,
+        }
+    }
+
+    fn after_unproven_cleanup(error: io::Error) -> Self {
+        Self {
+            error,
+            cleanup_unproven: true,
+        }
+    }
+
+    pub(crate) fn cleanup_unproven(&self) -> bool {
+        self.cleanup_unproven
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kind(&self) -> io::ErrorKind {
+        self.error.kind()
+    }
+}
+
+impl fmt::Display for SpawnOwnedError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for SpawnOwnedError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+impl From<io::Error> for SpawnOwnedError {
+    fn from(error: io::Error) -> Self {
+        Self::safe(error)
+    }
+}
+
 #[cfg(windows)]
 struct WindowsJob {
     // Store the owned kernel handle as its pointer-sized scalar representation
@@ -74,20 +127,20 @@ impl Drop for WindowsJob {
 }
 
 #[cfg(windows)]
-fn probe_failure_after_cleanup(child: &mut OwnedChild, original: io::Error) -> io::Error {
+fn probe_failure_after_cleanup(child: &mut OwnedChild, original: io::Error) -> SpawnOwnedError {
     match terminate_child_tree(child) {
-        Ok(()) => original,
-        Err(cleanup) => io::Error::other(format!(
+        Ok(()) => SpawnOwnedError::safe(original),
+        Err(cleanup) => SpawnOwnedError::after_unproven_cleanup(io::Error::other(format!(
             "{original}; provider probe process-tree termination was not proven: {cleanup}"
-        )),
+        ))),
     }
 }
 
 /// Unix provider discovery is staged behind the same non-escapable containment
 /// primitive as provider execution. Do not probe by spawning an unowned child.
 #[cfg(unix)]
-fn run_probe(_command: Command) -> io::Result<ProbeOutput> {
-    Err(unix_containment_unavailable())
+fn run_probe(_command: Command) -> Result<ProbeOutput, SpawnOwnedError> {
+    Err(SpawnOwnedError::safe(unix_containment_unavailable()))
 }
 
 /// Windows discovery uses a bounded anonymous-pipe consumer instead of a
@@ -95,7 +148,7 @@ fn run_probe(_command: Command) -> io::Result<ProbeOutput> {
 /// cannot allocate unbounded disk space between monitor polls. Process-tree
 /// cleanup is checked before any output is trusted.
 #[cfg(windows)]
-fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
+fn run_probe(mut command: Command) -> Result<ProbeOutput, SpawnOwnedError> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -152,7 +205,7 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
 
         match child.child.try_wait() {
             Ok(Some(status)) => {
-                terminate_child_tree(&mut child)?;
+                terminate_child_tree(&mut child).map_err(SpawnOwnedError::safe)?;
                 break status;
             }
             Ok(None) => {}
@@ -169,20 +222,20 @@ fn run_probe(mut command: Command) -> io::Result<ProbeOutput> {
         Some(output) => output,
         None => match receiver.recv_timeout(PROBE_READER_DRAIN_TIMEOUT) {
             Ok(Ok(output)) => output,
-            Ok(Err(error)) => return Err(error),
+            Ok(Err(error)) => return Err(SpawnOwnedError::safe(error)),
             Err(error) => {
-                return Err(io::Error::new(
+                return Err(SpawnOwnedError::safe(io::Error::new(
                     io::ErrorKind::TimedOut,
                     format!("provider probe output did not close after termination: {error}"),
-                ));
+                )));
             }
         },
     };
     if stdout.len() > MAX_PROBE_OUTPUT_BYTES {
-        return Err(io::Error::new(
+        return Err(SpawnOwnedError::safe(io::Error::new(
             io::ErrorKind::InvalidData,
             "provider probe exceeded the output limit",
-        ));
+        )));
     }
     Ok(ProbeOutput { status, stdout })
 }
@@ -319,7 +372,7 @@ fn resume_suspended_process(pid: u32) -> io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
+pub(crate) fn spawn_owned(command: &mut Command) -> Result<OwnedChild, SpawnOwnedError> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
@@ -336,7 +389,13 @@ pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
             let error = io::Error::last_os_error();
             let termination = child.kill();
             let cleanup = finish_failed_spawn_cleanup(&mut child, termination);
-            return Err(spawn_cleanup_error(error, cleanup));
+            return Err(match cleanup {
+                Ok(()) => SpawnOwnedError::safe(error),
+                Err(cleanup) => SpawnOwnedError::after_unproven_cleanup(spawn_cleanup_error(
+                    error,
+                    Err(cleanup),
+                )),
+            });
         }
         if let Err(error) = resume_suspended_process(child.id()) {
             let termination = if unsafe { TerminateJobObject(job.raw(), 1) } == 0 {
@@ -345,14 +404,20 @@ pub(crate) fn spawn_owned(command: &mut Command) -> io::Result<OwnedChild> {
                 Ok(())
             };
             let cleanup = finish_failed_spawn_cleanup(&mut child, termination);
-            return Err(spawn_cleanup_error(error, cleanup));
+            return Err(match cleanup {
+                Ok(()) => SpawnOwnedError::safe(error),
+                Err(cleanup) => SpawnOwnedError::after_unproven_cleanup(spawn_cleanup_error(
+                    error,
+                    Err(cleanup),
+                )),
+            });
         }
         Ok(OwnedChild { child, job })
     }
     #[cfg(unix)]
     {
         let _ = command;
-        Err(unix_containment_unavailable())
+        Err(SpawnOwnedError::safe(unix_containment_unavailable()))
     }
 }
 
@@ -556,52 +621,71 @@ pub struct ResolvedProvider {
     pub version: Option<String>,
 }
 
-fn probe_definition(provider: ProviderDefinition) -> Option<ResolvedProvider> {
+fn probe_definition(
+    provider: ProviderDefinition,
+) -> Result<Option<ResolvedProvider>, SpawnOwnedError> {
     for candidate in provider.candidates() {
         for program in candidate_paths(candidate) {
             let mut command = Command::new(&program);
             command.arg(provider.version_arg);
-            if let Ok(output) = run_probe(command) {
-                if output.status.success() {
+            match run_probe(command) {
+                Ok(output) if output.status.success() => {
                     let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    return Some(ResolvedProvider {
+                    return Ok(Some(ResolvedProvider {
                         definition: provider,
                         program,
                         version: (!version.is_empty()).then_some(version),
-                    });
+                    }));
                 }
+                Err(error) if error.cleanup_unproven() => return Err(error),
+                Ok(_) | Err(_) => {}
             }
         }
     }
-    None
+    Ok(None)
 }
 
 fn host_supports_provider_containment() -> bool {
     cfg!(windows)
 }
 
-pub fn resolve(provider_id: &str) -> Result<ResolvedProvider, String> {
-    let provider =
-        definition(provider_id).ok_or_else(|| format!("unknown Neko provider '{provider_id}'"))?;
+pub fn resolve(provider_id: &str) -> Result<ResolvedProvider, SpawnOwnedError> {
+    let provider = definition(provider_id).ok_or_else(|| {
+        SpawnOwnedError::safe(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown Neko provider '{provider_id}'"),
+        ))
+    })?;
     #[cfg(unix)]
     {
-        return Err(unix_containment_unavailable().to_string());
+        return Err(SpawnOwnedError::safe(unix_containment_unavailable()));
     }
     #[cfg(windows)]
     {
-        probe_definition(provider)
-            .ok_or_else(|| format!("provider '{}' is not available on this host", provider.name))
+        probe_definition(provider)?.ok_or_else(|| {
+            SpawnOwnedError::safe(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("provider '{}' is not available on this host", provider.name),
+            ))
+        })
     }
 }
 
-pub fn list() -> Vec<AgentInfo> {
+pub fn list() -> Result<Vec<AgentInfo>, String> {
     PROVIDERS
         .iter()
         .copied()
         .map(|provider| {
-            let resolved = host_supports_provider_containment()
-                .then(|| probe_definition(provider))
-                .flatten();
+            let resolved = if host_supports_provider_containment() {
+                probe_definition(provider).map_err(|error| {
+                    format!(
+                        "provider discovery cleanup could not be proven for '{}': {error}",
+                        provider.name
+                    )
+                })?
+            } else {
+                None
+            };
             let availability = if !host_supports_provider_containment() {
                 AgentAvailability::HostUnsupported
             } else if resolved.is_some() {
@@ -609,14 +693,14 @@ pub fn list() -> Vec<AgentInfo> {
             } else {
                 AgentAvailability::NotInstalled
             };
-            AgentInfo {
+            Ok(AgentInfo {
                 id: provider.id.to_string(),
                 name: provider.name.to_string(),
                 version: resolved.as_ref().and_then(|item| item.version.clone()),
                 found: resolved.is_some(),
                 availability,
                 supports_profiles: provider.supports_profiles(),
-            }
+            })
         })
         .collect()
 }
@@ -695,7 +779,7 @@ pub fn profiles(provider_id: &str, cwd: &str) -> Result<Vec<AgentProfile>, Strin
     if !cwd_path.is_absolute() || !cwd_path.is_dir() {
         return Err("workspace must be an existing absolute directory".to_string());
     }
-    let resolved = resolve(provider_id)?;
+    let resolved = resolve(provider_id).map_err(|error| error.to_string())?;
     let mut command = Command::new(&resolved.program);
     command.arg("profiles").current_dir(cwd_path);
     let output = run_probe(command).map_err(|error| format!("profile probe failed: {error}"))?;
@@ -800,10 +884,19 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
     }
 
+    #[test]
+    fn post_spawn_cleanup_uncertainty_is_machine_readable() {
+        let safe = SpawnOwnedError::safe(io::Error::other("spawn rejected"));
+        let uncertain =
+            SpawnOwnedError::after_unproven_cleanup(io::Error::other("cleanup unproven"));
+        assert!(!safe.cleanup_unproven());
+        assert!(uncertain.cleanup_unproven());
+    }
+
     #[cfg(unix)]
     #[test]
     fn provider_roster_reports_host_containment_as_unsupported() {
-        let providers = list();
+        let providers = list().unwrap();
         assert!(!providers.is_empty());
         assert!(providers.iter().all(|provider| {
             !provider.found && provider.availability == AgentAvailability::HostUnsupported

@@ -19,7 +19,7 @@ pub async fn neko_control_provider_list(
     let runtime = runtime.inner().clone();
     tauri::async_runtime::spawn_blocking(move || runtime.list_providers())
         .await
-        .map_err(|error| format!("Neko provider discovery task failed: {error}"))
+        .map_err(|error| format!("Neko provider discovery task failed: {error}"))?
 }
 
 #[tauri::command]
