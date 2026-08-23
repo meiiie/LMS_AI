@@ -207,7 +207,11 @@ class FakeDriver implements Driver {
 }
 
 let spawned: FakeDriver[] = [];
-let launches: Array<{ executionId?: string; backendSessionId?: string | null }> = [];
+let launches: Array<{
+  executionId?: string;
+  execution?: { taskId: string; runId: string; environmentId: string };
+  backendSessionId?: string | null;
+}> = [];
 
 function useFakeFactory(): void {
   _setDriverFactoryForTests(async (agent, sessionId, launch, onEvent) => {
@@ -340,6 +344,36 @@ describe("neko-chill persistence", () => {
     expect(persisted.events.map((event) => event.seq)).toEqual(
       persisted.events.map((_, eventIndex) => eventIndex + 1),
     );
+  });
+
+  it("persists a Wiii execution binding before launch and restores it exactly", async () => {
+    const execution = {
+      taskId: "task-wiii",
+      runId: "run-wiii",
+      environmentId: "environment-wiii",
+    };
+    const id = await useNekoSessionStore.getState().createSession(
+      AGENT,
+      WORKSPACE,
+      null,
+      { execution, title: "Activate Wiii ADE" },
+    );
+    await flushDebounce();
+
+    expect(launches[0].execution).toEqual(execution);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      title: "Activate Wiii ADE",
+      execution,
+    });
+    const persisted = storage.get(`neko-chill-sessions.json:session:${id}`) as {
+      entry: { execution?: typeof execution };
+    };
+    expect(persisted.entry.execution).toEqual(execution);
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().hydrate();
+    expect(useNekoSessionStore.getState().sessions[id].execution).toEqual(execution);
   });
 
   it("persists native lifecycle facts before the compatible transcript", async () => {

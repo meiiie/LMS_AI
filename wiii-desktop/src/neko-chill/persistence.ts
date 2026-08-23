@@ -22,6 +22,7 @@ import type { ContentBlock } from "@/api/types";
 import type { NekoMessage, NekoSession } from "./stores/neko-session-store";
 import type { DriverCommand, DriverConfigOption } from "./drivers/types";
 import type { AgentLaunchProfile } from "./stores/neko-agent-store";
+import type { NekoExecutionBinding } from "@/neko/control-client";
 import { isAbsoluteWorkspacePath, type WorkspaceRef } from "./workspace";
 import {
   isNativeRuntimeSessionEvent,
@@ -48,6 +49,8 @@ export interface SessionIndexEntry {
   updatedAt: number;
   workspace?: WorkspaceRef | null;
   launchProfile?: AgentLaunchProfile | null;
+  /** Wiii Task/Run/Environment identity; absent for manual legacy sessions. */
+  execution?: NekoExecutionBinding | null;
   /** Provider-owned durable ACP id used to resume across process restarts. */
   backendSessionId?: string | null;
   controls?: DriverConfigOption[];
@@ -144,6 +147,16 @@ function isLaunchProfile(value: unknown): value is AgentLaunchProfile {
   );
 }
 
+function isExecutionBinding(value: unknown): value is NekoExecutionBinding {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const execution = value as Record<string, unknown>;
+  return (
+    typeof execution.taskId === "string" && execution.taskId.length > 0 &&
+    typeof execution.runId === "string" && execution.runId.length > 0 &&
+    typeof execution.environmentId === "string" && execution.environmentId.length > 0
+  );
+}
+
 function isSessionIndexEntry(value: unknown, expectedId?: string): value is SessionIndexEntry {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const entry = value as Partial<SessionIndexEntry>;
@@ -162,6 +175,9 @@ function isSessionIndexEntry(value: unknown, expectedId?: string): value is Sess
     (entry.launchProfile === undefined ||
       entry.launchProfile === null ||
       isLaunchProfile(entry.launchProfile)) &&
+    (entry.execution === undefined ||
+      entry.execution === null ||
+      isExecutionBinding(entry.execution)) &&
     (entry.backendSessionId === undefined ||
       entry.backendSessionId === null ||
       typeof entry.backendSessionId === "string") &&
@@ -320,6 +336,7 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     updatedAt: session.updatedAt,
     workspace: session.workspace,
     launchProfile: session.launchProfile,
+    execution: session.execution,
     backendSessionId: session.backendSessionId,
     controls: session.controls,
     commands: session.commands,

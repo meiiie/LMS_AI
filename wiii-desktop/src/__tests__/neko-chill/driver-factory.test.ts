@@ -1030,4 +1030,38 @@ describe("Neko driver factory resource ownership", () => {
       ([command]) => command === "neko_control_session_cancel",
     )).toHaveLength(1);
   });
+
+  it("forwards Wiii Task, Run, and Environment identity instead of legacy-local IDs", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    let owned: Driver | null = null;
+    const execution = {
+      taskId: "task-wiii",
+      runId: "run-wiii",
+      environmentId: "environment-wiii",
+    };
+
+    const creating = createDriverForAgent(
+      PROVIDER,
+      "visible-session",
+      {
+        workspace: { path: "C:/tmp/project", name: "project" },
+        execution,
+      },
+      vi.fn(),
+      (driver) => {
+        owned = driver;
+      },
+    );
+    await vi.waitFor(() => expect(owned).not.toBeNull());
+
+    const startCall = tauri.invoke.mock.calls.find(
+      ([command]) => command === "neko_control_session_start",
+    );
+    expect(startCall?.[1]).toEqual({
+      request: expect.objectContaining(execution),
+    });
+
+    await owned!.dispose();
+    await expect(creating).rejects.toThrow("client disposed");
+  });
 });

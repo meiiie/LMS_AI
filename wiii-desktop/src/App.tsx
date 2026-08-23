@@ -49,7 +49,7 @@ const PointyPreview = lazy(async () => {
 
 const NekoMotionLab = lazy(async () => import("@/neko-motion-lab/NekoMotionLab"));
 
-const NekoChillApp = lazy(async () => import("@/neko-chill/NekoChillApp"));
+const WiiiAdeApp = lazy(async () => import("@/ade/WiiiAdeApp"));
 
 function BootSplash({ label }: { label: string }) {
   return (
@@ -369,7 +369,7 @@ export function WorkbenchGate({ host = detectWorkbenchHost() }: { host?: Workben
       renderLocal={({ openManaged }) => (
         <ErrorBoundary>
           <Suspense fallback={<BootSplash label="Wiii đang mở không gian cục bộ..." />}>
-            <NekoChillApp onOpenManaged={openManaged} />
+            <WiiiAdeApp onOpenManaged={openManaged} />
           </Suspense>
         </ErrorBoundary>
       )}
@@ -409,6 +409,16 @@ export default function App() {
     return (
       <Suspense fallback={<BootSplash label="Neko Motion Lab đang mở..." />}>
         <NekoMotionLab />
+      </Suspense>
+    );
+  }
+
+  // Product-shell verification rig: browser fallback storage, no managed
+  // bootstrap and no native provider side effects until a task is dispatched.
+  if (import.meta.env.DEV && window.location.search.includes("preview=ade")) {
+    return (
+      <Suspense fallback={<BootSplash label="Wiii đang mở Công việc..." />}>
+        <WiiiAdeApp />
       </Suspense>
     );
   }

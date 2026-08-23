@@ -8,6 +8,7 @@ import {
 } from "../stores/neko-agent-store";
 import { useNekoSessionStore } from "../stores/neko-session-store";
 import { getNekoControlClient } from "@/neko/control-client";
+import type { NekoExecutionBinding } from "@/neko/control-client";
 import {
   CodexAccountSession,
   getCodexAccountBootstrapOwner,
@@ -34,11 +35,19 @@ function recentWorkspaces(): WorkspaceRef[] {
     });
 }
 
-export function NewSessionView() {
+export interface NekoTaskLaunchRequest {
+  execution: NekoExecutionBinding;
+  workspace: WorkspaceRef;
+  title: string;
+  onSessionCreated?: (sessionId: string) => void | Promise<void>;
+  onLaunchError?: (error: unknown) => void | Promise<void>;
+}
+
+export function NewSessionView({ taskLaunch }: { taskLaunch?: NekoTaskLaunchRequest | null }) {
   const { agents, isLoading, error: discoveryError, detect } = useNekoAgentStore();
   const createSession = useNekoSessionStore((state) => state.createSession);
   const sessions = useNekoSessionStore((state) => state.sessions);
-  const [workspace, setWorkspace] = useState<WorkspaceRef | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceRef | null>(taskLaunch?.workspace ?? null);
   const [profiles, setProfiles] = useState<AgentLaunchProfile[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState("");
@@ -54,6 +63,10 @@ export function NewSessionView() {
   const recent = useMemo(() => recentWorkspaces(), [sessions]);
   const neko = agents.find((agent) => agent.id === "neko" && agent.found);
   const codex = agents.find((agent) => agent.id === "codex" && agent.found);
+
+  useEffect(() => {
+    if (taskLaunch) setWorkspace(taskLaunch.workspace);
+  }, [taskLaunch?.execution.runId, taskLaunch?.workspace.path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,9 +177,29 @@ export function NewSessionView() {
         : null;
     setStartingAgentId(agent.id);
     setError(null);
+    let sessionId: string;
     try {
-      await createSession(agent, workspace, profile);
+      sessionId = taskLaunch
+        ? await createSession(agent, workspace, profile, {
+            execution: taskLaunch.execution,
+            title: taskLaunch.title,
+          })
+        : await createSession(agent, workspace, profile);
     } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      try {
+        await taskLaunch?.onLaunchError?.(cause);
+      } catch (classificationError) {
+        setError(classificationError instanceof Error ? classificationError.message : String(classificationError));
+      }
+      setStartingAgentId(null);
+      return;
+    }
+    try {
+      await taskLaunch?.onSessionCreated?.(sessionId);
+    } catch (cause) {
+      // The provider launch has already completed. A Wiii work-binding failure
+      // must not be reclassified as a launch failure or trigger another Run.
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setStartingAgentId(null);
@@ -198,17 +231,18 @@ export function NewSessionView() {
     <main className="min-w-0 flex-1 overflow-y-auto" data-testid="new-session-view">
       <div className="mx-auto w-full max-w-[760px] px-7 pb-12 pt-[8vh]">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--nk-accent)]">
-          Phiên cục bộ mới
+          {taskLaunch ? "Thực thi công việc" : "Phiên cục bộ mới"}
         </p>
         <h1
           className="text-[27px] font-normal tracking-[-0.025em] text-[var(--nk-text)]"
           style={{ fontFamily: "var(--font-serif)" }}
         >
-          Bạn muốn Neko làm việc ở đâu?
+          {taskLaunch ? `Chọn agent cho “${taskLaunch.title}”` : "Bạn muốn Neko làm việc ở đâu?"}
         </h1>
         <p className="mt-2 max-w-[600px] text-[13px] leading-5 text-[var(--nk-text-2)]">
-          Thư mục dự án là ranh giới làm việc của agent. Neko Chill không tự dùng thư mục
-          home và không gửi dữ liệu phiên lên Wiii Cloud.
+          {taskLaunch
+            ? "Wiii đã lưu Task và Run. Neko sẽ chỉ điều hành agent trong thư mục đã gắn với Run này."
+            : "Thư mục dự án là ranh giới làm việc của agent. Neko Chill không tự dùng thư mục home và không gửi dữ liệu phiên lên Wiii Cloud."}
         </p>
 
         <section className="mt-7">
@@ -229,7 +263,10 @@ export function NewSessionView() {
                 ? "border-[var(--nk-border-strong)] bg-[var(--nk-raised)]"
                 : "border-dashed border-[var(--nk-border-strong)] bg-[var(--nk-composer)] hover:bg-[var(--nk-raised)]"
             }`}
-            onClick={() => void chooseWorkspace()}
+            onClick={() => {
+              if (!taskLaunch) void chooseWorkspace();
+            }}
+            disabled={Boolean(taskLaunch)}
             data-testid="choose-workspace"
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--nk-overlay-strong)] text-[var(--nk-text-2)]">
@@ -244,21 +281,29 @@ export function NewSessionView() {
               </small>
             </span>
             <span className="text-[11px] text-[var(--nk-text-3)]">
-              {workspace ? "Đổi" : "Chọn thư mục"}
+              {taskLaunch ? "Đã khóa vào Run" : workspace ? "Đổi" : "Chọn thư mục"}
             </span>
           </button>
-          {!workspace && recent.length ? (
+          {!taskLaunch && !workspace && recent.length ? (
             <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Dự án gần đây">
               {recent.slice(0, 6).map((item) => (
-                <button
-                  key={item.path}
-                  type="button"
-                  title={item.path}
-                  className="max-w-[210px] truncate rounded-md bg-[var(--nk-overlay)] px-2.5 py-1 text-[11.5px] text-[var(--nk-text-2)] hover:bg-[var(--nk-overlay-strong)]"
-                  onClick={() => setWorkspace(item)}
-                >
-                  {item.name}
-                </button>
+                <span key={item.path} className="group relative max-w-[210px]">
+                  <button
+                    type="button"
+                    aria-label={item.name}
+                    className="w-full truncate rounded-md bg-[var(--nk-overlay)] px-2.5 py-1 text-[11.5px] text-[var(--nk-text-2)] hover:bg-[var(--nk-overlay-strong)]"
+                    onClick={() => setWorkspace(item)}
+                  >
+                    {item.name}
+                  </button>
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden min-w-48 max-w-72 rounded-lg border border-[var(--nk-border-strong)] bg-[var(--nk-inverse)] px-2.5 py-2 text-left text-[10.5px] leading-4 text-[var(--nk-on-inverse)] shadow-lg group-hover:block group-focus-within:block"
+                  >
+                    <strong className="block truncate font-medium">{item.name}</strong>
+                    <span className="block break-all opacity-70">{item.path}</span>
+                  </span>
+                </span>
               ))}
             </div>
           ) : null}

@@ -4,6 +4,7 @@
  * arguments and raw Tauri commands live outside this module.
  */
 import { getNekoControlClient } from "@/neko/control-client";
+import type { NekoExecutionBinding } from "@/neko/control-client";
 import { requireProviderDefinition } from "@/neko/provider-registry";
 import { AcpDriver } from "./acp/driver";
 import { CodexAppServerDriver } from "./codex/driver";
@@ -13,6 +14,8 @@ import { isAbsoluteWorkspacePath, type WorkspaceRef } from "../workspace";
 
 export interface DriverLaunchConfig {
   workspace: WorkspaceRef;
+  /** Wiii-owned work identity. Omitted only for manual/legacy Neko sessions. */
+  execution?: NekoExecutionBinding;
   /** One RuntimeRegistry replacement attempt; creates a fresh Neko Run. */
   executionId?: string;
   profileId?: string;
@@ -36,6 +39,7 @@ export async function createDriverForAgent(
     providerId: agent.id,
     clientSessionId: sessionId,
     ...(launch.executionId ? { clientRunId: launch.executionId } : {}),
+    ...(launch.execution ? { execution: launch.execution } : {}),
     workspacePath: launch.workspace.path,
     ...(launch.profileId ? { profileId: launch.profileId } : {}),
   });

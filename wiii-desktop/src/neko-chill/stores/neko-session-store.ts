@@ -48,6 +48,7 @@ import {
 import {
   getNekoControlClient,
   type NekoControlClient,
+  type NekoExecutionBinding,
   type NekoNativeSessionRecord,
 } from "@/neko/control-client";
 
@@ -73,6 +74,8 @@ export interface NekoSession {
   workspace: WorkspaceRef | null;
   /** Neko's config-first launch choice; null for other agents/default launch. */
   launchProfile: AgentLaunchProfile | null;
+  /** Wiii work identity; null means this is a manual/legacy Neko session. */
+  execution?: NekoExecutionBinding | null;
   /** Provider-owned durable ACP id; independent from Wiii's local session id. */
   backendSessionId: string | null;
   /** Last complete capability snapshot reported by the live driver. */
@@ -140,6 +143,7 @@ type DriverFactory = (
   sessionId: string,
   launch: {
     workspace: WorkspaceRef;
+    execution?: NekoExecutionBinding;
     executionId?: string;
     profileId?: string;
     backendSessionId?: string | null;
@@ -162,15 +166,15 @@ const NATIVE_REPLAY_PAGE_SIZE = 500;
 const MAX_NATIVE_REPLAY_EVENTS = 10_000;
 const NATIVE_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
 
-function nativeTaskId(sessionId: string): string {
-  return `legacy-local/task/${sessionId}`;
+function nativeTaskId(session: Pick<NekoSession, "id" | "execution">): string {
+  return session.execution?.taskId ?? `legacy-local/task/${session.id}`;
 }
 
 function nativeSessionsForTask(
   sessions: NekoNativeSessionRecord[],
-  sessionId: string,
+  session: Pick<NekoSession, "id" | "execution">,
 ): NekoNativeSessionRecord[] {
-  const candidates = sessions.filter((candidate) => candidate.taskId === nativeTaskId(sessionId));
+  const candidates = sessions.filter((candidate) => candidate.taskId === nativeTaskId(session));
   candidates.sort((left, right) => {
     const timestamp = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
     return timestamp || right.agentSessionId.localeCompare(left.agentSessionId);
@@ -508,6 +512,7 @@ interface NekoSessionState {
     agent: DetectedAgent,
     workspace: WorkspaceRef,
     launchProfile?: AgentLaunchProfile | null,
+    options?: { execution?: NekoExecutionBinding; title?: string },
   ) => Promise<string>;
   /** One-time migration path for a legacy transcript with no workspace. */
   attachWorkspace: (sessionId: string, workspace: WorkspaceRef) => Promise<void>;
@@ -747,6 +752,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             updatedAt: entry.updatedAt,
             workspace,
             launchProfile,
+            execution: entry.execution ?? null,
             backendSessionId: entry.backendSessionId ?? null,
             controls: projectControls(entry.controls ?? [], events),
             commands: entry.commands ?? [],
@@ -773,7 +779,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const nativeReader = nativeControlReaderFactory();
           const nativeSessions = await nativeReader.listSessions();
           for (const session of Object.values(restored)) {
-            const natives = nativeSessionsForTask(nativeSessions, session.id);
+            const natives = nativeSessionsForTask(nativeSessions, session);
             let changed = retireAbsentNativeCheckpoints(session, natives);
             const reconciled: NekoNativeSessionRecord[] = [];
             for (const native of natives) {
@@ -781,7 +787,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               changed ||= result.changed;
               reconciled.push(result.native);
             }
-            reconcileNativeStatus(session, nativeSessionsForTask(reconciled, session.id));
+            reconcileNativeStatus(session, nativeSessionsForTask(reconciled, session));
             // The renderer must not become usable from a reconciled read model
             // that exists only in memory. Native truth remains authoritative,
             // and this strict snapshot records the consumed replay cursor.
@@ -827,7 +833,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       }
     },
 
-    createSession: async (agent, workspace, launchProfile = null) => {
+    createSession: async (agent, workspace, launchProfile = null, options = {}) => {
       const activeModeExit = modeExitOperation;
       if (activeModeExit) await activeModeExit;
       if (!workspace || !isAbsoluteWorkspacePath(workspace.path)) {
@@ -853,11 +859,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           id: sessionId,
           agentId: agent.id,
           agentName: agent.name,
-          title: `Phiên với ${agent.name}`,
+          title: options.title?.trim() || `Phiên với ${agent.name}`,
           createdAt: now,
           updatedAt: now,
           workspace,
           launchProfile,
+          execution: options.execution ?? null,
           backendSessionId: null,
           controls: [],
           commands: [],
@@ -891,6 +898,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             sessionId,
             {
               workspace,
+              ...(options.execution ? { execution: options.execution } : {}),
               executionId: instanceId,
               ...(launchProfile?.id ? { profileId: launchProfile.id } : {}),
               backendSessionId: null,
@@ -1102,6 +1110,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
                 sessionId,
                 {
                   workspace: session.workspace!,
+                  ...(session.execution ? { execution: session.execution } : {}),
                   executionId: instanceId,
                   ...(session.launchProfile?.id ? { profileId: session.launchProfile.id } : {}),
                   backendSessionId: session.backendSessionId,
