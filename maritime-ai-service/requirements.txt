@@ -14,7 +14,7 @@ itsdangerous>=2.2.0
 resend>=2.29.0
 
 # Error Tracking (Production Hardening)
-sentry-sdk[fastapi]>=2.58.0,<3.0.0
+sentry-sdk[fastapi]>=2.64.0,<3.0.0
 
 # Database
 sqlalchemy>=2.0.27,<3.0.0
@@ -86,9 +86,9 @@ slowapi~=0.1.9
 pyyaml>=6.0.3  # CHỈ THỊ SỐ 16: YAML config for personas
 
 # Observability (SOTA 2026: OpenTelemetry GenAI Semantic Conventions)
-opentelemetry-api>=1.41.1
-opentelemetry-sdk>=1.41.1
-opentelemetry-exporter-otlp>=1.41.1
+opentelemetry-api>=1.43.0
+opentelemetry-sdk>=1.43.0
+opentelemetry-exporter-otlp>=1.43.0
 
 # LangSmith dropped Phase 9c (2026-05-03) — the LangChain auto-tracer was
 # removed in Phase 7 (#217); the stub in app/core/langsmith.py keeps the
@@ -97,7 +97,7 @@ opentelemetry-exporter-otlp>=1.41.1
 # integration can re-add the SDK in its own PR.
 
 # Structured Logging (SOTA 2026)
-structlog>=25.5.0
+structlog>=26.1.0
 
 # Excel Report Generation (Sprint 148: Product Search)
 xlsxwriter>=3.2.0
