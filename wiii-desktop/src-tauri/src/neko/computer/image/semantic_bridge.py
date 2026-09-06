@@ -1145,7 +1145,10 @@ def launch_application(launcher: dict[str, Any], target: str | None = None) -> s
     if target is not None:
         if launcher["appId"] != "browser":
             raise ValueError("Only the browser launcher accepts a navigation target.")
-        argv = (*argv[:-1], target)
+        parsed = urlsplit(target)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("Browser launch requires an HTTP(S) navigation target.")
+        argv = (*argv[:-1], "--", target)
     environment = os.environ.copy()
     environment.update(launcher.get("environment", {}))
     return subprocess.Popen(

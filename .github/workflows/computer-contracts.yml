@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.11'
+      - name: Install bridge test dependency
+        run: python -m pip install --disable-pip-version-check websocket-client==1.9.0
       - name: Verify semantic and work-plane contracts without a live Computer
         run: |
           python -B wiii-desktop/scripts/test-semantic-bridge-contract.py -v
