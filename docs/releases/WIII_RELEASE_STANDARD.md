@@ -57,8 +57,9 @@ glibc version. Linux ARM is outside the current release contract.
 
 Owner decision, 2026-09-06: official public releases may ship without a publisher
 certificate. Release channel and platform trust are separate facts. The governed
-workflow currently selects `WIII_WINDOWS_SIGNING: unsigned` explicitly; missing
-credentials never silently downgrade a build configured for Authenticode.
+workflow defaults to `unsigned`. A manual dispatch may explicitly select
+`windows_signing=authenticode`; missing credentials never silently downgrade
+that selection. The emergency scope requires the Authenticode selection.
 
 A stable run is triggered only by a pushed `wiii-v<version>` tag. The tag must
 match `VERSION` and point to the reviewed release commit. Windows builds marked

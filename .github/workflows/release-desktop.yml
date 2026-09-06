@@ -20,6 +20,14 @@ on:
         options:
           - complete
           - windows-only-emergency
+      windows_signing:
+        description: Windows publisher trust (AuthentiCode requires protected signing credentials)
+        required: true
+        default: unsigned
+        type: choice
+        options:
+          - unsigned
+          - authenticode
       emergency_reason:
         description: Public incident or runner-outage reason (required for emergency scope)
         required: false
@@ -32,7 +40,7 @@ permissions:
   contents: read
 
 env:
-  WIII_WINDOWS_SIGNING: unsigned
+  WIII_WINDOWS_SIGNING: ${{ inputs.windows_signing || 'unsigned' }}
 
 concurrency:
   group: desktop-release-${{ github.ref }}
@@ -77,6 +85,14 @@ jobs:
         run: |
           set -euo pipefail
           release_scope="${RELEASE_SCOPE_INPUT:-complete}"
+          case "$WIII_WINDOWS_SIGNING" in
+            unsigned|authenticode) ;;
+            *) echo 'Unsupported Windows signing mode.' >&2; exit 1 ;;
+          esac
+          case "$release_scope" in
+            complete|windows-only-emergency) ;;
+            *) echo 'Unsupported release scope.' >&2; exit 1 ;;
+          esac
           if [[ "$release_scope" == 'windows-only-emergency' ]]; then
             if [[ "$WIII_WINDOWS_SIGNING" != 'authenticode' ]]; then
               echo 'Emergency publication requires Authenticode signing.' >&2
