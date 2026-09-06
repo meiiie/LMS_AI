@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -274,6 +275,44 @@ class WorkPlaneBridgeContractTests(unittest.TestCase):
         self.assertTrue(result["truncated"])
         self.assertTrue(result["items"][0]["ref"].startswith("work:file:"))
         self.assertNotIn(str(self.root), str(result))
+
+    def test_protected_files_are_neither_listed_nor_addressable(self) -> None:
+        paths = [".env", "nested/.ENV.production", ".git/config", ".ssh/id_ed25519", "signing.pfx"]
+        original_revision = BRIDGE.directory_revision(self.root)
+        for relative in paths:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("private-fixture", encoding="utf-8")
+        result = BRIDGE.query({"resourceRef": BRIDGE.PROJECT_REF, "view": "children"})
+        self.assertEqual({item["name"] for item in result["items"]}, {"notes.txt", "unchanged.bin"})
+        self.assertEqual(BRIDGE.directory_revision(self.root), original_revision)
+        source = BRIDGE.file_resource(self.root, self.root / "notes.txt")
+        for relative in paths:
+            with self.subTest(relative=relative):
+                with self.assertRaisesRegex(BRIDGE.BridgeError, "protected_path"):
+                    BRIDGE.query({"resourceRef": BRIDGE.encode_ref(relative), "view": "content"})
+                operations = [
+                    self.transaction("project.file.create", BRIDGE.PROJECT_REF, original_revision, {"path": relative, "content": "overwrite"}),
+                    self.transaction("project.file.patch_text", BRIDGE.encode_ref(relative), original_revision, {"expectedText": "private-fixture", "replacement": "overwrite"}),
+                    self.transaction("project.file.rename", source["ref"], source["revision"], {"destination": relative}),
+                ]
+                for operation in operations:
+                    with self.assertRaisesRegex(BRIDGE.BridgeError, "protected_path"):
+                        BRIDGE.execute(operation)
+                self.assertEqual((self.root / relative).read_text(encoding="utf-8"), "private-fixture")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX executable permissions")
+    def test_text_patch_preserves_executable_mode(self) -> None:
+        source = self.root / "notes.txt"
+        source.chmod(0o750)
+        resource = BRIDGE.file_resource(self.root, source)
+        result = BRIDGE.execute(self.transaction(
+            "project.file.patch_text", resource["ref"], resource["revision"],
+            {"expectedText": "alpha", "replacement": "updated"},
+        ))
+        self.assertEqual(result["outcome"], "completed")
+        self.assertEqual(stat.S_IMODE(source.stat().st_mode), 0o750)
+        self.assertEqual(source.read_text(encoding="utf-8"), "updated\nbeta\n")
 
 
 if __name__ == "__main__":

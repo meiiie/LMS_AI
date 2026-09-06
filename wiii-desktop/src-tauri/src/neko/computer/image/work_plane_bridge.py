@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -122,22 +123,12 @@ def file_revision(path: Path) -> str:
 
 def directory_revision(root: Path) -> str:
     digest = hashlib.sha256()
-    count = 0
-    for current, directories, files in os.walk(root, followlinks=False):
-        directories[:] = sorted(
-            name for name in directories if not (Path(current) / name).is_symlink()
+    for path in list_files(root):
+        relative = path.relative_to(root).as_posix()
+        metadata = path.lstat()
+        digest.update(
+            f"file\0{relative}\0{metadata.st_size}\0{metadata.st_mtime_ns}\n".encode("utf-8")
         )
-        for name in sorted(files):
-            count += 1
-            if count > MAX_FILES:
-                raise BridgeError("project_too_large: Work Plane supports at most 10000 files")
-            path = Path(current) / name
-            relative = path.relative_to(root).as_posix()
-            stat = path.lstat()
-            kind = "symlink" if path.is_symlink() else "file"
-            digest.update(
-                f"{kind}\0{relative}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode("utf-8")
-            )
     return "sha256:" + digest.hexdigest()
 
 
@@ -158,12 +149,24 @@ def decode_ref(resource_ref: str) -> str:
         raise BridgeError("invalid_resource_ref: malformed file identity") from error
 
 
+def protected_path(path: PurePosixPath) -> bool:
+    protected_names = {".git", ".ssh", ".aws", ".azure", ".gnupg", ".npmrc", ".pypirc", ".wiii-perf-secret"}
+    return any(
+        part.casefold() in protected_names
+        or part.casefold().startswith(".env")
+        or PurePosixPath(part).suffix.casefold() in {".pem", ".key", ".p12", ".pfx"}
+        for part in path.parts
+    )
+
+
 def logical_path(value: str) -> PurePosixPath:
     if not isinstance(value, str) or not value or len(value) > 240 or "\x00" in value:
         raise BridgeError("invalid_path: logical Project path is invalid")
     path = PurePosixPath(value.replace("\\", "/"))
     if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise BridgeError("path_escape: path must stay inside the granted Project")
+    if protected_path(path):
+        raise BridgeError("protected_path: credential and repository metadata are not Work Plane resources")
     return path
 
 
@@ -550,11 +553,13 @@ def list_files(root: Path) -> list[Path]:
     paths: list[Path] = []
     for current, directories, files in os.walk(root, followlinks=False):
         directories[:] = sorted(
-            name for name in directories if not (Path(current) / name).is_symlink()
+            name for name in directories
+            if not (Path(current) / name).is_symlink()
+            and not protected_path((Path(current) / name).relative_to(root))
         )
         for name in sorted(files):
             path = Path(current) / name
-            if not path.is_symlink():
+            if not path.is_symlink() and not protected_path(path.relative_to(root)):
                 paths.append(path)
             if len(paths) > MAX_FILES:
                 raise BridgeError("project_too_large: Work Plane supports at most 10000 files")
@@ -1122,12 +1127,15 @@ def completed(
 
 
 def atomic_write(path: Path, payload: bytes) -> None:
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
     handle, temporary = tempfile.mkstemp(prefix=".wiii-work-", dir=path.parent)
     try:
         with os.fdopen(handle, "wb") as output:
             output.write(payload)
             output.flush()
             os.fsync(output.fileno())
+        if mode is not None:
+            os.chmod(temporary, mode)
         os.replace(temporary, path)
     except Exception:
         try:

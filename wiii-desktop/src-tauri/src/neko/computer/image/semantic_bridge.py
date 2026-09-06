@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict, deque
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, quote, quote_plus, urlsplit
 from urllib.request import Request, urlopen
@@ -97,6 +97,7 @@ SENSITIVE_FIELD_TERMS = (
 pyatspi = None
 APP_EVENT_EPOCH = secrets.token_hex(8)
 APP_EVENT_LOCK = threading.Lock()
+SEMANTIC_CONTROL_LOCK = threading.Lock()
 APP_EVENT_CONDITION = threading.Condition(APP_EVENT_LOCK)
 APP_EVENT_BUFFER: deque[dict[str, Any]] = deque(maxlen=MAX_APP_EVENT_BUFFER)
 APP_EVENT_SEQUENCE = 0
@@ -1148,7 +1149,7 @@ def launch_application(launcher: dict[str, Any], target: str | None = None) -> s
         parsed = urlsplit(target)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Browser launch requires an HTTP(S) navigation target.")
-        argv = (*argv[:-1], "--", target)
+        argv = ("wiii-browser", "--", target)
     environment = os.environ.copy()
     environment.update(launcher.get("environment", {}))
     return subprocess.Popen(
@@ -1169,7 +1170,9 @@ def browser_url_matches_target(current_value: str, target: str) -> bool:
         return True
     current = urlsplit(current_value)
     return bool(
-        current.hostname == expected.hostname
+        current.scheme == expected.scheme
+        and current.netloc == expected.netloc
+        and current.path == expected.path
         and expected_query
         and all(parse_qs(current.query).get(key) == values for key, values in expected_query.items())
     )
@@ -1230,15 +1233,7 @@ def browser_navigation_completed(
     current_url = after.get("url")
     if isinstance(current_url, str) and browser_url_matches_target(current_url, target):
         return True
-    if before is None:
-        expected_scheme = urlsplit(target).scheme.casefold()
-        current_scheme = urlsplit(str(current_url or "")).scheme.casefold()
-        return bool(
-            target_id is not None
-            and expected_scheme in {"http", "https"}
-            and current_scheme in {"http", "https"}
-        )
-    return any(after.get(field) != before.get(field) for field in ("pageId", "url", "timeOrigin"))
+    return False
 
 
 def workstation_nodes() -> list[dict[str, Any]]:
@@ -3369,6 +3364,8 @@ def observe(
             actions = [action for action in actions if action != "set_text"]
             interfaces.pop("set_text", None)
             states = sorted({*states, "protected"})
+            value = None
+            description = None
 
         emitted_ref = parent_ref
         if not recognized_application and should_emit(role, name, value, states, actions, depth):
@@ -3818,7 +3815,7 @@ def act(request: dict[str, Any]) -> dict[str, Any]:
         else observed_scope
     )
     identity_matches = request.get("expectedRole") == node["role"] and request.get("expectedName") == node["name"]
-    if request.get("stateVersion") != before_version and not identity_matches:
+    if request.get("stateVersion") != before_version:
         return reject(request, "semantic_stale_snapshot", "The target changed after it was observed; observe again before acting.", before_version)
     if not identity_matches:
         return reject(request, "semantic_target_mismatch", "The target identity no longer matches the observed control.", before_version)
@@ -4217,7 +4214,12 @@ class SemanticBridgeHandler(BaseHTTPRequestHandler):
             request = json.loads(self.rfile.read(content_length).decode("utf-8-sig"))
             if not isinstance(request, dict):
                 raise ValueError("The semantic bridge request must be an object.")
-            self.write_json(200, bridge_request(self.path, request))
+            if self.path == "/events":
+                response = bridge_request(self.path, request)
+            else:
+                with SEMANTIC_CONTROL_LOCK:
+                    response = bridge_request(self.path, request)
+            self.write_json(200, response)
         except Exception as error:
             self.write_json(
                 400,
@@ -4242,7 +4244,7 @@ class SemanticBridgeHandler(BaseHTTPRequestHandler):
 
 def serve() -> None:
     start_app_event_watcher()
-    HTTPServer((SEMANTIC_BRIDGE_HOST, SEMANTIC_BRIDGE_PORT), SemanticBridgeHandler).serve_forever()
+    ThreadingHTTPServer((SEMANTIC_BRIDGE_HOST, SEMANTIC_BRIDGE_PORT), SemanticBridgeHandler).serve_forever()
 
 
 def main() -> int:
