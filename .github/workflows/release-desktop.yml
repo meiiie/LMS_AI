@@ -40,7 +40,7 @@ permissions:
   contents: read
 
 env:
-  WIII_WINDOWS_SIGNING: ${{ inputs.windows_signing || 'unsigned' }}
+  WIII_WINDOWS_SIGNING: ${{ inputs.windows_signing || vars.WIII_WINDOWS_SIGNING || 'unsigned' }}
 
 concurrency:
   group: desktop-release-${{ github.ref }}

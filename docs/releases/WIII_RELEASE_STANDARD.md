@@ -60,6 +60,10 @@ certificate. Release channel and platform trust are separate facts. The governed
 workflow defaults to `unsigned`. A manual dispatch may explicitly select
 `windows_signing=authenticode`; missing credentials never silently downgrade
 that selection. The emergency scope requires the Authenticode selection.
+For a signed release, set the repository variable `WIII_WINDOWS_SIGNING` to
+`authenticode` before pushing its tag, so the automatic tag run uses that same
+trust selection. With no variable, tag runs remain explicitly unsigned. Do not
+attempt to change an already published release from unsigned to signed.
 
 A stable run is triggered only by a pushed `wiii-v<version>` tag. The tag must
 match `VERSION` and point to the reviewed release commit. Windows builds marked
