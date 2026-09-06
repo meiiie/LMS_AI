@@ -364,18 +364,36 @@ jobs:
 
       - name: Verify release asset contracts
         env:
+          GH_TOKEN: ${{ github.token }}
           GIT_SHA_VALUE: ${{ github.sha }}
           RELEASE_SCOPE_VALUE: ${{ needs.validate.outputs.release_scope }}
         shell: bash
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < VERSION)"
+          reuse_arguments=()
+          if [[ "$RELEASE_SCOPE_VALUE" == 'complete' && "$WIII_WINDOWS_SIGNING" == 'authenticode' ]] &&
+             gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            published_dir="$(mktemp -d "$RUNNER_TEMP/wiii-published-windows.XXXXXX")"
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern "Wiii-$version-windows-x64-signed-setup.exe" \
+              --pattern "Wiii-$version-windows-x64-signed-setup.exe.sha256" \
+              --pattern "Wiii-$version-windows-x64-release-manifest.json" \
+              --dir "$published_dir"
+            for subject in "$published_dir"/*; do
+              gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-desktop.yml" \
+                --source-ref "$GITHUB_REF" --source-digest "$GIT_SHA_VALUE"
+            done
+            reuse_arguments=(--published-windows "$published_dir")
+          fi
           python tools/release/verify_desktop_release.py \
             --root artifacts/platforms \
             --version "$version" \
             --git-sha "$GIT_SHA_VALUE" \
             --release-scope "$RELEASE_SCOPE_VALUE" \
             --windows-signing "$WIII_WINDOWS_SIGNING" \
+            "${reuse_arguments[@]}" \
             --out artifacts/desktop-release-verification.json
           find artifacts/platforms -type f -print | sort
 

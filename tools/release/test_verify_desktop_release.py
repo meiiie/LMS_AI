@@ -130,6 +130,42 @@ class DesktopReleaseVerifierTests(unittest.TestCase):
                     release_scope="windows-only-emergency",
                 )
 
+    def test_backfill_reuses_published_bytes_instead_of_timestamped_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = self._create_release(root / "current", tuple(verifier.TARGET_SUFFIXES))
+            published = self._create_release(root / "published", ("windows-x64",))
+            installer = next(current.rglob("*.exe"))
+            installer.write_bytes(b"different-authenticode-timestamp")
+            verifier.reuse_published_windows(root=current, published=published,
+                                            version="1.2.0", git_sha=self.git_sha)
+            self.assertEqual(installer.read_bytes(), next(published.rglob("*.exe")).read_bytes())
+            self.assertTrue(verifier.verify_release_assets(
+                root=current, version="1.2.0", git_sha=self.git_sha, release_scope="complete",
+            )["ok"])
+
+    def test_backfill_rejects_unverified_originals_before_replacing_anything(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = self._create_release(root / "current", tuple(verifier.TARGET_SUFFIXES))
+            published = self._create_release(root / "published", ("windows-x64",))
+            installer = next(current.rglob("*.exe"))
+            before = installer.read_bytes()
+            next(published.rglob("*.exe")).write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                verifier.reuse_published_windows(root=current, published=published,
+                                                version="1.2.0", git_sha=self.git_sha)
+            self.assertEqual(installer.read_bytes(), before)
+
+    def test_backfill_rejects_originals_from_another_source_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = self._create_release(root / "current", tuple(verifier.TARGET_SUFFIXES))
+            published = self._create_release(root / "published", ("windows-x64",))
+            with self.assertRaisesRegex(ValueError, "unexpected git_sha"):
+                verifier.reuse_published_windows(root=current, published=published,
+                                                version="1.2.0", git_sha="d" * 40)
+
     def test_rejects_manifest_from_another_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

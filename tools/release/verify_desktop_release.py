@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -178,12 +179,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-scope", choices=sorted(RELEASE_SCOPES), required=True)
     parser.add_argument("--windows-signing", choices=("authenticode", "unsigned"), default="authenticode")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--published-windows", type=Path)
     return parser
+
+
+def reuse_published_windows(*, root: Path, published: Path, version: str, git_sha: str) -> None:
+    verify_release_assets(
+        root=published, version=version, git_sha=git_sha,
+        release_scope="windows-only-emergency", windows_signing="authenticode",
+    )
+    current = _index_contract_files(root)
+    originals = _index_contract_files(published)
+    if not set(originals).issubset(current):
+        raise ValueError("published Windows assets have no matching build destinations")
+    for name, path in originals.items():
+        shutil.copyfile(path, current[name])
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.published_windows:
+            if args.release_scope != "complete" or args.windows_signing != "authenticode":
+                raise ValueError("published Windows reuse requires a complete Authenticode backfill")
+            reuse_published_windows(
+                root=args.root, published=args.published_windows,
+                version=args.version, git_sha=args.git_sha,
+            )
         result = verify_release_assets(
             root=args.root,
             version=args.version,

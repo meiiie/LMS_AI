@@ -160,10 +160,12 @@ upgrades and installed application state.
 Verify the sidecar before opening a downloaded package. On PowerShell:
 
 ```powershell
-$expected = (Get-Content .\Wiii-1.2.0-windows-x64-signed-setup.exe.sha256).Split()[0]
-$actual = (Get-FileHash .\Wiii-1.2.0-windows-x64-signed-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected = (Get-Content .\Wiii-1.2.0-windows-x64-unsigned-setup.exe.sha256).Split()[0]
+$actual = (Get-FileHash .\Wiii-1.2.0-windows-x64-unsigned-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw 'Wiii checksum mismatch' }
 ```
+
+For an Authenticode release, use its `signed-setup.exe` filename instead.
 
 On Linux:
 
