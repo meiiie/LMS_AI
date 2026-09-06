@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Trình duyệt
+Comment=Mở Chromium trong Web Computer
+Exec=wiii-browser
+Icon=google-chrome
+Terminal=false
+Categories=Network;WebBrowser;
+StartupNotify=true

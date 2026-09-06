@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Tệp dự án
+Comment=Mở thư mục Project được gắn vào Computer
+Exec=pcmanfm /workspace/project
+Icon=system-file-manager
+Terminal=false
+Categories=System;FileTools;FileManager;
+StartupNotify=true

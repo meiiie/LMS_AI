@@ -1567,7 +1567,7 @@ fn read_bounded_frame<R: BufRead>(
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let take = newline.map_or(available.len(), |position| position + 1);
-        let payload_bytes = newline.map_or(take, |position| position);
+        let payload_bytes = newline.unwrap_or(take);
         if frame.len().saturating_add(payload_bytes) > max_bytes {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

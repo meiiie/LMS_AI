@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Comment=Mở terminal tại Project
+Exec=lxterminal --working-directory=/workspace/project
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupNotify=true

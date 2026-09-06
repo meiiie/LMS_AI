@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+# Chrome's nested sandbox cannot initialize inside Wiii's tested outer container boundary.
+exec google-chrome-stable \
+  --user-data-dir="$HOME/.wiii/google-chrome" \
+  --no-sandbox \
+  --no-first-run \
+  --hide-crash-restore-bubble \
+  --disable-dev-shm-usage \
+  --disable-gpu \
+  --password-store=basic \
+  --force-renderer-accessibility \
+  --enable-accessibility-object-model \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --remote-allow-origins=http://127.0.0.1:9222 \
+  "$@"
