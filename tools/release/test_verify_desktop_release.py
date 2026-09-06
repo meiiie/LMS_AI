@@ -30,7 +30,7 @@ verifier = _load_module("verify_desktop_release")
 class DesktopReleaseVerifierTests(unittest.TestCase):
     git_sha = "c" * 40
 
-    def _create_release(self, root: Path, targets: tuple[str, ...]) -> Path:
+    def _create_release(self, root: Path, targets: tuple[str, ...], windows_signing: str = "authenticode") -> Path:
         output_root = root / "platforms"
         raw_paths = {
             "windows-x64": ("release/bundle/nsis/Wiii_1.2.0_x64-setup.exe",),
@@ -58,6 +58,7 @@ class DesktopReleaseVerifierTests(unittest.TestCase):
                 version="1.2.0",
                 git_sha=self.git_sha,
                 release_channel="stable",
+                windows_signing=windows_signing,
             )
         return output_root
 
@@ -86,6 +87,34 @@ class DesktopReleaseVerifierTests(unittest.TestCase):
                 release_scope="windows-only-emergency",
             )
             self.assertEqual(result["targets"], ["windows-x64"])
+
+    def test_unsigned_complete_release_keeps_inventory_and_integrity_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_root = self._create_release(Path(directory), tuple(verifier.TARGET_SUFFIXES), "unsigned")
+            arguments = dict(root=output_root, version="1.2.0", git_sha=self.git_sha,
+                             release_scope="complete", windows_signing="unsigned")
+            result = verifier.verify_release_assets(**arguments)
+            self.assertEqual(len(result["binaries"]), 5)
+            self.assertEqual(len(result["manifests"]), 4)
+            with self.assertRaisesRegex(ValueError, "inventory mismatch"):
+                verifier.verify_release_assets(**{**arguments, "windows_signing": "authenticode"})
+            with self.assertRaisesRegex(ValueError, "emergency releases require"):
+                verifier.verify_release_assets(**{**arguments, "release_scope": "windows-only-emergency"})
+            binary = next(output_root.rglob("*.exe"))
+            binary.write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                verifier.verify_release_assets(**arguments)
+
+    def test_unsigned_release_rejects_false_signed_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_root = self._create_release(Path(directory), tuple(verifier.TARGET_SUFFIXES), "unsigned")
+            manifest_path = next((output_root / "windows-x64").glob("*-release-manifest.json"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["trust_state"] = "authenticode-signed"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unexpected trust_state"):
+                verifier.verify_release_assets(root=output_root, version="1.2.0", git_sha=self.git_sha,
+                                               release_scope="complete", windows_signing="unsigned")
 
     def test_rejects_tampered_binary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

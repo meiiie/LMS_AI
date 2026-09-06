@@ -55,9 +55,16 @@ glibc version. Linux ARM is outside the current release contract.
 
 ### Stable
 
+Owner decision, 2026-09-06: official public releases may ship without a publisher
+certificate. Release channel and platform trust are separate facts. The governed
+workflow currently selects `WIII_WINDOWS_SIGNING: unsigned` explicitly; missing
+credentials never silently downgrade a build configured for Authenticode.
+
 A stable run is triggered only by a pushed `wiii-v<version>` tag. The tag must
-match `VERSION` and point to the reviewed release commit. Stable Windows builds
-require an Authenticode certificate and pass signature verification. Linux and
+match `VERSION` and point to the reviewed release commit. Windows builds marked
+`signed` require an Authenticode certificate and signature verification. Builds
+explicitly configured `unsigned` must verify `NotSigned` and disclose that state
+in the installer filename, manifest and public release notes. Linux and
 macOS packages are built from that same commit. All packages, checksums, and
 manifests receive GitHub artifact provenance attestations before publication.
 
@@ -68,12 +75,13 @@ transparent transitional channel, not a claim of Apple trust. Users must verify
 the checksum and use macOS Privacy & Security to approve the application. Do
 not suggest disabling Gatekeeper globally.
 
-The workflow expects these protected repository or environment secrets:
+For the Authenticode configuration, the workflow expects these protected secrets:
 
 - `WIII_WINDOWS_CERTIFICATE_PFX_BASE64`
 - `WIII_WINDOWS_CERTIFICATE_PASSWORD`
 
-Use two GitHub environments: `candidate` contains no secrets and may run without
+No certificate is required for the explicitly unsigned configuration. Keep two
+GitHub environments: `candidate` contains no secrets and may run without
 approval; `release` contains the signing secrets and requires approval from the
 project owner or an explicitly delegated release/security maintainer. Use a
 code-signing certificate controlled by the project owner. Restrict the secrets
@@ -93,8 +101,8 @@ Before a stable tag is created:
 5. Upgrade, persistence, and rollback risks are recorded in the PR.
 6. The tagged commit is the exact commit approved for release.
 
-The stable workflow additionally verifies the tag, Windows installer
-Authenticode status and exact signer thumbprint, the complete
+The stable workflow additionally verifies the tag, declared Windows trust state
+(Authenticode status and exact signer thumbprint when signed), the complete
 five-binary/four-manifest matrix, every SHA-256 sidecar, manifest version and
 commit bindings, and GitHub provenance attestation.
 
@@ -130,6 +138,7 @@ Public desktop package names are stable and architecture-explicit:
 
 - Candidate Windows: `Wiii-<version>-candidate-<sha8>-windows-x64-unsigned-setup.exe`
 - Stable Windows: `Wiii-<version>-windows-x64-signed-setup.exe`
+- Explicitly unsigned stable Windows: `Wiii-<version>-windows-x64-unsigned-setup.exe`
 - Candidate Linux: `Wiii-<version>-candidate-<sha8>-linux-x64.{deb,AppImage}`
 - Stable Linux: `Wiii-<version>-linux-x64.{deb,AppImage}`
 - Candidate macOS: `Wiii-<version>-candidate-<sha8>-macos-<arch>-unnotarized.dmg`
@@ -169,6 +178,10 @@ shasum -a 256 -c Wiii-<version>-<package>.sha256
 
 - Windows: run the NSIS installer normally. Managed automation may use the
   standard NSIS `/S` silent switch.
+  Unsigned builds can trigger SmartScreen or enterprise-policy blocks; verify
+  source, checksum and provenance before deciding whether to allow that app.
+  Never disable Windows protection globally. SHA-256 verifies integrity, not
+  publisher identity or absence of malicious behavior.
 - Debian/Ubuntu: install the `.deb` with the system package manager.
 - Other supported x64 Linux distributions: mark the AppImage executable and
   run it without installation. The AppImage includes Tauri's media framework
@@ -213,6 +226,8 @@ the submitted reason. No unsigned Windows package or unreviewed commit may use
 this path. When hosted runners recover, rerun the workflow on the same tag with
 `release_scope=complete`; the workflow verifies and attests the full matrix,
 backfills the missing assets, and replaces the temporary availability notice.
+Existing assets must be byte-identical to any regenerated names; publication
+must refuse replacement and upload only missing assets, never use `--clobber`.
 
 Every break-glass use must be recorded in a public issue or security advisory,
 reviewed after recovery, and included in the next changelog. Repeated platform

@@ -88,7 +88,10 @@ def normalize_bundle(
     version: str,
     git_sha: str,
     release_channel: str,
+    windows_signing: str = "authenticode",
 ) -> dict[str, object]:
+    if windows_signing not in {"authenticode", "unsigned"}:
+        raise ValueError("windows signing must be 'authenticode' or 'unsigned'")
     if release_target not in RELEASE_TARGETS:
         choices = ", ".join(sorted(RELEASE_TARGETS))
         raise ValueError(f"unsupported release target {release_target!r}; choose one of: {choices}")
@@ -107,6 +110,8 @@ def normalize_bundle(
             if release_channel == "stable"
             else bundle_file.candidate_suffix
         )
+        if release_target == "windows-x64" and windows_signing == "unsigned":
+            suffix = bundle_file.candidate_suffix
         destination = output_directory / f"Wiii-{identity}-{suffix}"
         shutil.copy2(source, destination)
         checksum = wiii_release.sha256(destination)
@@ -121,6 +126,8 @@ def normalize_bundle(
         if release_channel == "stable"
         else target.candidate_trust_state
     )
+    if release_target == "windows-x64" and windows_signing == "unsigned":
+        trust_state = "unsigned"
     manifest = wiii_release.build_manifest(
         normalized,
         version,
@@ -148,6 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", required=True)
     parser.add_argument("--git-sha", required=True)
     parser.add_argument("--release-channel", choices=("candidate", "stable"), required=True)
+    parser.add_argument("--windows-signing", choices=("authenticode", "unsigned"), default="authenticode")
     return parser
 
 
@@ -161,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             version=args.version,
             git_sha=args.git_sha,
             release_channel=args.release_channel,
+            windows_signing=args.windows_signing,
         )
     except (OSError, ValueError) as exc:
         print(f"bundle normalization error: {exc}", file=sys.stderr)
