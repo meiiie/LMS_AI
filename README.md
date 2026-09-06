@@ -74,7 +74,7 @@ the coordinated release target in source; it does not mean a matching tag or
 download has been published. Maintainer-triggered workflow artifacts are
 unsigned evaluation candidates, not stable packages.
 
-When the signed release gates pass, stable packages will be published on the
+When the governed release gates pass, stable packages will be published on the
 [Wiii Releases page](https://github.com/meiiie/wiii/releases) with this matrix:
 
 | Platform | Package |
@@ -86,8 +86,10 @@ When the signed release gates pass, stable packages will be published on the
 | macOS Intel | x64 `.dmg` |
 
 Do not treat a CI artifact or a locally built installer as a stable release.
-Published packages must include an adjacent `.sha256` file; Windows stable
-builds must be Authenticode-signed. macOS packages are currently ad-hoc signed
+Published packages must include an adjacent `.sha256` file. Official Windows
+releases may be explicitly unsigned; their filenames and manifests disclose
+`unsigned` instead of claiming Authenticode publisher identity. Signed Windows
+builds require certificate verification. macOS packages are currently ad-hoc signed
 but not Apple-notarized, so their filenames explicitly include `unnotarized`;
 see the [release standard](docs/releases/WIII_RELEASE_STANDARD.md) for the exact
 trust contract.

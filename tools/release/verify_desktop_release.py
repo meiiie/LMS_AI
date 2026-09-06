@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -62,8 +63,13 @@ def _index_contract_files(root: Path) -> dict[str, Path]:
 
 
 def verify_release_assets(
-    *, root: Path, version: str, git_sha: str, release_scope: str
+    *, root: Path, version: str, git_sha: str, release_scope: str,
+    windows_signing: str = "authenticode",
 ) -> dict[str, object]:
+    if windows_signing not in {"authenticode", "unsigned"}:
+        raise ValueError("windows signing must be 'authenticode' or 'unsigned'")
+    if release_scope == "windows-only-emergency" and windows_signing != "authenticode":
+        raise ValueError("emergency releases require Authenticode signing")
     version = wiii_release.validate_semver(version)
     if release_scope not in RELEASE_SCOPES:
         choices = ", ".join(sorted(RELEASE_SCOPES))
@@ -72,8 +78,13 @@ def verify_release_assets(
         raise ValueError(f"release asset directory does not exist: {root}")
 
     targets = RELEASE_SCOPES[release_scope]
+    suffixes = dict(TARGET_SUFFIXES)
+    trust_states = dict(TARGET_TRUST_STATES)
+    if windows_signing == "unsigned":
+        suffixes["windows-x64"] = ("windows-x64-unsigned-setup.exe",)
+        trust_states["windows-x64"] = "unsigned"
     binaries_by_target = {
-        target: tuple(_binary_name(version, suffix) for suffix in TARGET_SUFFIXES[target])
+        target: tuple(_binary_name(version, suffix) for suffix in suffixes[target])
         for target in targets
     }
     binary_names = {name for names in binaries_by_target.values() for name in names}
@@ -120,7 +131,7 @@ def verify_release_assets(
             "version": version,
             "release_channel": "stable",
             "build_identity": version,
-            "trust_state": TARGET_TRUST_STATES[target],
+            "trust_state": trust_states[target],
             "tag": wiii_release.canonical_tag(version),
             "git_sha": git_sha,
         }
@@ -153,6 +164,7 @@ def verify_release_assets(
         "version": version,
         "git_sha": git_sha,
         "release_scope": release_scope,
+        "windows_signing": windows_signing,
         "targets": list(targets),
         "binaries": sorted(binary_names),
         "manifests": sorted(manifest_names),
@@ -165,18 +177,41 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", required=True)
     parser.add_argument("--git-sha", required=True)
     parser.add_argument("--release-scope", choices=sorted(RELEASE_SCOPES), required=True)
+    parser.add_argument("--windows-signing", choices=("authenticode", "unsigned"), default="authenticode")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--published-windows", type=Path)
     return parser
+
+
+def reuse_published_windows(*, root: Path, published: Path, version: str, git_sha: str) -> None:
+    verify_release_assets(
+        root=published, version=version, git_sha=git_sha,
+        release_scope="windows-only-emergency", windows_signing="authenticode",
+    )
+    current = _index_contract_files(root)
+    originals = _index_contract_files(published)
+    if not set(originals).issubset(current):
+        raise ValueError("published Windows assets have no matching build destinations")
+    for name, path in originals.items():
+        shutil.copyfile(path, current[name])
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.published_windows:
+            if args.release_scope != "complete" or args.windows_signing != "authenticode":
+                raise ValueError("published Windows reuse requires a complete Authenticode backfill")
+            reuse_published_windows(
+                root=args.root, published=args.published_windows,
+                version=args.version, git_sha=args.git_sha,
+            )
         result = verify_release_assets(
             root=args.root,
             version=args.version,
             git_sha=args.git_sha,
             release_scope=args.release_scope,
+            windows_signing=args.windows_signing,
         )
     except (OSError, ValueError) as exc:
         print(f"desktop release verification error: {exc}", file=sys.stderr)

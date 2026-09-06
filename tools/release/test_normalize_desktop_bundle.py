@@ -114,6 +114,25 @@ class DesktopBundleNormalizerTests(unittest.TestCase):
                     release_channel="candidate",
                 )
 
+    def test_unsigned_stable_is_explicit_and_not_mislabeled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "target/release/bundle/nsis/Wiii_1.2.0_x64-setup.exe"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"unsigned-fixture")
+            result = normalizer.normalize_bundle(
+                source_root=root / "target", output_directory=root / "output",
+                release_target="windows-x64", version="1.2.0", git_sha="a" * 40,
+                release_channel="stable", windows_signing="unsigned",
+            )
+            manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["trust_state"], "unsigned")
+            self.assertEqual(manifest["release_channel"], "stable")
+            self.assertEqual(manifest["tag"], "wiii-v1.2.0")
+            artifact = Path(result["artifacts"][0])
+            self.assertEqual(artifact.name, "Wiii-1.2.0-windows-x64-unsigned-setup.exe")
+            self.assertEqual(artifact.read_bytes(), b"unsigned-fixture")
+
 
 if __name__ == "__main__":
     unittest.main()

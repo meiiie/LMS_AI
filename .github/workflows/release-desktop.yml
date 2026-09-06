@@ -20,6 +20,14 @@ on:
         options:
           - complete
           - windows-only-emergency
+      windows_signing:
+        description: Windows publisher trust (AuthentiCode requires protected signing credentials)
+        required: true
+        default: unsigned
+        type: choice
+        options:
+          - unsigned
+          - authenticode
       emergency_reason:
         description: Public incident or runner-outage reason (required for emergency scope)
         required: false
@@ -30,6 +38,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  WIII_WINDOWS_SIGNING: ${{ inputs.windows_signing || vars.WIII_WINDOWS_SIGNING || 'unsigned' }}
 
 concurrency:
   group: desktop-release-${{ github.ref }}
@@ -74,7 +85,19 @@ jobs:
         run: |
           set -euo pipefail
           release_scope="${RELEASE_SCOPE_INPUT:-complete}"
+          case "$WIII_WINDOWS_SIGNING" in
+            unsigned|authenticode) ;;
+            *) echo 'Unsupported Windows signing mode.' >&2; exit 1 ;;
+          esac
+          case "$release_scope" in
+            complete|windows-only-emergency) ;;
+            *) echo 'Unsupported release scope.' >&2; exit 1 ;;
+          esac
           if [[ "$release_scope" == 'windows-only-emergency' ]]; then
+            if [[ "$WIII_WINDOWS_SIGNING" != 'authenticode' ]]; then
+              echo 'Emergency publication requires Authenticode signing.' >&2
+              exit 1
+            fi
             if [[ "$EVENT_NAME_VALUE" != 'workflow_dispatch' || "$REF_TYPE_VALUE" != 'tag' ]]; then
               echo 'Windows-only emergency publication requires workflow_dispatch on an existing stable tag.' >&2
               exit 1
@@ -177,7 +200,7 @@ jobs:
         run: npm ci
 
       - name: Import stable Windows code-signing certificate
-        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/') && env.WIII_WINDOWS_SIGNING == 'authenticode'
         id: windows-signing
         env:
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WIII_WINDOWS_CERTIFICATE_PFX_BASE64 }}
@@ -197,7 +220,7 @@ jobs:
           Remove-Item -LiteralPath $certificatePath -Force
 
       - name: Create stable Windows signing configuration
-        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/') && env.WIII_WINDOWS_SIGNING == 'authenticode'
         working-directory: wiii-desktop
         env:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ steps.windows-signing.outputs.thumbprint }}
@@ -214,13 +237,13 @@ jobs:
           }
           $configuration | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 release-signing.json
 
-      - name: Build Windows candidate installer
-        if: matrix.release_target == 'windows-x64' && !startsWith(github.ref, 'refs/tags/')
+      - name: Build unsigned Windows installer
+        if: matrix.release_target == 'windows-x64' && (!startsWith(github.ref, 'refs/tags/') || env.WIII_WINDOWS_SIGNING == 'unsigned')
         working-directory: wiii-desktop
         run: npm run tauri -- build --bundles nsis
 
       - name: Build signed Windows stable installer
-        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/') && env.WIII_WINDOWS_SIGNING == 'authenticode'
         working-directory: wiii-desktop
         run: npm run tauri -- build --bundles nsis --config release-signing.json
 
@@ -268,7 +291,8 @@ jobs:
             --release-target "$RELEASE_TARGET_VALUE" \
             --version "$version" \
             --git-sha "$GIT_SHA_VALUE" \
-            --release-channel "$release_channel"
+            --release-channel "$release_channel" \
+            --windows-signing "$WIII_WINDOWS_SIGNING"
           arguments=(tools/release/wiii_release.py notes "$version" --out artifacts/release/release-notes.md)
           if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
             arguments+=(--tag "${GITHUB_REF_NAME}")
@@ -276,7 +300,7 @@ jobs:
           python "${arguments[@]}"
 
       - name: Verify stable Windows signature
-        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.release_target == 'windows-x64' && startsWith(github.ref, 'refs/tags/') && env.WIII_WINDOWS_SIGNING == 'authenticode'
         env:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ steps.windows-signing.outputs.thumbprint }}
         shell: pwsh
@@ -289,6 +313,15 @@ jobs:
               $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_CERTIFICATE_THUMBPRINT) {
             throw 'Stable installer was signed by an unexpected certificate.'
           }
+
+      - name: Verify unsigned Windows disclosure
+        if: matrix.release_target == 'windows-x64' && (!startsWith(github.ref, 'refs/tags/') || env.WIII_WINDOWS_SIGNING == 'unsigned')
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem 'artifacts/release' -Filter '*-unsigned-setup.exe')
+          if ($installer.Count -ne 1) { throw 'Expected exactly one explicitly unsigned installer.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer[0].FullName
+          if ($signature.Status -ne 'NotSigned') { throw "Unsigned installer has unexpected signature status: $($signature.Status)" }
 
       - name: Upload candidate or stable bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -331,17 +364,36 @@ jobs:
 
       - name: Verify release asset contracts
         env:
+          GH_TOKEN: ${{ github.token }}
           GIT_SHA_VALUE: ${{ github.sha }}
           RELEASE_SCOPE_VALUE: ${{ needs.validate.outputs.release_scope }}
         shell: bash
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < VERSION)"
+          reuse_arguments=()
+          if [[ "$RELEASE_SCOPE_VALUE" == 'complete' && "$WIII_WINDOWS_SIGNING" == 'authenticode' ]] &&
+             gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            published_dir="$(mktemp -d "$RUNNER_TEMP/wiii-published-windows.XXXXXX")"
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern "Wiii-$version-windows-x64-signed-setup.exe" \
+              --pattern "Wiii-$version-windows-x64-signed-setup.exe.sha256" \
+              --pattern "Wiii-$version-windows-x64-release-manifest.json" \
+              --dir "$published_dir"
+            for subject in "$published_dir"/*; do
+              gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-desktop.yml" \
+                --source-ref "$GITHUB_REF" --source-digest "$GIT_SHA_VALUE"
+            done
+            reuse_arguments=(--published-windows "$published_dir")
+          fi
           python tools/release/verify_desktop_release.py \
             --root artifacts/platforms \
             --version "$version" \
             --git-sha "$GIT_SHA_VALUE" \
             --release-scope "$RELEASE_SCOPE_VALUE" \
+            --windows-signing "$WIII_WINDOWS_SIGNING" \
+            "${reuse_arguments[@]}" \
             --out artifacts/desktop-release-verification.json
           find artifacts/platforms -type f -print | sort
 
@@ -352,7 +404,7 @@ jobs:
           set -euo pipefail
           mapfile -t subjects < <(
             find artifacts/platforms -type f \
-              \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.sha256' -o -name '*_release-manifest.json' \) \
+              \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.sha256' -o -name '*-release-manifest.json' \) \
               -print | sort
           )
           [[ ${#subjects[@]} -gt 0 ]] || { echo 'No attestation subjects found.' >&2; exit 1; }
@@ -377,6 +429,16 @@ jobs:
           notes_source="$(find artifacts/platforms -type f -name release-notes.md -print -quit)"
           [[ -n "$notes_source" ]] || { echo 'Release notes are missing.' >&2; exit 1; }
           cp "$notes_source" artifacts/publish-release-notes.md
+          if [[ "$WIII_WINDOWS_SIGNING" == 'unsigned' ]]; then
+            {
+              echo
+              echo '## Platform trust notice'
+              echo
+              echo 'This is an official release without publisher certificate signing: Windows is unsigned, Linux is checksummed, and macOS is ad-hoc signed and not Apple-notarized.'
+              echo 'Windows SmartScreen or macOS Gatekeeper may warn or block installation. Verify SHA-256 and provenance; do not disable OS protection globally.'
+              echo 'Local harness execution is currently supported on Windows only. Linux/macOS packages do not imply local harness support. Neko Core requires separate installation; the optional Computer pilot requires Docker.'
+            } >> artifacts/publish-release-notes.md
+          fi
           if [[ "$RELEASE_SCOPE_VALUE" == 'windows-only-emergency' ]]; then
             {
               echo
@@ -399,7 +461,7 @@ jobs:
           version="${GITHUB_REF_NAME#wiii-v}"
           mapfile -d '' assets < <(
             find artifacts/platforms -type f \
-              \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.sha256' -o -name '*_release-manifest.json' \) \
+              \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.sha256' -o -name '*-release-manifest.json' \) \
               -print0 | sort -z
           )
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
@@ -407,7 +469,20 @@ jobs:
               echo 'An existing release may only be updated by a complete matrix backfill.' >&2
               exit 1
             fi
-            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+            existing_dir="$(mktemp -d "$RUNNER_TEMP/wiii-existing.XXXXXX")"
+            gh release download "$GITHUB_REF_NAME" --pattern 'Wiii-*' --dir "$existing_dir"
+            missing=()
+            for asset in "${assets[@]}"; do
+              existing="$existing_dir/$(basename "$asset")"
+              if [[ -f "$existing" ]]; then
+                cmp --silent "$asset" "$existing" || { echo 'Refusing to replace published bytes.' >&2; exit 1; }
+              else
+                missing+=("$asset")
+              fi
+            done
+            if [[ ${#missing[@]} -gt 0 ]]; then
+              gh release upload "$GITHUB_REF_NAME" "${missing[@]}"
+            fi
             gh release edit "$GITHUB_REF_NAME" \
               --title "Wiii $version" \
               --notes-file artifacts/publish-release-notes.md
